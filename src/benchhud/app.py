@@ -21,16 +21,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"benchhud {__version__}")
         return 0
 
-    # Import Qt lazily so ``--version`` stays display-free.
+    # Import Qt + shell lazily so ``--version`` stays display-free.
     from PySide6.QtWidgets import QApplication
 
+    from benchhud import config as config_module
+    from benchhud.logging_setup import configure_logging
     from benchhud.shell.main_window import MainWindow
+
+    config = config_module.load()
+    configure_logging(config.shell.logging.level)
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("benchhud")
     app.setApplicationDisplayName("benchhud")
 
-    window = MainWindow()
+    window = MainWindow(config, on_persist=config_module.save)
     window.show()
     return app.exec()
 
