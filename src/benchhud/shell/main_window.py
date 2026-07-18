@@ -15,6 +15,8 @@ from PySide6.QtWidgets import QLabel, QMainWindow, QWidget
 
 from benchhud import __version__
 from benchhud.config import Config, PersistCallback
+from benchhud.shell.panel_manager import PanelManager
+from benchhud.shell.panels.placeholder import PlaceholderPanel
 
 
 class MainWindow(QMainWindow):
@@ -34,13 +36,17 @@ class MainWindow(QMainWindow):
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
 
-        placeholder = QLabel(
-            "benchhud — HUD shell\n\n"
-            "Panels (scope · thermal · telemetry · tools) land in Phase 0 §C.3."
+        central = QLabel(
+            "benchhud — composite / preview area\n\n"
+            "The scope + thermal composite renders here once the pipeline lands (Phase 1)."
         )
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder.setObjectName("PlaceholderCentral")
-        self.setCentralWidget(placeholder)
+        central.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        central.setObjectName("CompositePreview")
+        self.setCentralWidget(central)
+
+        # Panels must exist before restoreState so their dock geometry restores.
+        self.panels = PanelManager(self)
+        self.panels.add_panel(PlaceholderPanel())
 
         self.statusBar().showMessage(f"benchhud {__version__}")
 
