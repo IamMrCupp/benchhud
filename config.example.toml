@@ -1,0 +1,50 @@
+# benchhud — example configuration.
+#
+# Copy to your user config path (benchhud writes/reads it there automatically;
+# see `benchhud --help` once implemented) or point $BENCHHUD_CONFIG at a file.
+# Device paths below match the reference Linux bench; adjust for your hardware.
+
+[shell]
+# Main-window geometry, restored on launch and written back on quit.
+window_width = 1600
+window_height = 900
+# The dockable panel layout is persisted by the app as an opaque blob under
+# [shell] as `layout`; you normally don't edit it by hand.
+
+[shell.logging]
+level = "INFO" # DEBUG | INFO | WARNING | ERROR
+
+[output]
+# Composited virtual-camera output (pyvirtualcam; v4l2loopback on Linux,
+# OBS virtual cam on macOS/Windows). Off until the pipeline lands (Phase 1).
+enabled = false
+width = 1280
+height = 720
+fps = 15 # paced to the slower feed; thermal is 25 fps, see research.md §4
+
+[panels.scope]
+# BTER 4K microscope cam (UVC). On Linux this is a /dev/videoN path; on
+# macOS/Windows use an integer camera index instead.
+enabled = true
+device = "/dev/video4"
+
+[panels.thermal]
+# Sipeed T256s. Analysis uses the raw Y16 192x256 @ 25 fps stream.
+enabled = false
+device = "/dev/video6"
+
+[panels.telemetry]
+# OWON SPM8104 (PSU + DMM) over SCPI. Live DMM readout is a hard requirement.
+enabled = false
+port = "/dev/ttyUSB0" # CH341 USB-serial
+baud = 115200
+
+# External tools surfaced by the launcher panel (Phase 7). Repeat the block per
+# tool; `command` is resolved on PATH (or give an absolute path / AppImage).
+[[tools]]
+name = "OpenBoardView"
+command = "openboardview"
+
+[[tools]]
+name = "minipro-gui"
+command = "minipro-gui"
