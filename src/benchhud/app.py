@@ -1,8 +1,7 @@
-"""Application entry point.
+"""Application entry point — launches the HUD shell.
 
-The full HUD shell (QApplication + main window + panel manager) is built out in
-Phase 0 §C. For now this is a minimal, importable entry point so packaging and
-the ``benchhud`` console script are wired end to end.
+``--version`` deliberately avoids importing Qt so it works on a headless box
+with no display; the GUI imports happen only when we actually open the window.
 """
 
 from __future__ import annotations
@@ -15,15 +14,25 @@ from benchhud import __version__
 def main(argv: list[str] | None = None) -> int:
     """Console-script entry point for ``benchhud``.
 
-    Returns a process exit code. Currently a placeholder that reports the
-    version; replaced by the real HUD shell launch in §C.1.
+    Returns a process exit code (the Qt event-loop result when the shell runs).
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in {"-V", "--version"}:
         print(f"benchhud {__version__}")
         return 0
-    print(f"benchhud {__version__} — HUD shell not yet implemented (see plan.md Phase 0 §C)")
-    return 0
+
+    # Import Qt lazily so ``--version`` stays display-free.
+    from PySide6.QtWidgets import QApplication
+
+    from benchhud.shell.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+    app.setApplicationName("benchhud")
+    app.setApplicationDisplayName("benchhud")
+
+    window = MainWindow()
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
