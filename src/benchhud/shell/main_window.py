@@ -27,6 +27,7 @@ from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.telemetry import TelemetryPanel
+from benchhud.shell.panels.thermal import ThermalPanel
 
 # Preview refresh rate for the on-screen scope panel (the virtual-cam output has
 # its own fps in config; this is just how often the GUI repaints).
@@ -71,6 +72,8 @@ class MainWindow(QMainWindow):
         self.panels = PanelManager(self)
         self.scope_panel = ScopePanel()
         self.panels.add_panel(self.scope_panel)
+        self.thermal_panel = ThermalPanel()
+        self.panels.add_panel(self.thermal_panel)
         self.telemetry_panel = TelemetryPanel()
         self.panels.add_panel(self.telemetry_panel)
         self.launcher_panel = LauncherPanel(self._config.tools)
