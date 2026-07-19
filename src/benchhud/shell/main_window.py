@@ -75,19 +75,31 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # Panels must exist before restoreState so their dock geometry restores.
+        # Default layout: cameras + meter on the right, settings tabbed on the
+        # left, composite preview in the centre. A saved layout (config) wins on
+        # later launches; this is just the first-run arrangement.
         self.panels = PanelManager(self)
+        right = Qt.DockWidgetArea.RightDockWidgetArea
+        left = Qt.DockWidgetArea.LeftDockWidgetArea
+
         self.scope_panel = ScopePanel()
-        self.panels.add_panel(self.scope_panel)
+        scope_dock = self.panels.add_panel(self.scope_panel, right)
         self.thermal_panel = ThermalPanel()
-        self.panels.add_panel(self.thermal_panel)
+        thermal_dock = self.panels.add_panel(self.thermal_panel, right)
+        self.tabifyDockWidget(scope_dock, thermal_dock)  # scope/thermal as tabs
         # PowerPanel is the combined power/DMM meter (supersedes a separate
         # telemetry dock); it renders the DMM header + V/A/W/max + trend graph.
         self.power_panel = PowerPanel()
-        self.panels.add_panel(self.power_panel)
-        self.launcher_panel = LauncherPanel(self._config.tools)
-        self.panels.add_panel(self.launcher_panel)
+        self.panels.add_panel(self.power_panel, right)
+
         self.controls_panel = ControlsPanel(self._config)
-        self.panels.add_panel(self.controls_panel)
+        controls_dock = self.panels.add_panel(self.controls_panel, left)
+        self.launcher_panel = LauncherPanel(self._config.tools)
+        launcher_dock = self.panels.add_panel(self.launcher_panel, left)
+        self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
+
+        scope_dock.raise_()
+        controls_dock.raise_()
 
         self.statusBar().showMessage(f"benchhud {__version__}")
 
