@@ -33,8 +33,8 @@ class LoggingConfig:
 
 @dataclass
 class ShellConfig:
-    window_width: int = 1600
-    window_height: int = 900
+    window_width: int = 1200
+    window_height: int = 760
     # Opaque base64 of QMainWindow.saveState(); None until first save.
     layout: str | None = None
     logging: LoggingConfig = field(default_factory=LoggingConfig)

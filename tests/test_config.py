@@ -11,7 +11,7 @@ from benchhud import config as cfg
 
 def test_defaults() -> None:
     c = cfg.Config()
-    assert c.shell.window_width == 1600
+    assert c.shell.window_width == 1200
     assert c.shell.logging.level == "INFO"
     assert c.panels.scope.device == "/dev/video4"
     assert c.panels.telemetry.baud == 115200
@@ -63,7 +63,7 @@ def test_layout_round_trips_when_set(tmp_path) -> None:
 def test_from_dict_ignores_unknown_keys() -> None:
     c = cfg.Config.from_dict({"shell": {"window_width": 800, "bogus": 1}, "extra": {}})
     assert c.shell.window_width == 800
-    assert c.shell.window_height == 900  # default preserved
+    assert c.shell.window_height == 760  # default preserved
 
 
 def test_tools_parsed_and_incomplete_dropped() -> None:
