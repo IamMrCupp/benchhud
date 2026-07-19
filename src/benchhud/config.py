@@ -81,10 +81,35 @@ class ToolConfig:
 
 
 @dataclass
+class OverlayConfig:
+    """Overlay preferences. ``colormap`` is a name (e.g. INFERNO), not a cv2 int —
+    the mapping lives in the overlay adapter so config stays cv2-free."""
+
+    mode: str = "blend"  # blend | tint | marker
+    alpha: float = 0.5
+    threshold: float = 60.0
+    tmin: float = 20.0
+    tmax: float = 100.0
+    colormap: str = "INFERNO"
+
+
+@dataclass
+class RegistrationConfig:
+    """Persisted thermal→scope calibration transform."""
+
+    scale: float = 1.0
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    rotation_deg: float = 0.0
+
+
+@dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     panels: PanelsConfig = field(default_factory=PanelsConfig)
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)
+    registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -105,6 +130,17 @@ class Config:
             cfg.panels.telemetry,
             panels_d.get("telemetry", {}),
             ("enabled", "port", "baud"),
+        )
+
+        _apply(
+            cfg.overlay,
+            data.get("overlay", {}),
+            ("mode", "alpha", "threshold", "tmin", "tmax", "colormap"),
+        )
+        _apply(
+            cfg.registration,
+            data.get("registration", {}),
+            ("scale", "offset_x", "offset_y", "rotation_deg"),
         )
 
         cfg.tools = [
