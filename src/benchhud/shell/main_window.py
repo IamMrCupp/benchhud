@@ -23,6 +23,7 @@ from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
+from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
 from benchhud.shell.about import about_html
 from benchhud.shell.icon import app_icon
@@ -63,6 +64,9 @@ class MainWindow(QMainWindow):
         self._scanner = scanner or SystemDeviceScanner()
         self._pump: FramePump | None = None
         self._timer: QTimer | None = None
+        self._demo: DemoSignal | None = None
+        self._demo_timer: QTimer | None = None
+        self._demo_t = 0.0
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
@@ -149,9 +153,54 @@ class MainWindow(QMainWindow):
         self.reset_layout_action.triggered.connect(self.reset_layout)
         menu.addAction(self.reset_layout_action)
 
+        menu.addSeparator()
+        self.demo_action = QAction("Demo mode", self)
+        self.demo_action.setCheckable(True)
+        self.demo_action.toggled.connect(self.set_demo_mode)
+        menu.addAction(self.demo_action)
+
     def reset_layout(self) -> None:
         """Restore the default dock arrangement."""
         self.restoreState(self._default_state)
+
+    # --- demo mode -------------------------------------------------------
+
+    def set_demo_mode(self, enabled: bool) -> None:
+        """Toggle demo mode (synthetic data across the whole HUD)."""
+        if enabled:
+            self._start_demo()
+        else:
+            self._stop_demo()
+
+    def _start_demo(self) -> None:
+        if self._demo_timer is not None:
+            return
+        self._demo = DemoSignal()
+        self._demo_t = 0.0
+        self.start_preview()  # animate the scope too
+        self._demo_timer = QTimer(self)
+        self._demo_timer.timeout.connect(self._demo_tick)
+        self._demo_timer.start(200)  # 5 Hz
+        self._refresh_status()
+
+    def _demo_tick(self) -> None:
+        if self._demo is None:
+            return
+        self._demo.step()
+        self._demo_t += 0.2
+        self.thermal_panel.update_temps(self._demo.thermal())
+        self.power_panel.update_from_snapshot(self._demo.telemetry(), self._demo_t)
+
+    def _stop_demo(self) -> None:
+        if self._demo_timer is not None:
+            self._demo_timer.stop()
+            self._demo_timer = None
+        self._demo = None
+        self._refresh_status()
+
+    @property
+    def demo_active(self) -> bool:
+        return self._demo_timer is not None
 
     def open_preferences(self) -> PreferencesDialog:
         """Open the preferences dialog. Returns it (tests inspect without exec)."""
@@ -174,8 +223,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_status(self) -> None:
         panels = self._config.panels
+        prefix = "◉ DEMO MODE   ·   " if self.demo_active else ""
         self.statusBar().showMessage(
-            f"benchhud {__version__}   ·   "
+            f"{prefix}benchhud {__version__}   ·   "
             f"scope {panels.scope.device or '—'}   ·   "
             f"thermal {panels.thermal.device or '—'}   ·   "
             f"psu/dmm {panels.telemetry.port or '—'}"
@@ -213,6 +263,7 @@ class MainWindow(QMainWindow):
         shell.layout = bytes(self.saveState().toBase64()).decode("ascii")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._stop_demo()
         self.stop_preview()
         self.persist_into_config()
         if self._on_persist is not None:
