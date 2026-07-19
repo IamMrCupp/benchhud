@@ -25,6 +25,7 @@ from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
 from benchhud.shell.about import about_html
+from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
@@ -65,6 +66,7 @@ class MainWindow(QMainWindow):
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
+        self.setWindowIcon(app_icon())
         self._build_menu()
 
         central = QLabel(

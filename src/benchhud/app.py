@@ -31,11 +31,13 @@ def main(argv: list[str] | None = None) -> int:
     config = config_module.load()
     configure_logging(config.shell.logging.level)
 
+    from benchhud.shell.icon import app_icon
     from benchhud.shell.theme import apply_theme
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("benchhud")
     app.setApplicationDisplayName("benchhud")
+    app.setWindowIcon(app_icon())
     apply_theme(app)
 
     window = MainWindow(config, on_persist=config_module.save)
