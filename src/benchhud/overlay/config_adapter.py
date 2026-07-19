@@ -26,6 +26,11 @@ _COLORMAPS: dict[str, int] = {
 _DEFAULT_COLORMAP_NAME = "INFERNO"
 
 
+def colormap_names() -> list[str]:
+    """Available colormap names, in display order."""
+    return list(_COLORMAPS)
+
+
 def colormap_from_name(name: str) -> int:
     return _COLORMAPS.get(name.upper(), _COLORMAPS[_DEFAULT_COLORMAP_NAME])
 
