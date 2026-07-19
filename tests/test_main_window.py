@@ -21,13 +21,25 @@ def test_main_window_shows(qtbot) -> None:
 
 
 def test_restores_geometry_from_config(qtbot) -> None:
+    # Values fit within the (offscreen 800x800) screen, so no clamp applies.
     config = Config()
-    config.shell.window_width = 1024
-    config.shell.window_height = 768
+    config.shell.window_width = 700
+    config.shell.window_height = 600
     window = MainWindow(config)
     qtbot.addWidget(window)
-    assert window.width() == 1024
-    assert window.height() == 768
+    assert window.width() == 700
+    assert window.height() == 600
+
+
+def test_window_clamps_to_screen(qtbot) -> None:
+    config = Config()
+    config.shell.window_width = 99999  # absurdly large
+    config.shell.window_height = 99999
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    screen = window.screen().availableGeometry()
+    assert window.width() <= screen.width()
+    assert window.height() <= screen.height()
 
 
 def test_persist_captures_geometry_and_layout(qtbot) -> None:

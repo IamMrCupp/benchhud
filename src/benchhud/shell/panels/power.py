@@ -70,7 +70,7 @@ class PowerPanel(Panel):
         super().__init__(parent)
         self._max_current = 0.0
         self.setStyleSheet(_STYLE)
-        self.setMinimumWidth(300)
+        self.setMinimumWidth(220)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_header())
@@ -83,6 +83,7 @@ class PowerPanel(Panel):
         self._dmm_value = QLabel(_PLACEHOLDER)
         self._dmm_value.setObjectName("meterPrimary")
         self._dmm_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dmm_value.setMinimumHeight(34)
         self._dmm_unit = QLabel("")
         self._dmm_unit.setObjectName("meterUnit")
 
@@ -180,6 +181,7 @@ def _cell_value() -> QLabel:
     label = QLabel(_PLACEHOLDER)
     label.setObjectName("meterValue")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setMinimumHeight(28)  # guarantee vertical room for the LCD digits
     return label
 
 

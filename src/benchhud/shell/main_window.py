@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QWidget
 
 from benchhud import __version__
@@ -80,6 +80,8 @@ class MainWindow(QMainWindow):
         )
         central.setAlignment(Qt.AlignmentFlag.AlignCenter)
         central.setObjectName("CompositePreview")
+        central.setWordWrap(True)  # don't force a wide minimum window
+        central.setMinimumWidth(1)
         self.setCentralWidget(central)
 
         # Panels must exist before restoreState so their dock geometry restores.
@@ -120,9 +122,23 @@ class MainWindow(QMainWindow):
 
     def _apply_config(self) -> None:
         shell = self._config.shell
-        self.resize(shell.window_width, shell.window_height)
+        self._resize_within_screen(shell.window_width, shell.window_height)
         if shell.layout:
             self.restoreState(QByteArray.fromBase64(shell.layout.encode("ascii")))
+
+    def _resize_within_screen(self, width: int, height: int) -> None:
+        """Resize to (width, height) but never larger than the screen; centre it."""
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            width = min(width, avail.width())
+            height = min(height, avail.height())
+            self.resize(width, height)
+            frame = self.frameGeometry()
+            frame.moveCenter(avail.center())
+            self.move(frame.topLeft())
+        else:
+            self.resize(width, height)
 
     # --- menu / preferences ----------------------------------------------
 
