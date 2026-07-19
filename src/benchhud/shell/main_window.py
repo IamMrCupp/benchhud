@@ -24,6 +24,7 @@ from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.shell.panel_manager import PanelManager
+from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.telemetry import TelemetryPanel
@@ -78,6 +79,8 @@ class MainWindow(QMainWindow):
         self.panels.add_panel(self.telemetry_panel)
         self.launcher_panel = LauncherPanel(self._config.tools)
         self.panels.add_panel(self.launcher_panel)
+        self.controls_panel = ControlsPanel(self._config)
+        self.panels.add_panel(self.controls_panel)
 
         self.statusBar().showMessage(f"benchhud {__version__}")
 
