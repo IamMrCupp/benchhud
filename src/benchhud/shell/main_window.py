@@ -104,6 +104,9 @@ class MainWindow(QMainWindow):
         scope_dock.raise_()
         controls_dock.raise_()
 
+        self._build_view_menu()
+        self._default_state = self.saveState()  # for "Reset layout"
+
         self._refresh_status()
 
         self._apply_config()
@@ -134,6 +137,21 @@ class MainWindow(QMainWindow):
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
         quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
+
+    def _build_view_menu(self) -> None:
+        menu = self.menuBar().addMenu("View")
+        for panel_id in ("scope", "thermal", "power", "controls", "launcher"):
+            dock = self.panels.dock(panel_id)
+            if dock is not None:
+                menu.addAction(dock.toggleViewAction())
+        menu.addSeparator()
+        self.reset_layout_action = QAction("Reset layout", self)
+        self.reset_layout_action.triggered.connect(self.reset_layout)
+        menu.addAction(self.reset_layout_action)
+
+    def reset_layout(self) -> None:
+        """Restore the default dock arrangement."""
+        self.restoreState(self._default_state)
 
     def open_preferences(self) -> PreferencesDialog:
         """Open the preferences dialog. Returns it (tests inspect without exec)."""
