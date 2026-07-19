@@ -1,6 +1,6 @@
 [project]
 name = "benchhud"
-version = "0.0.0"
+dynamic = ["version"]
 description = "A microsoldering / board-repair bench HUD: fuses scope + thermal video with instrument telemetry and outputs a virtual camera for OBS."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -34,6 +34,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/benchhud/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/benchhud"]
