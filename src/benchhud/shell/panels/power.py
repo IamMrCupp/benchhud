@@ -48,17 +48,19 @@ QFrame#meterHeader {
 QFrame#meterCell {
     background: #86cddf; border: 1px solid #4f97a8; border-radius: 4px;
 }
-QLabel#meterCaption { color: #08343f; font-size: 8pt; }
+/* Labels must be transparent so the cyan cell shows through — otherwise the
+   global dark theme paints their background dark and the digits vanish. */
+QLabel#meterCaption { color: #0a3a45; background: transparent; font-size: 8pt; }
 QLabel#meterValue {
-    color: #08343f; font-weight: bold; font-size: 15pt;
+    color: #062028; background: transparent; font-weight: bold; font-size: 16pt;
     font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
 }
-QLabel#meterMode { color: #3a6b78; font-size: 9pt; }
+QLabel#meterMode { color: #2f6472; background: transparent; font-size: 9pt; }
 QLabel#meterPrimary {
-    color: #08343f; font-weight: bold; font-size: 20pt;
+    color: #062028; background: transparent; font-weight: bold; font-size: 18pt;
     font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
 }
-QLabel#meterUnit { color: #3a6b78; font-size: 11pt; }
+QLabel#meterUnit { color: #2f6472; background: transparent; font-size: 11pt; }
 """
 
 
