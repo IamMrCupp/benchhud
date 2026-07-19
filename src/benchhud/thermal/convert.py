@@ -7,6 +7,9 @@ converted back. On the bench the camera needs ~2 min to reach thermal
 equilibrium, and low-emissivity surfaces (bare metal) need tape / matte paint
 for accurate readings.
 
+The device docs note a per-device **calibration factor** affects the absolute
+reading; this is the base conversion, refined on the bench against a reference.
+
 Source: https://wiki.sipeed.com/hardware/en/ThermalCam/T256s/UG.html
 
 The conversion is pure arithmetic, so it's unit-tested here with exact values;
