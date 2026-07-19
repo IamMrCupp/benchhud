@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
-from PySide6.QtWidgets import QLabel, QMainWindow, QWidget
+from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QWidget
 
 from benchhud import __version__
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
@@ -24,6 +24,7 @@ from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
+from benchhud.shell.about import about_html
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
@@ -101,7 +102,7 @@ class MainWindow(QMainWindow):
         scope_dock.raise_()
         controls_dock.raise_()
 
-        self.statusBar().showMessage(f"benchhud {__version__}")
+        self._refresh_status()
 
         self._apply_config()
 
@@ -121,6 +122,11 @@ class MainWindow(QMainWindow):
         self.preferences_action.triggered.connect(self.open_preferences)
         menu.addAction(self.preferences_action)
 
+        self.about_action = QAction("About benchhud", self)
+        self.about_action.setMenuRole(QAction.MenuRole.AboutRole)
+        self.about_action.triggered.connect(self.open_about)
+        menu.addAction(self.about_action)
+
         quit_action = QAction("Quit", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
@@ -132,8 +138,28 @@ class MainWindow(QMainWindow):
         dialog = PreferencesDialog(
             self._config, self._scanner, on_save=self._on_persist, parent=self
         )
+        dialog.accepted.connect(self._refresh_status)
         dialog.open()
         return dialog
+
+    def open_about(self) -> QMessageBox:
+        """Show the About dialog (non-blocking; returned for tests)."""
+        box = QMessageBox(self)
+        box.setWindowTitle("About benchhud")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(about_html())
+        box.setIcon(QMessageBox.Icon.Information)
+        box.show()
+        return box
+
+    def _refresh_status(self) -> None:
+        panels = self._config.panels
+        self.statusBar().showMessage(
+            f"benchhud {__version__}   ·   "
+            f"scope {panels.scope.device or '—'}   ·   "
+            f"thermal {panels.thermal.device or '—'}   ·   "
+            f"psu/dmm {panels.telemetry.port or '—'}"
+        )
 
     # --- capture preview -------------------------------------------------
 
