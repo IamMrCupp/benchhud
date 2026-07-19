@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow(config, on_persist=config_module.save)
     window.show()
+    window.start_preview()
     return app.exec()
 
 

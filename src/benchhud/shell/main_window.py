@@ -1,22 +1,41 @@
 """The benchhud main window.
 
-A minimal :class:`~PySide6.QtWidgets.QMainWindow` that restores its geometry and
-dock layout from :class:`~benchhud.config.Config` on construction and persists
-them back on close. The dockable panel manager lands in §C.3; the persistence
-mechanism here already handles dock/toolbar state via ``saveState``/
-``restoreState``.
+Restores geometry/dock layout from :class:`~benchhud.config.Config` and persists
+on close. Hosts panels via :class:`~benchhud.shell.panel_manager.PanelManager`.
+
+Capture is explicit, not automatic: :meth:`start_preview` builds a frame source →
+:class:`LatestFrameReader` → :class:`FramePump` and drives it from a QTimer, so
+constructing the window (as tests do repeatedly) spawns no threads. Until the
+bench-gated ``CameraFrameSource`` lands, the default source is synthetic — so the
+shell animates end to end with no camera.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, Qt
+from collections.abc import Callable
+
+from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QLabel, QMainWindow, QWidget
 
 from benchhud import __version__
+from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
+from benchhud.capture.latest_frame_reader import LatestFrameReader
+from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.shell.panel_manager import PanelManager
-from benchhud.shell.panels.placeholder import PlaceholderPanel
+from benchhud.shell.panels.scope import ScopePanel
+
+# Preview refresh rate for the on-screen scope panel (the virtual-cam output has
+# its own fps in config; this is just how often the GUI repaints).
+_PREVIEW_FPS = 30
+
+SourceFactory = Callable[[], FrameSource]
+
+
+def _default_scope_source() -> FrameSource:
+    """Dev fallback until the bench camera lands: a synthetic scope feed."""
+    return SyntheticFrameSource(960, 540)
 
 
 class MainWindow(QMainWindow):
@@ -32,6 +51,8 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self._config = config or Config()
         self._on_persist = on_persist
+        self._pump: FramePump | None = None
+        self._timer: QTimer | None = None
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
@@ -46,7 +67,8 @@ class MainWindow(QMainWindow):
 
         # Panels must exist before restoreState so their dock geometry restores.
         self.panels = PanelManager(self)
-        self.panels.add_panel(PlaceholderPanel())
+        self.scope_panel = ScopePanel()
+        self.panels.add_panel(self.scope_panel)
 
         self.statusBar().showMessage(f"benchhud {__version__}")
 
@@ -58,6 +80,30 @@ class MainWindow(QMainWindow):
         if shell.layout:
             self.restoreState(QByteArray.fromBase64(shell.layout.encode("ascii")))
 
+    # --- capture preview -------------------------------------------------
+
+    def start_preview(self, source_factory: SourceFactory = _default_scope_source) -> None:
+        """Start the scope preview loop (idempotent)."""
+        if self._pump is not None:
+            return
+        reader = LatestFrameReader(source_factory())
+        self._pump = FramePump(reader, consumers=[self.scope_panel.update_frame])
+        self._pump.start()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._pump.tick)
+        self._timer.start(1000 // _PREVIEW_FPS)
+
+    def stop_preview(self) -> None:
+        """Stop the scope preview loop (idempotent)."""
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        if self._pump is not None:
+            self._pump.stop()
+            self._pump = None
+
+    # --- persistence -----------------------------------------------------
+
     def persist_into_config(self) -> None:
         """Write current window geometry + dock layout back into the config."""
         shell = self._config.shell
@@ -66,6 +112,7 @@ class MainWindow(QMainWindow):
         shell.layout = bytes(self.saveState().toBase64()).decode("ascii")
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self.stop_preview()
         self.persist_into_config()
         if self._on_persist is not None:
             self._on_persist(self._config)
