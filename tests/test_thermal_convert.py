@@ -15,6 +15,12 @@ def test_known_value_300k() -> None:
     assert celsius[0, 0] == pytest.approx(26.85, abs=1e-3)
 
 
+def test_sipeed_documented_example() -> None:
+    # From the Sipeed T256s User Guide: raw 22700 -> ~81.53 °C.
+    raw = np.array([22700], dtype=np.uint16)
+    assert y16_to_celsius(raw)[0] == pytest.approx(81.54, abs=0.02)
+
+
 def test_absolute_zero_raw() -> None:
     raw = np.array([0], dtype=np.uint16)
     assert y16_to_celsius(raw)[0] == pytest.approx(-273.15, abs=1e-3)
