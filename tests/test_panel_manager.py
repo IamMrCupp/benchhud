@@ -49,11 +49,11 @@ def test_duplicate_panel_id_raises(qtbot) -> None:
         manager.add_panel(_TwoPanel())
 
 
-def test_main_window_hosts_placeholder_panel(qtbot) -> None:
+def test_main_window_hosts_scope_panel(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
-    assert "placeholder" in window.panels.panel_ids()
-    assert window.panels.dock("placeholder") is not None
+    assert "scope" in window.panels.panel_ids()
+    assert window.panels.dock("scope") is not None
 
 
 def test_layout_persists_and_restores_without_error(qtbot) -> None:
@@ -68,4 +68,4 @@ def test_layout_persists_and_restores_without_error(qtbot) -> None:
     # Reconstructing with the saved layout must restore cleanly.
     second = MainWindow(config)
     qtbot.addWidget(second)
-    assert "placeholder" in second.panels.panel_ids()
+    assert "scope" in second.panels.panel_ids()
