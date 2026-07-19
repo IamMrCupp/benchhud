@@ -27,6 +27,7 @@ from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
+from benchhud.shell.panels.power import PowerPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.telemetry import TelemetryPanel
 from benchhud.shell.panels.thermal import ThermalPanel
@@ -82,6 +83,8 @@ class MainWindow(QMainWindow):
         self.panels.add_panel(self.thermal_panel)
         self.telemetry_panel = TelemetryPanel()
         self.panels.add_panel(self.telemetry_panel)
+        self.power_panel = PowerPanel()
+        self.panels.add_panel(self.power_panel)
         self.launcher_panel = LauncherPanel(self._config.tools)
         self.panels.add_panel(self.launcher_panel)
         self.controls_panel = ControlsPanel(self._config)
