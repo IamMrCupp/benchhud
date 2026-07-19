@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import QLabel, QMainWindow, QWidget
 
 from benchhud import __version__
@@ -23,12 +23,14 @@ from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
+from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.telemetry import TelemetryPanel
 from benchhud.shell.panels.thermal import ThermalPanel
+from benchhud.shell.preferences import PreferencesDialog
 
 # Preview refresh rate for the on-screen scope panel (the virtual-cam output has
 # its own fps in config; this is just how often the GUI repaints).
@@ -50,16 +52,19 @@ class MainWindow(QMainWindow):
         config: Config | None = None,
         *,
         on_persist: PersistCallback | None = None,
+        scanner: DeviceScanner | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._config = config or Config()
         self._on_persist = on_persist
+        self._scanner = scanner or SystemDeviceScanner()
         self._pump: FramePump | None = None
         self._timer: QTimer | None = None
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
+        self._build_menu()
 
         central = QLabel(
             "benchhud — composite / preview area\n\n"
@@ -91,6 +96,30 @@ class MainWindow(QMainWindow):
         self.resize(shell.window_width, shell.window_height)
         if shell.layout:
             self.restoreState(QByteArray.fromBase64(shell.layout.encode("ascii")))
+
+    # --- menu / preferences ----------------------------------------------
+
+    def _build_menu(self) -> None:
+        menu = self.menuBar().addMenu("benchhud")
+        self.preferences_action = QAction("Preferences…", self)
+        self.preferences_action.setShortcut(QKeySequence.StandardKey.Preferences)
+        self.preferences_action.setMenuRole(QAction.MenuRole.PreferencesRole)
+        self.preferences_action.triggered.connect(self.open_preferences)
+        menu.addAction(self.preferences_action)
+
+        quit_action = QAction("Quit", self)
+        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
+        quit_action.setMenuRole(QAction.MenuRole.QuitRole)
+        quit_action.triggered.connect(self.close)
+        menu.addAction(quit_action)
+
+    def open_preferences(self) -> PreferencesDialog:
+        """Open the preferences dialog. Returns it (tests inspect without exec)."""
+        dialog = PreferencesDialog(
+            self._config, self._scanner, on_save=self._on_persist, parent=self
+        )
+        dialog.open()
+        return dialog
 
     # --- capture preview -------------------------------------------------
 
