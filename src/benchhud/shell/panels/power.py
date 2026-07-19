@@ -51,14 +51,14 @@ QFrame#meterHeader {
 QFrame#meterCell {
     background: #86cddf; border: 1px solid #4f97a8; border-radius: 4px;
 }
-QLabel#meterCaption { color: #08343f; font-size: 9pt; }
+QLabel#meterCaption { color: #08343f; font-size: 8pt; }
 QLabel#meterValue {
-    color: #08343f; font-weight: bold; font-size: 22pt;
+    color: #08343f; font-weight: bold; font-size: 15pt;
     font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
 }
 QLabel#meterMode { color: #3a6b78; font-size: 9pt; }
 QLabel#meterPrimary {
-    color: #08343f; font-weight: bold; font-size: 26pt;
+    color: #08343f; font-weight: bold; font-size: 20pt;
     font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
 }
 QLabel#meterUnit { color: #3a6b78; font-size: 11pt; }
@@ -80,6 +80,7 @@ class PowerPanel(Panel):
         self._window = window_seconds
         self._max_current = 0.0
         self.setStyleSheet(_STYLE)
+        self.setMinimumWidth(300)  # room for the LCD digits without clipping
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_header())
@@ -99,6 +100,7 @@ class PowerPanel(Panel):
 
         frame = QFrame()
         frame.setObjectName("meterHeader")
+        frame.setMinimumHeight(52)
         row = QHBoxLayout(frame)
         row.addWidget(self._dmm_mode)
         row.addStretch(1)
@@ -137,6 +139,7 @@ class PowerPanel(Panel):
         self.w_series.setName("W")
 
         self._chart = QChart()
+        self._chart.setTheme(QChart.ChartTheme.ChartThemeDark)
         self._axis_x = QValueAxis()
         self._axis_x.setTitleText("s")
         self._axis_y = QValueAxis()
@@ -168,7 +171,7 @@ class PowerPanel(Panel):
     def reset_max(self) -> None:
         """Clear the peak-hold max current."""
         self._max_current = 0.0
-        self._max_value.setText(f"{self._max_current:.3f} A")
+        self._max_value.setText(f"{self._max_current:.2f} A")
 
     def _update_dmm(self, snapshot: TelemetrySnapshot) -> None:
         if not snapshot.ok:
@@ -210,11 +213,12 @@ class PowerPanel(Panel):
         low = min(0.0, min(values)) if values else 0.0
         self._axis_y.setRange(low, high * 1.1 if high > 0 else 1.0)
 
+        # Decimal places match the OWON display (V/A/max 2dp, W 1dp).
         latest = samples[-1]
-        self._v_value.setText(f"{latest.voltage:.3f} V")
-        self._a_value.setText(f"{latest.current:.3f} A")
-        self._w_value.setText(f"{latest.power:.2f} W")
-        self._max_value.setText(f"{self._max_current:.3f} A")
+        self._v_value.setText(f"{latest.voltage:.2f} V")
+        self._a_value.setText(f"{latest.current:.2f} A")
+        self._w_value.setText(f"{latest.power:.1f} W")
+        self._max_value.setText(f"{self._max_current:.2f} A")
 
     # Read-only accessors for tests.
     @property
@@ -252,11 +256,14 @@ def _cell_value() -> QLabel:
 def _cell(caption: str, value: QLabel, extra: QWidget | None = None) -> QFrame:
     frame = QFrame()
     frame.setObjectName("meterCell")
+    frame.setMinimumHeight(68)
     box = QVBoxLayout(frame)
+    box.setContentsMargins(8, 4, 8, 4)
+    box.setSpacing(2)
     cap = QLabel(caption)
     cap.setObjectName("meterCaption")
     box.addWidget(cap)
-    box.addWidget(value)
+    box.addWidget(value, stretch=1)
     if extra is not None:
         box.addWidget(extra)
     return frame

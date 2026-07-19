@@ -30,9 +30,9 @@ def test_add_reading_updates_readouts_and_series(qtbot) -> None:
     panel = PowerPanel()
     qtbot.addWidget(panel)
     panel.add_reading(voltage=12.0, current=1.5, t=0.0)
-    assert "12.000 V" in panel.voltage_text
-    assert "1.500 A" in panel.current_text
-    assert "18.00 W" in panel.power_text  # 12 * 1.5
+    assert "12.00 V" in panel.voltage_text
+    assert "1.50 A" in panel.current_text
+    assert "18.0 W" in panel.power_text  # 12 * 1.5
     assert panel.v_series.count() == 1
     assert panel.w_series.count() == 1
 
@@ -41,7 +41,7 @@ def test_update_from_snapshot_with_psu(qtbot) -> None:
     panel = PowerPanel()
     qtbot.addWidget(panel)
     panel.update_from_snapshot(TelemetrySnapshot(voltage=5.0, current=2.0), t=1.0)
-    assert "10.00 W" in panel.power_text
+    assert "10.0 W" in panel.power_text
     assert panel.w_series.count() == 1
 
 
@@ -93,9 +93,9 @@ def test_max_current_peak_hold_and_reset(qtbot) -> None:
     panel.add_reading(4.2, 0.5, t=0.0)
     panel.add_reading(4.2, 1.9, t=1.0)  # peak
     panel.add_reading(4.2, 0.3, t=2.0)  # falls back, but max holds
-    assert "1.900 A" in panel.max_current_text
+    assert "1.90 A" in panel.max_current_text
     panel.reset_max()
-    assert "0.000 A" in panel.max_current_text
+    assert "0.00 A" in panel.max_current_text
 
 
 def test_shell_hosts_power_panel(qtbot) -> None:

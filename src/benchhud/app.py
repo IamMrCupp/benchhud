@@ -31,9 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     config = config_module.load()
     configure_logging(config.shell.logging.level)
 
+    from benchhud.shell.theme import apply_theme
+
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("benchhud")
     app.setApplicationDisplayName("benchhud")
+    apply_theme(app)
 
     window = MainWindow(config, on_persist=config_module.save)
     window.show()
