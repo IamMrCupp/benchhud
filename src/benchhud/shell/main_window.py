@@ -29,7 +29,6 @@ from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
 from benchhud.shell.panels.scope import ScopePanel
-from benchhud.shell.panels.telemetry import TelemetryPanel
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 
@@ -81,8 +80,8 @@ class MainWindow(QMainWindow):
         self.panels.add_panel(self.scope_panel)
         self.thermal_panel = ThermalPanel()
         self.panels.add_panel(self.thermal_panel)
-        self.telemetry_panel = TelemetryPanel()
-        self.panels.add_panel(self.telemetry_panel)
+        # PowerPanel is the combined power/DMM meter (supersedes a separate
+        # telemetry dock); it renders the DMM header + V/A/W/max + trend graph.
         self.power_panel = PowerPanel()
         self.panels.add_panel(self.power_panel)
         self.launcher_panel = LauncherPanel(self._config.tools)

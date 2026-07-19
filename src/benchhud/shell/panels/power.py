@@ -1,10 +1,11 @@
-"""Power panel — meter-style V/A/W readouts + a live trend graph.
+"""Power / DMM meter panel — a bench-instrument-style readout + trend graph.
 
-Mirrors what a bench PSU/DMM shows on its own display: the current voltage,
-current, and wattage as big numbers, plus a scrolling graph of all three so you
-can watch the trend (e.g. a current spike when a shorted board is powered). Fed
-from :class:`PowerHistory` + the OWON PSU readings; render-only, so it's testable
-offscreen with synthesized readings. Uses QtCharts (bundled — no new dependency).
+Echoes the look of the bench PSU/DMM's own on-screen overlay: a DMM header (mode
++ big reading + unit), a cyan LCD-style 2x2 grid (voltage / current / power /
+max current, with peak-hold), and a live trend graph of V/A/W below. Fed from a
+:class:`TelemetrySnapshot` (DMM + PSU V/I); render-only, so it's testable
+offscreen. Uses QtCharts (bundled — no new dependency). The monospace digits
+approximate an LCD; a true 7-segment font can be bundled later.
 """
 
 from __future__ import annotations
@@ -12,7 +13,15 @@ from __future__ import annotations
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from benchhud.instruments.power_history import PowerHistory
 from benchhud.instruments.telemetry import TelemetrySnapshot
@@ -20,10 +29,45 @@ from benchhud.shell.panel import Panel
 
 _PLACEHOLDER = "—"
 
+# Best-effort DMM unit from the OWON mode token (blank when unknown).
+_DMM_UNITS = {
+    "CONT": "Ω",
+    "RES": "Ω",
+    "OHM": "Ω",
+    "VDC": "V",
+    "VAC": "V",
+    "ADC": "A",
+    "AAC": "A",
+    "DIODE": "V",
+    "CAP": "F",
+    "FREQ": "Hz",
+    "TEMP": "°C",
+}
+
+_STYLE = """
+QFrame#meterHeader {
+    background: #f4fbfc; border: 1px solid #4f97a8; border-radius: 4px;
+}
+QFrame#meterCell {
+    background: #86cddf; border: 1px solid #4f97a8; border-radius: 4px;
+}
+QLabel#meterCaption { color: #08343f; font-size: 9pt; }
+QLabel#meterValue {
+    color: #08343f; font-weight: bold; font-size: 22pt;
+    font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
+}
+QLabel#meterMode { color: #3a6b78; font-size: 9pt; }
+QLabel#meterPrimary {
+    color: #08343f; font-weight: bold; font-size: 26pt;
+    font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
+}
+QLabel#meterUnit { color: #3a6b78; font-size: 11pt; }
+"""
+
 
 class PowerPanel(Panel):
     panel_id = "power"
-    panel_title = "Power"
+    panel_title = "Meter"
 
     def __init__(
         self,
@@ -34,14 +78,57 @@ class PowerPanel(Panel):
         super().__init__(parent)
         self._history = history or PowerHistory()
         self._window = window_seconds
+        self._max_current = 0.0
+        self.setStyleSheet(_STYLE)
 
-        self._v_label = _readout(f"{_PLACEHOLDER} V")
-        self._a_label = _readout(f"{_PLACEHOLDER} A")
-        self._w_label = _readout(f"{_PLACEHOLDER} W")
-        readouts = QHBoxLayout()
-        for label in (self._v_label, self._a_label, self._w_label):
-            readouts.addWidget(label)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._build_header())
+        layout.addWidget(self._build_grid())
+        layout.addWidget(self._build_chart(), stretch=1)
 
+    # --- header (DMM) ----------------------------------------------------
+
+    def _build_header(self) -> QWidget:
+        self._dmm_mode = QLabel("DMM")
+        self._dmm_mode.setObjectName("meterMode")
+        self._dmm_value = QLabel(_PLACEHOLDER)
+        self._dmm_value.setObjectName("meterPrimary")
+        self._dmm_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dmm_unit = QLabel("")
+        self._dmm_unit.setObjectName("meterUnit")
+
+        frame = QFrame()
+        frame.setObjectName("meterHeader")
+        row = QHBoxLayout(frame)
+        row.addWidget(self._dmm_mode)
+        row.addStretch(1)
+        row.addWidget(self._dmm_value)
+        row.addStretch(1)
+        row.addWidget(self._dmm_unit)
+        return frame
+
+    # --- 2x2 grid (V / A / W / max) -------------------------------------
+
+    def _build_grid(self) -> QWidget:
+        self._v_value = _cell_value()
+        self._a_value = _cell_value()
+        self._w_value = _cell_value()
+        self._max_value = _cell_value()
+
+        self._reset_max_button = QPushButton("Reset max")
+        self._reset_max_button.clicked.connect(self.reset_max)
+
+        widget = QWidget()
+        grid = QGridLayout(widget)
+        grid.addWidget(_cell("VOLTAGE", self._v_value), 0, 0)
+        grid.addWidget(_cell("CURRENT", self._a_value), 0, 1)
+        grid.addWidget(_cell("POWER", self._w_value), 1, 0)
+        grid.addWidget(_cell("MAX CURRENT", self._max_value, self._reset_max_button), 1, 1)
+        return widget
+
+    # --- trend graph -----------------------------------------------------
+
+    def _build_chart(self) -> QWidget:
         self.v_series = QLineSeries()
         self.v_series.setName("V")
         self.a_series = QLineSeries()
@@ -60,22 +147,44 @@ class PowerPanel(Panel):
             series.attachAxis(self._axis_x)
             series.attachAxis(self._axis_y)
 
-        self._view = QChartView(self._chart)
-        self._view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        view = QChartView(self._chart)
+        view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        return view
 
-        layout = QVBoxLayout(self)
-        layout.addLayout(readouts)
-        layout.addWidget(self._view, stretch=1)
+    # --- updates ---------------------------------------------------------
 
     def add_reading(self, voltage: float, current: float, t: float) -> None:
-        """Record a PSU reading (power computed) and refresh the view."""
+        """Record a PSU reading (power computed) and refresh the readouts + graph."""
         self._history.add(voltage, current, t)
+        self._max_current = max(self._max_current, current)
         self._refresh()
 
     def update_from_snapshot(self, snapshot: TelemetrySnapshot, t: float) -> None:
-        """Record from a telemetry snapshot when it carries PSU V + I."""
+        """Update the DMM header and, when PSU V+I are present, the power side."""
+        self._update_dmm(snapshot)
         if snapshot.voltage is not None and snapshot.current is not None:
             self.add_reading(snapshot.voltage, snapshot.current, t)
+
+    def reset_max(self) -> None:
+        """Clear the peak-hold max current."""
+        self._max_current = 0.0
+        self._max_value.setText(f"{self._max_current:.3f} A")
+
+    def _update_dmm(self, snapshot: TelemetrySnapshot) -> None:
+        if not snapshot.ok:
+            self._dmm_mode.setText("DMM")
+            self._dmm_value.setText("ERR")
+            self._dmm_unit.setText("")
+            return
+        dmm = snapshot.dmm
+        if dmm is None:
+            return
+        self._dmm_mode.setText(dmm.mode or "DMM")
+        if dmm.value is not None:
+            self._dmm_value.setText(f"{dmm.value:g}")
+        else:
+            self._dmm_value.setText(dmm.status or _PLACEHOLDER)
+        self._dmm_unit.setText(_DMM_UNITS.get(dmm.mode.upper(), ""))
 
     def _refresh(self) -> None:
         samples = self._history.samples()
@@ -102,29 +211,52 @@ class PowerPanel(Panel):
         self._axis_y.setRange(low, high * 1.1 if high > 0 else 1.0)
 
         latest = samples[-1]
-        self._v_label.setText(f"{latest.voltage:.3f} V")
-        self._a_label.setText(f"{latest.current:.3f} A")
-        self._w_label.setText(f"{latest.power:.2f} W")
+        self._v_value.setText(f"{latest.voltage:.3f} V")
+        self._a_value.setText(f"{latest.current:.3f} A")
+        self._w_value.setText(f"{latest.power:.2f} W")
+        self._max_value.setText(f"{self._max_current:.3f} A")
 
     # Read-only accessors for tests.
     @property
     def voltage_text(self) -> str:
-        return self._v_label.text()
+        return self._v_value.text()
 
     @property
     def current_text(self) -> str:
-        return self._a_label.text()
+        return self._a_value.text()
 
     @property
     def power_text(self) -> str:
-        return self._w_label.text()
+        return self._w_value.text()
+
+    @property
+    def max_current_text(self) -> str:
+        return self._max_value.text()
+
+    @property
+    def dmm_text(self) -> str:
+        return self._dmm_value.text()
+
+    @property
+    def dmm_unit_text(self) -> str:
+        return self._dmm_unit.text()
 
 
-def _readout(text: str) -> QLabel:
-    label = QLabel(text)
+def _cell_value() -> QLabel:
+    label = QLabel(_PLACEHOLDER)
+    label.setObjectName("meterValue")
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    font = label.font()
-    font.setPointSize(18)
-    font.setBold(True)
-    label.setFont(font)
     return label
+
+
+def _cell(caption: str, value: QLabel, extra: QWidget | None = None) -> QFrame:
+    frame = QFrame()
+    frame.setObjectName("meterCell")
+    box = QVBoxLayout(frame)
+    cap = QLabel(caption)
+    cap.setObjectName("meterCaption")
+    box.addWidget(cap)
+    box.addWidget(value)
+    if extra is not None:
+        box.addWidget(extra)
+    return frame

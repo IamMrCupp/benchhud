@@ -49,14 +49,14 @@ def test_duplicate_panel_id_raises(qtbot) -> None:
         manager.add_panel(_TwoPanel())
 
 
-def test_main_window_hosts_scope_and_telemetry_panels(qtbot) -> None:
+def test_main_window_hosts_core_panels(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
     ids = window.panels.panel_ids()
     assert "scope" in ids
-    assert "telemetry" in ids
+    assert "power" in ids  # the combined power/DMM meter
+    assert "telemetry" not in ids  # superseded by the power meter
     assert window.panels.dock("scope") is not None
-    assert window.panels.dock("telemetry") is not None
 
 
 def test_layout_persists_and_restores_without_error(qtbot) -> None:
