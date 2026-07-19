@@ -1,18 +1,16 @@
-"""Power / DMM meter panel — a bench-instrument-style readout + trend graph.
+"""Power / DMM meter panel — a bench-instrument-style numeric readout.
 
-Echoes the look of the bench PSU/DMM's own on-screen overlay: a DMM header (mode
-+ big reading + unit), a cyan LCD-style 2x2 grid (voltage / current / power /
-max current, with peak-hold), and a live trend graph of V/A/W below. Fed from a
-:class:`TelemetrySnapshot` (DMM + PSU V/I); render-only, so it's testable
-offscreen. Uses QtCharts (bundled — no new dependency). The monospace digits
-approximate an LCD; a true 7-segment font can be bundled later.
+Echoes the bench PSU/DMM's own on-screen overlay: a DMM header (mode + big
+reading + unit) and a cyan LCD-style 2x2 grid (voltage / current / power / max
+current, with peak-hold). The V/A/W *trend graph* lives in its own dock
+(:class:`~benchhud.shell.panels.power_graph.PowerGraphPanel`) so it has room.
+Fed from a :class:`TelemetrySnapshot`; render-only, testable offscreen. Monospace
+digits approximate an LCD; a true 7-segment font can be bundled later.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -23,7 +21,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from benchhud.instruments.power_history import PowerHistory
 from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.shell.panel import Panel
 
@@ -69,25 +66,16 @@ class PowerPanel(Panel):
     panel_id = "power"
     panel_title = "Meter"
 
-    def __init__(
-        self,
-        history: PowerHistory | None = None,
-        window_seconds: float = 120.0,
-        parent: QWidget | None = None,
-    ) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._history = history or PowerHistory()
-        self._window = window_seconds
         self._max_current = 0.0
         self.setStyleSheet(_STYLE)
-        self.setMinimumWidth(300)  # room for the LCD digits without clipping
+        self.setMinimumWidth(300)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_header())
         layout.addWidget(self._build_grid())
-        layout.addWidget(self._build_chart(), stretch=1)
-
-    # --- header (DMM) ----------------------------------------------------
+        layout.addStretch(1)
 
     def _build_header(self) -> QWidget:
         self._dmm_mode = QLabel("DMM")
@@ -109,8 +97,6 @@ class PowerPanel(Panel):
         row.addWidget(self._dmm_unit)
         return frame
 
-    # --- 2x2 grid (V / A / W / max) -------------------------------------
-
     def _build_grid(self) -> QWidget:
         self._v_value = _cell_value()
         self._a_value = _cell_value()
@@ -128,45 +114,20 @@ class PowerPanel(Panel):
         grid.addWidget(_cell("MAX CURRENT", self._max_value, self._reset_max_button), 1, 1)
         return widget
 
-    # --- trend graph -----------------------------------------------------
-
-    def _build_chart(self) -> QWidget:
-        self.v_series = QLineSeries()
-        self.v_series.setName("V")
-        self.a_series = QLineSeries()
-        self.a_series.setName("A")
-        self.w_series = QLineSeries()
-        self.w_series.setName("W")
-
-        self._chart = QChart()
-        self._chart.setTheme(QChart.ChartTheme.ChartThemeDark)
-        self._axis_x = QValueAxis()
-        self._axis_x.setTitleText("s")
-        self._axis_y = QValueAxis()
-        self._chart.addAxis(self._axis_x, Qt.AlignmentFlag.AlignBottom)
-        self._chart.addAxis(self._axis_y, Qt.AlignmentFlag.AlignLeft)
-        for series in (self.v_series, self.a_series, self.w_series):
-            self._chart.addSeries(series)
-            series.attachAxis(self._axis_x)
-            series.attachAxis(self._axis_y)
-
-        view = QChartView(self._chart)
-        view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        return view
-
-    # --- updates ---------------------------------------------------------
-
-    def add_reading(self, voltage: float, current: float, t: float) -> None:
-        """Record a PSU reading (power computed) and refresh the readouts + graph."""
-        self._history.add(voltage, current, t)
+    def add_reading(self, voltage: float, current: float, t: float = 0.0) -> None:
+        """Update the numeric readouts (``t`` unused — the graph handles time)."""
         self._max_current = max(self._max_current, current)
-        self._refresh()
+        # Decimal places match the OWON display (V/A/max 2dp, W 1dp).
+        self._v_value.setText(f"{voltage:.2f} V")
+        self._a_value.setText(f"{current:.2f} A")
+        self._w_value.setText(f"{voltage * current:.1f} W")
+        self._max_value.setText(f"{self._max_current:.2f} A")
 
-    def update_from_snapshot(self, snapshot: TelemetrySnapshot, t: float) -> None:
-        """Update the DMM header and, when PSU V+I are present, the power side."""
+    def update_from_snapshot(self, snapshot: TelemetrySnapshot, t: float = 0.0) -> None:
+        """Update the DMM header and, when PSU V+I are present, the numeric grid."""
         self._update_dmm(snapshot)
         if snapshot.voltage is not None and snapshot.current is not None:
-            self.add_reading(snapshot.voltage, snapshot.current, t)
+            self.add_reading(snapshot.voltage, snapshot.current)
 
     def reset_max(self) -> None:
         """Clear the peak-hold max current."""
@@ -188,37 +149,6 @@ class PowerPanel(Panel):
         else:
             self._dmm_value.setText(dmm.status or _PLACEHOLDER)
         self._dmm_unit.setText(_DMM_UNITS.get(dmm.mode.upper(), ""))
-
-    def _refresh(self) -> None:
-        samples = self._history.samples()
-        self.v_series.clear()
-        self.a_series.clear()
-        self.w_series.clear()
-        if not samples:
-            return
-
-        t_latest = samples[-1].t
-        t_min = t_latest - self._window
-        values: list[float] = []
-        for s in samples:
-            if s.t < t_min:
-                continue
-            self.v_series.append(s.t, s.voltage)
-            self.a_series.append(s.t, s.current)
-            self.w_series.append(s.t, s.power)
-            values.extend((s.voltage, s.current, s.power))
-
-        self._axis_x.setRange(t_min, t_latest if t_latest > t_min else t_min + 1)
-        high = max(values) if values else 1.0
-        low = min(0.0, min(values)) if values else 0.0
-        self._axis_y.setRange(low, high * 1.1 if high > 0 else 1.0)
-
-        # Decimal places match the OWON display (V/A/max 2dp, W 1dp).
-        latest = samples[-1]
-        self._v_value.setText(f"{latest.voltage:.2f} V")
-        self._a_value.setText(f"{latest.current:.2f} A")
-        self._w_value.setText(f"{latest.power:.1f} W")
-        self._max_value.setText(f"{self._max_current:.2f} A")
 
     # Read-only accessors for tests.
     @property

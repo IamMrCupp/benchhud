@@ -31,6 +31,7 @@ from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
+from benchhud.shell.panels.power_graph import PowerGraphPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
@@ -94,10 +95,12 @@ class MainWindow(QMainWindow):
         self.thermal_panel = ThermalPanel()
         thermal_dock = self.panels.add_panel(self.thermal_panel, right)
         self.tabifyDockWidget(scope_dock, thermal_dock)  # scope/thermal as tabs
-        # PowerPanel is the combined power/DMM meter (supersedes a separate
-        # telemetry dock); it renders the DMM header + V/A/W/max + trend graph.
+        # PowerPanel is the numeric power/DMM meter (DMM header + V/A/W/max).
         self.power_panel = PowerPanel()
         self.panels.add_panel(self.power_panel, right)
+        # The trend graph gets its own full-width bottom dock (like a scope trace).
+        self.power_graph_panel = PowerGraphPanel()
+        self.panels.add_panel(self.power_graph_panel, Qt.DockWidgetArea.BottomDockWidgetArea)
 
         self.controls_panel = ControlsPanel(self._config)
         controls_dock = self.panels.add_panel(self.controls_panel, left)
@@ -144,7 +147,7 @@ class MainWindow(QMainWindow):
 
     def _build_view_menu(self) -> None:
         menu = self.menuBar().addMenu("View")
-        for panel_id in ("scope", "thermal", "power", "controls", "launcher"):
+        for panel_id in ("scope", "thermal", "power", "power_graph", "controls", "launcher"):
             dock = self.panels.dock(panel_id)
             if dock is not None:
                 menu.addAction(dock.toggleViewAction())
@@ -188,8 +191,10 @@ class MainWindow(QMainWindow):
             return
         self._demo.step()
         self._demo_t += 0.2
+        snapshot = self._demo.telemetry()
         self.thermal_panel.update_temps(self._demo.thermal())
-        self.power_panel.update_from_snapshot(self._demo.telemetry(), self._demo_t)
+        self.power_panel.update_from_snapshot(snapshot)
+        self.power_graph_panel.update_from_snapshot(snapshot, self._demo_t)
 
     def _stop_demo(self) -> None:
         if self._demo_timer is not None:
