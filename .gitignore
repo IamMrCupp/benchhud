@@ -22,3 +22,8 @@ config.local.json
 *.swo
 *~
 # claude-project-kit — managed block END
+
+# Python build artifacts
+dist/
+build/
+*.egg-info/
