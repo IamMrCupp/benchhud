@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     symptoms   TEXT NOT NULL DEFAULT '',
     status     TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    external_ref TEXT
 );
 CREATE TABLE IF NOT EXISTS job_notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +43,7 @@ CREATE TABLE IF NOT EXISTS job_notes (
 """
 
 # Fields a caller may update on a job (whitelist — never interpolate raw input).
-_UPDATABLE = ("device", "serial", "customer", "symptoms", "status")
+_UPDATABLE = ("device", "serial", "customer", "symptoms", "status", "external_ref")
 
 
 class JobStatus(StrEnum):
@@ -63,6 +64,8 @@ class Job:
     status: str
     created_at: str
     updated_at: str
+    # Reference to a ticket in an external shop system, when linked.
+    external_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -102,12 +105,14 @@ class JobStore:
         self._root = None if str(path) == ":memory:" else Path(path).parent
 
     def _migrate(self) -> None:
-        """Bring an older database up to the current schema."""
-        columns = {
-            row["name"] for row in self._conn.execute("PRAGMA table_info(job_notes)").fetchall()
-        }
-        if "attachment" not in columns:
-            self._conn.execute("ALTER TABLE job_notes ADD COLUMN attachment TEXT")
+        """Bring an older database up to the current schema (additive only)."""
+        self._add_column_if_missing("job_notes", "attachment", "TEXT")
+        self._add_column_if_missing("jobs", "external_ref", "TEXT")
+
+    def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        if column not in {row["name"] for row in rows}:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     def attachments_dir(self, job_id: int) -> Path | None:
         """Directory for a job's captured images (``None`` for in-memory stores)."""
@@ -130,12 +135,13 @@ class JobStore:
         customer: str = "",
         symptoms: str = "",
         status: str = JobStatus.OPEN,
+        external_ref: str | None = None,
     ) -> Job:
         stamp = self._now()
         cur = self._conn.execute(
             "INSERT INTO jobs (device, serial, customer, symptoms, status,"
-            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (device, serial, customer, symptoms, str(status), stamp, stamp),
+            " created_at, updated_at, external_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (device, serial, customer, symptoms, str(status), stamp, stamp, external_ref),
         )
         self._conn.commit()
         job = self.get_job(int(cur.lastrowid))
@@ -144,6 +150,11 @@ class JobStore:
 
     def get_job(self, job_id: int) -> Job | None:
         row = self._conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return _job(row) if row else None
+
+    def find_by_external_ref(self, ref: str) -> Job | None:
+        """The job linked to an external ticket reference, if any."""
+        row = self._conn.execute("SELECT * FROM jobs WHERE external_ref = ?", (ref,)).fetchone()
         return _job(row) if row else None
 
     def list_jobs(self, status: str | None = None) -> list[Job]:
@@ -224,4 +235,5 @@ def _job(row: sqlite3.Row) -> Job:
         status=row["status"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        external_ref=row["external_ref"],
     )
