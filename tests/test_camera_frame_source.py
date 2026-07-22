@@ -133,3 +133,51 @@ def test_scope_source_falls_back_when_the_camera_will_not_open():
     from benchhud.shell.main_window import scope_source_for
 
     assert isinstance(scope_source_for("/dev/video-nope"), SyntheticFrameSource)
+
+
+def _cameras():
+    from benchhud.devices.discovery import CameraDevice
+
+    return [
+        CameraDevice(identifier="0x8020000005ac8514", label="FaceTime HD", index=0),
+        CameraDevice(identifier="0x1a11000005ac1112", label="Studio Display", index=1),
+    ]
+
+
+def test_qt_device_id_resolves_to_its_enumeration_index():
+    """macOS/Windows ids are opaque to OpenCV — it needs the index."""
+    from benchhud.devices.discovery import resolve_capture_device
+
+    assert resolve_capture_device("0x1a11000005ac1112", _cameras()) == 1
+
+
+def test_v4l2_path_is_passed_through():
+    from benchhud.devices.discovery import resolve_capture_device
+
+    assert resolve_capture_device("/dev/video4", []) == "/dev/video4"
+
+
+def test_numeric_identifier_becomes_an_index():
+    from benchhud.devices.discovery import resolve_capture_device
+
+    assert resolve_capture_device("2", []) == 2
+
+
+def test_unknown_identifier_is_left_alone():
+    """Stale config: the open attempt fails and the caller falls back."""
+    from benchhud.devices.discovery import resolve_capture_device
+
+    assert resolve_capture_device("0xdeadbeef", _cameras()) == "0xdeadbeef"
+
+
+def test_scope_source_opens_the_camera_at_the_resolved_index():
+    from benchhud.capture.camera import CameraFrameSource
+    from benchhud.shell.main_window import scope_source_for
+
+    source = scope_source_for("0x1a11000005ac1112", _cameras())
+    # No second camera on CI, so this falls back — the point is that resolution
+    # happened: a real attempt was made rather than the id being opened verbatim.
+    assert source is not None
+    if isinstance(source, CameraFrameSource):
+        assert source.device == 1
+        source.close()

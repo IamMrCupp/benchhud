@@ -64,3 +64,10 @@ def test_camera_device_shape() -> None:
     cam = CameraDevice(identifier="/dev/video4", label="scope", index=1)
     assert cam.identifier == "/dev/video4"
     assert cam.index == 1
+
+
+def test_qt_enumeration_without_an_application_is_safe():
+    """QMediaDevices *segfaults* with no QCoreApplication — never call it there."""
+    from benchhud.devices.discovery import list_cameras_qt
+
+    assert list_cameras_qt(app_instance=lambda: None) == []
