@@ -10,12 +10,14 @@ so the whole dialog is testable offscreen with no hardware.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QPushButton,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
+from benchhud.shell.tool_picker import ToolPickerDialog
 
 SaveCallback = Callable[[Config], None]
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -122,11 +125,19 @@ class PreferencesDialog(QDialog):
         self.add_tool_button.clicked.connect(lambda: self._append_tool_row("", ""))
         self.remove_tool_button = QPushButton("Remove")
         self.remove_tool_button.clicked.connect(self._remove_selected_tool)
+        self.detect_tools_button = QPushButton("Detect installed…")
+        self.detect_tools_button.setToolTip("Scan this system for known bench tools")
+        self.detect_tools_button.clicked.connect(self.open_tool_picker)
+        self.browse_tool_button = QPushButton("Browse…")
+        self.browse_tool_button.setToolTip("Pick an executable from the filesystem")
+        self.browse_tool_button.clicked.connect(self.browse_for_tool)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.add_tool_button)
         buttons.addWidget(self.remove_tool_button)
         buttons.addStretch(1)
+        buttons.addWidget(self.detect_tools_button)
+        buttons.addWidget(self.browse_tool_button)
 
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -139,6 +150,28 @@ class PreferencesDialog(QDialog):
         self.tools_table.insertRow(row)
         self.tools_table.setItem(row, 0, QTableWidgetItem(name))
         self.tools_table.setItem(row, 1, QTableWidgetItem(command))
+
+    def open_tool_picker(self) -> ToolPickerDialog:
+        """Scan for installed tools; add the ticked ones (returned for tests)."""
+        dialog = ToolPickerDialog(parent=self)
+        dialog.accepted.connect(lambda: self.add_tools(dialog.selected_tools()))
+        dialog.open()
+        return dialog
+
+    def browse_for_tool(self) -> None:
+        """Pick an executable from the filesystem and add it as a tool."""
+        path, _ = QFileDialog.getOpenFileName(self, "Select a tool executable")
+        if path:
+            self.add_tools([ToolConfig(name=Path(path).stem, command=path)])
+
+    def add_tools(self, tools: list[ToolConfig]) -> None:
+        """Append tools, skipping ones already in the table (by command)."""
+        existing = {_cell(self.tools_table, row, 1) for row in range(self.tools_table.rowCount())}
+        for tool in tools:
+            if tool.command in existing:
+                continue
+            self._append_tool_row(tool.name, tool.command)
+            existing.add(tool.command)
 
     def _remove_selected_tool(self) -> None:
         row = self.tools_table.currentRow()
