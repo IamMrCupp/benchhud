@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from benchhud.jobs.capture import CaptureContext, capture_to_job
 from benchhud.jobs.store import JobStatus, JobStore
 from benchhud.shell.panel import Panel
+from benchhud.shell.qt_util import fit_combo_popup
 
 CaptureProvider = Callable[[], CaptureContext | None]
 
@@ -90,6 +91,7 @@ class JobsPanel(Panel):
         self.symptoms_edit.setMaximumHeight(60)
         self.status_combo = QComboBox()
         self.status_combo.addItems([s.value for s in JobStatus])
+        fit_combo_popup(self.status_combo)
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save_current)
 
