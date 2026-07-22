@@ -11,6 +11,7 @@ render-only, testable offscreen. Monospace digits approximate an LCD; a true
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -74,7 +75,9 @@ class PowerPanel(Panel):
         self._max_current = 0.0
         self._last_snapshot: TelemetrySnapshot | None = None
         self.setStyleSheet(_STYLE)
-        self.setMinimumWidth(220)
+        # Two cells side by side; the panel lives in a scroll area, so a truthful
+        # minimum means the digits scroll rather than get clipped.
+        self.setMinimumWidth(2 * cell_min_width() + 24)
 
         self.chart = PowerChart()
         self.chart.setMinimumHeight(150)
@@ -191,6 +194,33 @@ class PowerPanel(Panel):
         return self._dmm_unit.text()
 
 
+# Point sizes must track the QSS rules above — they're what the labels actually
+# render at, and we size the cells from them so digits are never clipped.
+_VALUE_PT = 16
+_CAPTION_PT = 8
+# Worst case the meter can show: three integer digits, a sign, and a unit.
+_WIDEST_VALUE = "-000.00 W"
+_WIDEST_CAPTION = "MAX CURRENT"
+
+
+def _text_width(text: str, point_size: int, *, bold: bool = False) -> int:
+    font = QFont()
+    font.setPointSize(point_size)
+    font.setBold(bold)
+    return QFontMetrics(font).horizontalAdvance(text)
+
+
+def cell_min_width() -> int:
+    """Width one meter cell needs for its widest value and caption, plus padding."""
+    return (
+        max(
+            _text_width(_WIDEST_VALUE, _VALUE_PT, bold=True),
+            _text_width(_WIDEST_CAPTION, _CAPTION_PT),
+        )
+        + 20  # cell margins + frame border
+    )
+
+
 def _cell_value() -> QLabel:
     label = QLabel(_PLACEHOLDER)
     label.setObjectName("meterValue")
@@ -203,6 +233,7 @@ def _cell(caption: str, value: QLabel, extra: QWidget | None = None) -> QFrame:
     frame = QFrame()
     frame.setObjectName("meterCell")
     frame.setMinimumHeight(68)
+    frame.setMinimumWidth(cell_min_width())
     box = QVBoxLayout(frame)
     box.setContentsMargins(8, 4, 8, 4)
     box.setSpacing(2)

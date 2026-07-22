@@ -100,3 +100,19 @@ def test_meter_embeds_the_trend_chart(qtbot) -> None:
     assert "12.00 V" in panel.voltage_text
     assert panel.chart.v_series.count() == 1
     assert panel.chart.w_series.count() == 1
+
+
+def test_meter_cells_fit_their_widest_reading(qtbot):
+    """Digits were clipping at narrow dock widths — the cell must own the space."""
+    from PySide6.QtGui import QFont, QFontMetrics
+
+    from benchhud.shell.panels.power import cell_min_width
+
+    panel = PowerPanel()
+    qtbot.addWidget(panel)
+    font = QFont()
+    font.setPointSize(16)
+    font.setBold(True)
+    needed = QFontMetrics(font).horizontalAdvance("-000.00 W")
+    assert cell_min_width() > needed
+    assert panel.minimumWidth() >= 2 * cell_min_width()
