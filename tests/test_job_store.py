@@ -103,3 +103,67 @@ def test_default_db_path_sits_beside_config(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setenv(cfg.ENV_VAR, str(tmp_path / "conf" / "config.toml"))
     assert default_db_path() == tmp_path / "conf" / "jobs.db"
+
+
+def test_note_attachment_round_trip(store) -> None:
+    job = store.create_job("board")
+    store.add_note(job.id, "thermal capture", attachment="/tmp/cap.png")
+    note = store.list_notes(job.id)[0]
+    assert note.attachment == "/tmp/cap.png"
+
+
+def test_note_without_attachment_is_none(store) -> None:
+    job = store.create_job("board")
+    store.add_note(job.id, "plain note")
+    assert store.list_notes(job.id)[0].attachment is None
+
+
+def test_attachments_dir_beside_db(tmp_path) -> None:
+    s = JobStore(tmp_path / "jobs.db")
+    try:
+        job = s.create_job("board")
+        d = s.attachments_dir(job.id)
+        assert d == tmp_path / "job_attachments" / str(job.id)
+        assert d.is_dir()
+    finally:
+        s.close()
+
+
+def test_in_memory_store_has_no_attachments_dir(store) -> None:
+    job = store.create_job("board")
+    assert store.attachments_dir(job.id) is None
+
+
+def test_migrates_older_database(tmp_path) -> None:
+    """A db created before the attachment column still opens and works."""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(
+        """
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, device TEXT NOT NULL,
+            serial TEXT NOT NULL DEFAULT '', customer TEXT NOT NULL DEFAULT '',
+            symptoms TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE job_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL, text TEXT NOT NULL);
+        """
+    )
+    legacy.execute("INSERT INTO jobs (device, created_at, updated_at) VALUES ('legacy', 't', 't')")
+    legacy.execute("INSERT INTO job_notes (job_id, created_at, text) VALUES (1, 't', 'old note')")
+    legacy.commit()
+    legacy.close()
+
+    migrated = JobStore(path)
+    try:
+        assert [j.device for j in migrated.list_jobs()] == ["legacy"]
+        note = migrated.list_notes(1)[0]
+        assert note.text == "old note"
+        assert note.attachment is None  # column added by the migration
+        migrated.add_note(1, "new note", attachment="/tmp/x.png")
+        assert migrated.list_notes(1)[1].attachment == "/tmp/x.png"
+    finally:
+        migrated.close()
