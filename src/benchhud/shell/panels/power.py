@@ -2,10 +2,10 @@
 
 Echoes the bench PSU/DMM's own on-screen overlay: a DMM header (mode + big
 reading + unit) and a cyan LCD-style 2x2 grid (voltage / current / power / max
-current, with peak-hold). The V/A/W *trend graph* lives in its own dock
-(:class:`~benchhud.shell.panels.power_graph.PowerGraphPanel`) so it has room.
-Fed from a :class:`TelemetrySnapshot`; render-only, testable offscreen. Monospace
-digits approximate an LCD; a true 7-segment font can be bundled later.
+current, with peak-hold) with the live V/A/W trend chart beneath it, so the
+whole thing reads as one instrument. Fed from a :class:`TelemetrySnapshot`;
+render-only, testable offscreen. Monospace digits approximate an LCD; a true
+7-segment font can be bundled later.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.shell.panel import Panel
+from benchhud.shell.power_chart import PowerChart
 
 _PLACEHOLDER = "—"
 
@@ -75,10 +76,13 @@ class PowerPanel(Panel):
         self.setStyleSheet(_STYLE)
         self.setMinimumWidth(220)
 
+        self.chart = PowerChart()
+        self.chart.setMinimumHeight(150)
+
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_header())
         layout.addWidget(self._build_grid())
-        layout.addStretch(1)
+        layout.addWidget(self.chart, stretch=1)
 
     def _build_header(self) -> QWidget:
         self._dmm_mode = QLabel("DMM")
@@ -119,8 +123,9 @@ class PowerPanel(Panel):
         return widget
 
     def add_reading(self, voltage: float, current: float, t: float = 0.0) -> None:
-        """Update the numeric readouts (``t`` unused — the graph handles time)."""
+        """Update the numeric readouts and append the reading to the trend chart."""
         self._max_current = max(self._max_current, current)
+        self.chart.add_reading(voltage, current, t)
         # Decimal places match the OWON display (V/A/max 2dp, W 1dp).
         self._v_value.setText(f"{voltage:.2f} V")
         self._a_value.setText(f"{current:.2f} A")
@@ -132,7 +137,7 @@ class PowerPanel(Panel):
         self._last_snapshot = snapshot
         self._update_dmm(snapshot)
         if snapshot.voltage is not None and snapshot.current is not None:
-            self.add_reading(snapshot.voltage, snapshot.current)
+            self.add_reading(snapshot.voltage, snapshot.current, t)
 
     def reset_max(self) -> None:
         """Clear the peak-hold max current."""
