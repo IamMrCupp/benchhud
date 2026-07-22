@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import glob as glob_module
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -79,8 +79,18 @@ def list_cameras_v4l2(
     return cameras
 
 
-def list_cameras_qt() -> list[CameraDevice]:
-    """Non-Linux: enumerate cameras via Qt Multimedia."""
+def list_cameras_qt(app_instance: Callable[[], object | None] | None = None) -> list[CameraDevice]:
+    """Non-Linux: enumerate cameras via Qt Multimedia.
+
+    Returns nothing when there is no Qt application — QMediaDevices *segfaults*
+    without one, which a caller can't catch, so guard rather than crash a CLI.
+    """
+    from PySide6.QtCore import QCoreApplication
+
+    instance = app_instance or QCoreApplication.instance
+    if instance() is None:
+        return []
+
     from PySide6.QtMultimedia import QMediaDevices
 
     cameras = []
@@ -88,6 +98,26 @@ def list_cameras_qt() -> list[CameraDevice]:
         identifier = cam.id().data().decode(errors="replace")
         cameras.append(CameraDevice(identifier=identifier, label=cam.description(), index=index))
     return cameras
+
+
+def resolve_capture_device(identifier: str, cameras: Sequence[CameraDevice]) -> int | str:
+    """Map a configured camera identifier to something OpenCV can actually open.
+
+    Linux identifiers are already device paths, which ``cv2.VideoCapture`` takes
+    directly. Qt's ids (macOS/Windows) are opaque strings it cannot open at all,
+    so we fall back to the camera's enumeration position — which is exactly the
+    index OpenCV wants. Without this, choosing a camera in Preferences on macOS
+    silently yields no feed.
+    """
+    text = identifier.strip()
+    if text.lstrip("-").isdigit():
+        return int(text)
+    if text.startswith("/dev/"):
+        return text
+    for camera in cameras:
+        if camera.identifier == text:
+            return camera.index
+    return text  # unknown: let the caller's open attempt fail and fall back
 
 
 def list_cameras() -> list[CameraDevice]:

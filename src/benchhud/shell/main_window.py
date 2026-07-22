@@ -12,7 +12,7 @@ shell animates end to end with no camera.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
@@ -25,7 +25,12 @@ from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.demo import DemoSignal
-from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
+from benchhud.devices.discovery import (
+    CameraDevice,
+    DeviceScanner,
+    SystemDeviceScanner,
+    resolve_capture_device,
+)
 from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.store import JobStore, default_db_path
 from benchhud.overlay.composite import colorize, compose
@@ -58,15 +63,16 @@ def _default_scope_source() -> FrameSource:
     return SyntheticFrameSource(960, 540)
 
 
-def scope_source_for(device: str) -> FrameSource:
+def scope_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> FrameSource:
     """Open the configured scope camera, falling back to the synthetic feed.
 
     A camera that is unplugged, busy (UVC allows one reader), or simply wrong in
     the config must leave the shell usable — so we fall back rather than fail.
+    ``cameras`` is the current scan, used to resolve a Qt device id to an index.
     """
     if not device.strip():
         return _default_scope_source()
-    camera = CameraFrameSource(device)
+    camera = CameraFrameSource(resolve_capture_device(device, cameras))
     if camera.is_open:
         return camera
     camera.close()
@@ -279,6 +285,13 @@ class MainWindow(QMainWindow):
         box.show()
         return box
 
+    def _scan_cameras(self) -> list[CameraDevice]:
+        """Current camera list; a scanner blowing up must not stop the preview."""
+        try:
+            return self._scanner.cameras()
+        except Exception:
+            return []
+
     def _on_scope_frame(self, frame) -> None:
         self.scope_panel.update_frame(frame)
         self.render_composite()
@@ -332,9 +345,10 @@ class MainWindow(QMainWindow):
             return
         if source_factory is None:
             device = self._config.panels.scope.device
+            cameras = self._scan_cameras()
 
             def source_factory() -> FrameSource:
-                return scope_source_for(device)
+                return scope_source_for(device, cameras)
 
         reader = LatestFrameReader(source_factory())
         self._pump = FramePump(reader, consumers=[self._on_scope_frame])
