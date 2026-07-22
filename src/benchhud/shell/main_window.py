@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QLabel, QMainWindow, QMessageBox, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
 
 from benchhud import __version__
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
@@ -27,7 +27,9 @@ from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
 from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.store import JobStore, default_db_path
+from benchhud.overlay.composite import colorize, compose
 from benchhud.shell.about import about_html
+from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
@@ -77,21 +79,16 @@ class MainWindow(QMainWindow):
         self._demo: DemoSignal | None = None
         self._demo_timer: QTimer | None = None
         self._demo_t = 0.0
+        self._demo_scope = SyntheticFrameSource(960, 540)
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
         self.setWindowIcon(app_icon())
         self._build_menu()
 
-        central = QLabel(
-            "benchhud — composite / preview area\n\n"
-            "The scope + thermal composite renders here once the pipeline lands (Phase 1)."
-        )
-        central.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        central.setObjectName("CompositePreview")
-        central.setWordWrap(True)  # don't force a wide minimum window
-        central.setMinimumWidth(1)
-        self.setCentralWidget(central)
+        self.composite_view = CompositeView()
+        self.composite_view.setObjectName("CompositePreview")
+        self.setCentralWidget(self.composite_view)
 
         # Panels must exist before restoreState so their dock geometry restores.
         # Default layout: cameras + meter on the right, settings tabbed on the
@@ -114,6 +111,7 @@ class MainWindow(QMainWindow):
         self.launcher_panel = LauncherPanel(self._config.tools)
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
+        self.controls_panel.changed.connect(self.render_composite)
         self.jobs_panel = JobsPanel(self._job_store, capture_provider=self.capture_context)
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
@@ -227,8 +225,13 @@ class MainWindow(QMainWindow):
         self._demo.step()
         self._demo_t += 0.2
         snapshot = self._demo.telemetry()
+        # Demo drives a synthetic scope feed too, so the centre shows a real
+        # composite (scope + thermal) rather than thermal on its own.
+        if self._pump is None:
+            self.scope_panel.update_frame(self._demo_scope.read())
         self.thermal_panel.update_temps(self._demo.thermal())
         self.power_panel.update_from_snapshot(snapshot, self._demo_t)
+        self.render_composite()
 
     def _stop_demo(self) -> None:
         if self._demo_timer is not None:
@@ -260,6 +263,30 @@ class MainWindow(QMainWindow):
         box.show()
         return box
 
+    def _on_scope_frame(self, frame) -> None:
+        self.scope_panel.update_frame(frame)
+        self.render_composite()
+
+    def render_composite(self) -> None:
+        """Recompose the central view from whatever feeds are live."""
+        scope = self.scope_panel.last_frame
+        temps = self.thermal_panel.last_temps
+        if scope is None and temps is None:
+            return
+        if temps is None:
+            self.composite_view.show_frame(scope)
+            return
+
+        settings = self.controls_panel.current_settings()
+        if scope is None:
+            # Thermal only — show it colourised on its own.
+            self.composite_view.show_frame(
+                colorize(temps, settings.tmin, settings.tmax, settings.colormap)
+            )
+            return
+        transform = self.controls_panel.current_transform()
+        self.composite_view.show_frame(compose(scope, temps, transform, settings))
+
     def capture_context(self) -> CaptureContext:
         """Current bench state for capture-to-job: scope + thermal + readings."""
         return CaptureContext(
@@ -285,7 +312,7 @@ class MainWindow(QMainWindow):
         if self._pump is not None:
             return
         reader = LatestFrameReader(source_factory())
-        self._pump = FramePump(reader, consumers=[self.scope_panel.update_frame])
+        self._pump = FramePump(reader, consumers=[self._on_scope_frame])
         self._pump.start()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._pump.tick)
