@@ -71,6 +71,7 @@ class PowerPanel(Panel):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._max_current = 0.0
+        self._last_snapshot: TelemetrySnapshot | None = None
         self.setStyleSheet(_STYLE)
         self.setMinimumWidth(220)
 
@@ -128,6 +129,7 @@ class PowerPanel(Panel):
 
     def update_from_snapshot(self, snapshot: TelemetrySnapshot, t: float = 0.0) -> None:
         """Update the DMM header and, when PSU V+I are present, the numeric grid."""
+        self._last_snapshot = snapshot
         self._update_dmm(snapshot)
         if snapshot.voltage is not None and snapshot.current is not None:
             self.add_reading(snapshot.voltage, snapshot.current)
@@ -152,6 +154,11 @@ class PowerPanel(Panel):
         else:
             self._dmm_value.setText(dmm.status or _PLACEHOLDER)
         self._dmm_unit.setText(_DMM_UNITS.get(dmm.mode.upper(), ""))
+
+    @property
+    def last_snapshot(self) -> TelemetrySnapshot | None:
+        """The most recent telemetry snapshot (for capture-to-job)."""
+        return self._last_snapshot
 
     # Read-only accessors for tests.
     @property
