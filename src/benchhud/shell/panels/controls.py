@@ -31,6 +31,7 @@ from benchhud.overlay.config_adapter import (
 )
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.panel import Panel
+from benchhud.shell.qt_util import fit_combo_popup
 
 
 class ControlsPanel(Panel):
@@ -55,6 +56,8 @@ class ControlsPanel(Panel):
         self.colormap_combo = QComboBox()
         self.colormap_combo.addItems(colormap_names())
         self.colormap_combo.setCurrentText(colormap_to_name(settings.colormap))
+        fit_combo_popup(self.mode_combo)
+        fit_combo_popup(self.colormap_combo)
 
         self.alpha_slider = QSlider(Qt.Orientation.Horizontal)
         self.alpha_slider.setRange(0, 100)

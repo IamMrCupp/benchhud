@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
+from benchhud.shell.qt_util import fit_combo_popup
 from benchhud.shell.tool_picker import ToolPickerDialog
 
 SaveCallback = Callable[[Config], None]
@@ -193,6 +194,7 @@ class PreferencesDialog(QDialog):
         self.logging_combo = QComboBox()
         self.logging_combo.addItems(_LOG_LEVELS)
         self.logging_combo.setCurrentText(self._config.shell.logging.level)
+        fit_combo_popup(self.logging_combo)
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow("Level", self.logging_combo)
@@ -234,6 +236,7 @@ def _fill_camera_combo(combo: QComboBox, cameras: list[CameraDevice], current: s
         selected = combo.count() - 1
     if selected >= 0:
         combo.setCurrentIndex(selected)
+    fit_combo_popup(combo)
 
 
 def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str) -> None:
@@ -248,6 +251,7 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
         selected = combo.count() - 1
     if selected >= 0:
         combo.setCurrentIndex(selected)
+    fit_combo_popup(combo)
 
 
 def _cell(table: QTableWidget, row: int, col: int) -> str:
