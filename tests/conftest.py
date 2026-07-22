@@ -67,6 +67,12 @@ class FakeSerialPort:
         self.closed = True
 
 
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path, monkeypatch):
+    """Keep every test off the real user config dir (and its jobs.db)."""
+    monkeypatch.setenv("BENCHHUD_CONFIG", str(tmp_path / "config.toml"))
+
+
 @pytest.fixture
 def make_fake_serial() -> Callable[[Mapping[str, str]], FakeSerialPort]:
     """Factory for a :class:`FakeSerialPort` seeded with custom responses."""
