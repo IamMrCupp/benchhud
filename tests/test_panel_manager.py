@@ -40,6 +40,22 @@ def test_add_panel_registers_dock_with_stable_name(qtbot) -> None:
     assert "two" in manager.panel_ids()
 
 
+def test_panel_is_wrapped_in_scroll_area(qtbot) -> None:
+    from PySide6.QtWidgets import QScrollArea
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    manager = PanelManager(window)
+    panel = _TwoPanel()
+    dock = manager.add_panel(panel)
+
+    scroll = dock.widget()
+    assert isinstance(scroll, QScrollArea)
+    assert scroll.widget() is panel  # content is scrollable, never clipped away
+    assert scroll.widgetResizable() is True
+    assert manager.panel("two") is panel
+
+
 def test_duplicate_panel_id_raises(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
