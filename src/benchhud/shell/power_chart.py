@@ -1,9 +1,9 @@
-"""Power trend graph — a dedicated V/A/W trend panel.
+"""Live V/A/W trend chart.
 
-Split out of the meter so the graph gets real space (it lives in a full-width
-bottom dock, like a scope trace). Backed by :class:`PowerHistory`; fed from the
-same PSU readings as the meter. Render-only, testable offscreen. Uses QtCharts
-(bundled — no new dependency).
+A plain widget (not a dock) embedded in the meter panel beneath the numeric
+readouts, so the instrument reads as one thing. Backed by :class:`PowerHistory`
+and fed from the same PSU readings as the numerics. Render-only and testable
+offscreen. Uses QtCharts (bundled — no new dependency).
 """
 
 from __future__ import annotations
@@ -15,12 +15,10 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from benchhud.instruments.power_history import PowerHistory
 from benchhud.instruments.telemetry import TelemetrySnapshot
-from benchhud.shell.panel import Panel
 
 
-class PowerGraphPanel(Panel):
-    panel_id = "power_graph"
-    panel_title = "Power Graph"
+class PowerChart(QWidget):
+    """Scrolling V/A/W trend over a rolling time window."""
 
     def __init__(
         self,
@@ -75,7 +73,9 @@ class PowerGraphPanel(Panel):
             return
 
         t_latest = samples[-1].t
-        t_min = t_latest - self._window
+        # Don't show empty time before the first sample (early on there's less
+        # data than the window is wide).
+        t_min = max(t_latest - self._window, samples[0].t)
         values: list[float] = []
         for s in samples:
             if s.t < t_min:

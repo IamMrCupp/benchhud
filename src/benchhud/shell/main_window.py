@@ -34,7 +34,6 @@ from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
-from benchhud.shell.panels.power_graph import PowerGraphPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
@@ -46,7 +45,7 @@ _PREVIEW_FPS = 30
 # Bump when the default dock arrangement changes. The shell auto-saves the
 # layout on close, so without this a layout from an older build would silently
 # override a newer default (and the user never knowingly saved one).
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 
 SourceFactory = Callable[[], FrameSource]
 
@@ -110,10 +109,6 @@ class MainWindow(QMainWindow):
         # PowerPanel is the numeric power/DMM meter (DMM header + V/A/W/max).
         self.power_panel = PowerPanel()
         self.panels.add_panel(self.power_panel, right)
-        # The trend graph gets its own full-width bottom dock (like a scope trace).
-        self.power_graph_panel = PowerGraphPanel()
-        self.panels.add_panel(self.power_graph_panel, Qt.DockWidgetArea.BottomDockWidgetArea)
-
         self.controls_panel = ControlsPanel(self._config)
         controls_dock = self.panels.add_panel(self.controls_panel, left)
         self.launcher_panel = LauncherPanel(self._config.tools)
@@ -182,7 +177,6 @@ class MainWindow(QMainWindow):
             "scope",
             "thermal",
             "power",
-            "power_graph",
             "controls",
             "launcher",
             "jobs",
@@ -234,8 +228,7 @@ class MainWindow(QMainWindow):
         self._demo_t += 0.2
         snapshot = self._demo.telemetry()
         self.thermal_panel.update_temps(self._demo.thermal())
-        self.power_panel.update_from_snapshot(snapshot)
-        self.power_graph_panel.update_from_snapshot(snapshot, self._demo_t)
+        self.power_panel.update_from_snapshot(snapshot, self._demo_t)
 
     def _stop_demo(self) -> None:
         if self._demo_timer is not None:

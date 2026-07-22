@@ -83,9 +83,20 @@ def test_max_current_peak_hold_and_reset(qtbot) -> None:
     assert "0.00 A" in panel.max_current_text
 
 
-def test_shell_hosts_power_and_graph_panels(qtbot) -> None:
+def test_shell_hosts_power_panel_with_embedded_chart(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
-    ids = window.panels.panel_ids()
-    assert "power" in ids
-    assert "power_graph" in ids
+    assert "power" in window.panels.panel_ids()
+    # the trend chart is embedded in the meter, not a separate dock
+    assert "power_graph" not in window.panels.panel_ids()
+
+
+def test_meter_embeds_the_trend_chart(qtbot) -> None:
+    panel = PowerPanel()
+    qtbot.addWidget(panel)
+    assert panel.chart.v_series.count() == 0
+    panel.update_from_snapshot(TelemetrySnapshot(voltage=12.0, current=1.5), t=0.0)
+    # one entry point updates both the numerics and the embedded chart
+    assert "12.00 V" in panel.voltage_text
+    assert panel.chart.v_series.count() == 1
+    assert panel.chart.w_series.count() == 1
