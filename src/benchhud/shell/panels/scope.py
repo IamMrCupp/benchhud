@@ -27,6 +27,7 @@ class ScopePanel(Panel):
         self._view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._view.setMinimumSize(160, 120)
         self._source_pixmap: QPixmap | None = None
+        self._last_frame: np.ndarray | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -36,10 +37,16 @@ class ScopePanel(Panel):
     def has_frame(self) -> bool:
         return self._source_pixmap is not None
 
+    @property
+    def last_frame(self) -> np.ndarray | None:
+        """The most recent BGR frame (for capture-to-job)."""
+        return self._last_frame
+
     def update_frame(self, frame: np.ndarray | None) -> None:
         """Show ``frame`` (BGR). ``None`` is ignored (keeps the last frame)."""
         if frame is None:
             return
+        self._last_frame = frame
         self._source_pixmap = QPixmap.fromImage(bgr_to_qimage(frame))
         self._render()
 

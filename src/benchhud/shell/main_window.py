@@ -25,6 +25,7 @@ from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
+from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.store import JobStore, default_db_path
 from benchhud.shell.about import about_html
 from benchhud.shell.icon import app_icon
@@ -118,7 +119,7 @@ class MainWindow(QMainWindow):
         self.launcher_panel = LauncherPanel(self._config.tools)
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
-        self.jobs_panel = JobsPanel(self._job_store)
+        self.jobs_panel = JobsPanel(self._job_store, capture_provider=self.capture_context)
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
 
@@ -265,6 +266,14 @@ class MainWindow(QMainWindow):
         box.setIcon(QMessageBox.Icon.Information)
         box.show()
         return box
+
+    def capture_context(self) -> CaptureContext:
+        """Current bench state for capture-to-job: scope + thermal + readings."""
+        return CaptureContext(
+            scope=self.scope_panel.last_frame,
+            temps=self.thermal_panel.last_temps,
+            snapshot=self.power_panel.last_snapshot,
+        )
 
     def _refresh_status(self) -> None:
         panels = self._config.panels

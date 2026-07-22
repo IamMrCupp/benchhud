@@ -10,6 +10,8 @@ current scope/thermal frame and live meter readings as timeline entries.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
@@ -25,8 +27,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from benchhud.jobs.capture import CaptureContext, capture_to_job
 from benchhud.jobs.store import JobStatus, JobStore
 from benchhud.shell.panel import Panel
+
+CaptureProvider = Callable[[], CaptureContext | None]
 
 
 def _short_stamp(iso: str) -> str:
@@ -38,9 +43,15 @@ class JobsPanel(Panel):
     panel_id = "jobs"
     panel_title = "Jobs"
 
-    def __init__(self, store: JobStore, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        store: JobStore,
+        capture_provider: CaptureProvider | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self._store = store
+        self._capture_provider = capture_provider
 
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_new_row())
@@ -100,10 +111,16 @@ class JobsPanel(Panel):
         self.note_edit.returnPressed.connect(self.add_note)
         self.add_note_button = QPushButton("Add note")
         self.add_note_button.clicked.connect(self.add_note)
+        self.capture_button = QPushButton("Capture bench")
+        self.capture_button.setToolTip(
+            "Attach the current scope + thermal frames and live meter readings"
+        )
+        self.capture_button.clicked.connect(self.capture_bench)
 
         row = QHBoxLayout()
         row.addWidget(self.note_edit, stretch=1)
         row.addWidget(self.add_note_button)
+        row.addWidget(self.capture_button)
 
         widget = QWidget()
         box = QVBoxLayout(widget)
@@ -148,6 +165,17 @@ class JobsPanel(Panel):
             return
         self._store.add_note(job_id, text)
         self.note_edit.clear()
+        self.refresh_notes()
+
+    def capture_bench(self) -> None:
+        """Attach the current scope/thermal frames + meter readings to the job."""
+        job_id = self.selected_job_id()
+        if job_id is None or self._capture_provider is None:
+            return
+        context = self._capture_provider()
+        if context is None:
+            return
+        capture_to_job(self._store, job_id, context)
         self.refresh_notes()
 
     # --- state -----------------------------------------------------------

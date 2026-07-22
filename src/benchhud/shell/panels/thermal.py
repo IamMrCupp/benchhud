@@ -37,6 +37,7 @@ class ThermalPanel(Panel):
         self._tmax = tmax
         self._colormap = colormap
         self._source_pixmap: QPixmap | None = None
+        self._last_temps: np.ndarray | None = None
 
         self._view = QLabel("No signal")
         self._view.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -54,6 +55,11 @@ class ThermalPanel(Panel):
         return self._source_pixmap is not None
 
     @property
+    def last_temps(self) -> np.ndarray | None:
+        """The most recent °C array (for capture-to-job)."""
+        return self._last_temps
+
+    @property
     def readout_text(self) -> str:
         return self._readout.text()
 
@@ -61,6 +67,7 @@ class ThermalPanel(Panel):
         """Show a °C array as a heatmap + hotspot readout. ``None`` is ignored."""
         if temps is None:
             return
+        self._last_temps = temps
         heat = colorize(temps, self._tmin, self._tmax, self._colormap)
         self._source_pixmap = QPixmap.fromImage(bgr_to_qimage(heat))
         self._render()
