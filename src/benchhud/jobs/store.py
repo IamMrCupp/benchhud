@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS job_notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
     created_at TEXT NOT NULL,
-    text       TEXT NOT NULL
+    text       TEXT NOT NULL,
+    attachment TEXT
 );
 """
 
@@ -70,6 +71,7 @@ class JobNote:
     job_id: int
     created_at: str
     text: str
+    attachment: str | None = None  # path to a captured image, if any
 
 
 def default_db_path() -> Path:
@@ -95,7 +97,25 @@ class JobStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+        self._root = None if str(path) == ":memory:" else Path(path).parent
+
+    def _migrate(self) -> None:
+        """Bring an older database up to the current schema."""
+        columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info(job_notes)").fetchall()
+        }
+        if "attachment" not in columns:
+            self._conn.execute("ALTER TABLE job_notes ADD COLUMN attachment TEXT")
+
+    def attachments_dir(self, job_id: int) -> Path | None:
+        """Directory for a job's captured images (``None`` for in-memory stores)."""
+        if self._root is None:
+            return None
+        path = self._root / "job_attachments" / str(job_id)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     def close(self) -> None:
         self._conn.close()
@@ -162,14 +182,20 @@ class JobStore:
 
     # --- notes -----------------------------------------------------------
 
-    def add_note(self, job_id: int, text: str) -> JobNote:
+    def add_note(self, job_id: int, text: str, attachment: str | None = None) -> JobNote:
         stamp = self._now()
         cur = self._conn.execute(
-            "INSERT INTO job_notes (job_id, created_at, text) VALUES (?, ?, ?)",
-            (job_id, stamp, text),
+            "INSERT INTO job_notes (job_id, created_at, text, attachment) VALUES (?, ?, ?, ?)",
+            (job_id, stamp, text, attachment),
         )
         self._conn.commit()
-        return JobNote(id=int(cur.lastrowid), job_id=job_id, created_at=stamp, text=text)
+        return JobNote(
+            id=int(cur.lastrowid),
+            job_id=job_id,
+            created_at=stamp,
+            text=text,
+            attachment=attachment,
+        )
 
     def list_notes(self, job_id: int) -> list[JobNote]:
         """Notes for a job, oldest first (a timeline)."""
@@ -177,7 +203,13 @@ class JobStore:
             "SELECT * FROM job_notes WHERE job_id = ? ORDER BY id ASC", (job_id,)
         ).fetchall()
         return [
-            JobNote(id=r["id"], job_id=r["job_id"], created_at=r["created_at"], text=r["text"])
+            JobNote(
+                id=r["id"],
+                job_id=r["job_id"],
+                created_at=r["created_at"],
+                text=r["text"],
+                attachment=r["attachment"],
+            )
             for r in rows
         ]
 
