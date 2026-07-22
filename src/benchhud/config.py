@@ -37,6 +37,9 @@ class ShellConfig:
     window_height: int = 760
     # Opaque base64 of QMainWindow.saveState(); None until first save.
     layout: str | None = None
+    # Which default-arrangement version produced `layout`. A saved layout from
+    # an older default is ignored so a new default isn't silently overridden.
+    layout_version: int = 0
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
@@ -118,7 +121,11 @@ class Config:
         cfg = cls()
 
         shell_d = data.get("shell", {})
-        _apply(cfg.shell, shell_d, ("window_width", "window_height", "layout"))
+        _apply(
+            cfg.shell,
+            shell_d,
+            ("window_width", "window_height", "layout", "layout_version"),
+        )
         _apply(cfg.shell.logging, shell_d.get("logging", {}), ("level",))
 
         _apply(cfg.output, data.get("output", {}), ("enabled", "width", "height", "fps"))

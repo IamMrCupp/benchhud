@@ -40,6 +40,11 @@ from benchhud.shell.preferences import PreferencesDialog
 # its own fps in config; this is just how often the GUI repaints).
 _PREVIEW_FPS = 30
 
+# Bump when the default dock arrangement changes. The shell auto-saves the
+# layout on close, so without this a layout from an older build would silently
+# override a newer default (and the user never knowingly saved one).
+LAYOUT_VERSION = 2
+
 SourceFactory = Callable[[], FrameSource]
 
 
@@ -123,7 +128,9 @@ class MainWindow(QMainWindow):
     def _apply_config(self) -> None:
         shell = self._config.shell
         self._resize_within_screen(shell.window_width, shell.window_height)
-        if shell.layout:
+        # Only restore a layout saved by the *current* default arrangement;
+        # a stale one is discarded so the newer default wins.
+        if shell.layout and shell.layout_version == LAYOUT_VERSION:
             self.restoreState(QByteArray.fromBase64(shell.layout.encode("ascii")))
 
     def _resize_within_screen(self, width: int, height: int) -> None:
@@ -179,8 +186,10 @@ class MainWindow(QMainWindow):
         menu.addAction(self.demo_action)
 
     def reset_layout(self) -> None:
-        """Restore the default dock arrangement."""
+        """Restore the default dock arrangement and drop the saved layout."""
         self.restoreState(self._default_state)
+        self._config.shell.layout = None
+        self._config.shell.layout_version = LAYOUT_VERSION
 
     # --- demo mode -------------------------------------------------------
 
@@ -282,6 +291,7 @@ class MainWindow(QMainWindow):
         shell.window_width = self.width()
         shell.window_height = self.height()
         shell.layout = bytes(self.saveState().toBase64()).decode("ascii")
+        shell.layout_version = LAYOUT_VERSION
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._stop_demo()
