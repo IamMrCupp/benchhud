@@ -25,10 +25,12 @@ from benchhud.capture.pipeline import FramePump
 from benchhud.config import Config, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import DeviceScanner, SystemDeviceScanner
+from benchhud.jobs.store import JobStore, default_db_path
 from benchhud.shell.about import about_html
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
+from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
 from benchhud.shell.panels.power_graph import PowerGraphPanel
@@ -43,7 +45,7 @@ _PREVIEW_FPS = 30
 # Bump when the default dock arrangement changes. The shell auto-saves the
 # layout on close, so without this a layout from an older build would silently
 # override a newer default (and the user never knowingly saved one).
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 
 SourceFactory = Callable[[], FrameSource]
 
@@ -62,12 +64,14 @@ class MainWindow(QMainWindow):
         *,
         on_persist: PersistCallback | None = None,
         scanner: DeviceScanner | None = None,
+        job_store: JobStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._config = config or Config()
         self._on_persist = on_persist
         self._scanner = scanner or SystemDeviceScanner()
+        self._job_store = job_store or JobStore(default_db_path())
         self._pump: FramePump | None = None
         self._timer: QTimer | None = None
         self._demo: DemoSignal | None = None
@@ -114,6 +118,9 @@ class MainWindow(QMainWindow):
         self.launcher_panel = LauncherPanel(self._config.tools)
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
+        self.jobs_panel = JobsPanel(self._job_store)
+        jobs_dock = self.panels.add_panel(self.jobs_panel, left)
+        self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
 
         scope_dock.raise_()
         controls_dock.raise_()
@@ -170,7 +177,15 @@ class MainWindow(QMainWindow):
 
     def _build_view_menu(self) -> None:
         menu = self.menuBar().addMenu("View")
-        for panel_id in ("scope", "thermal", "power", "power_graph", "controls", "launcher"):
+        for panel_id in (
+            "scope",
+            "thermal",
+            "power",
+            "power_graph",
+            "controls",
+            "launcher",
+            "jobs",
+        ):
             dock = self.panels.dock(panel_id)
             if dock is not None:
                 menu.addAction(dock.toggleViewAction())
