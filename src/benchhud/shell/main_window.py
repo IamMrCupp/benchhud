@@ -19,6 +19,7 @@ from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
 
 from benchhud import __version__
+from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
@@ -53,8 +54,23 @@ SourceFactory = Callable[[], FrameSource]
 
 
 def _default_scope_source() -> FrameSource:
-    """Dev fallback until the bench camera lands: a synthetic scope feed."""
+    """Dev fallback when no scope device is configured: a synthetic feed."""
     return SyntheticFrameSource(960, 540)
+
+
+def scope_source_for(device: str) -> FrameSource:
+    """Open the configured scope camera, falling back to the synthetic feed.
+
+    A camera that is unplugged, busy (UVC allows one reader), or simply wrong in
+    the config must leave the shell usable — so we fall back rather than fail.
+    """
+    if not device.strip():
+        return _default_scope_source()
+    camera = CameraFrameSource(device)
+    if camera.is_open:
+        return camera
+    camera.close()
+    return _default_scope_source()
 
 
 class MainWindow(QMainWindow):
@@ -307,10 +323,19 @@ class MainWindow(QMainWindow):
 
     # --- capture preview -------------------------------------------------
 
-    def start_preview(self, source_factory: SourceFactory = _default_scope_source) -> None:
-        """Start the scope preview loop (idempotent)."""
+    def start_preview(self, source_factory: SourceFactory | None = None) -> None:
+        """Start the scope preview loop (idempotent).
+
+        Without a factory, opens the scope camera configured in Preferences.
+        """
         if self._pump is not None:
             return
+        if source_factory is None:
+            device = self._config.panels.scope.device
+
+            def source_factory() -> FrameSource:
+                return scope_source_for(device)
+
         reader = LatestFrameReader(source_factory())
         self._pump = FramePump(reader, consumers=[self._on_scope_frame])
         self._pump.start()
