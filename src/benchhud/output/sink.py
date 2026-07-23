@@ -1,21 +1,23 @@
 """Output sinks for the composited frame.
 
 Consumers depend on the :class:`OutputSink` protocol. :class:`FakeSink` records
-frames in memory for tests; :class:`VirtualCamSink` pushes to a virtual camera
-via ``pyvirtualcam`` (v4l2loopback on Linux, OBS virtual cam on macOS/Windows).
+frames in memory for tests; :class:`~benchhud.output.v4l2.V4l2LoopbackSink`
+writes them to a v4l2loopback device for OBS to capture.
 
-The virtual-cam *device* can only be opened on a machine with the backend
-installed (the Linux bench), so :class:`VirtualCamSink` takes an injectable
-``camera_factory`` — the BGR→RGB conversion is unit-tested with a fake camera,
-and the real device path is exercised on the bench.
+Virtual-camera output is Linux-only today. macOS and Windows are P2 portability
+targets and their backends need a non-GPL path — see ``docs/ARCHITECTURE.md``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+from benchhud.output.v4l2 import V4l2LoopbackSink
+
+log = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -61,46 +63,39 @@ class FakeSink:
         self.closed = True
 
 
-# A camera factory takes (width, height, fps) and returns an object exposing
-# ``send(rgb_frame)`` and ``close()`` — pyvirtualcam.Camera satisfies this.
-CameraFactory = Callable[[int, int, int], object]
+class NullSink:
+    """:class:`OutputSink` that discards frames, keeping only a count.
 
-
-class VirtualCamSink:
-    """Push frames to a virtual camera (pyvirtualcam / v4l2loopback).
-
-    ``pyvirtualcam`` expects RGB; OpenCV frames are BGR, so we swap channels on
-    the way out. Opening the device requires the platform backend, so the real
-    factory is only usable on the bench; tests inject a fake camera.
+    The fallback when virtual-camera output can't be opened: it runs for the
+    life of the app, so unlike :class:`FakeSink` it must not retain frames —
+    at 1280x720x15fps that would be ~41 MB/s of leak.
     """
 
-    def __init__(
-        self,
-        width: int = 1280,
-        height: int = 720,
-        fps: int = 15,
-        *,
-        camera_factory: CameraFactory | None = None,
-    ) -> None:
+    def __init__(self, width: int = 1280, height: int = 720) -> None:
         self._size = (width, height)
-        if camera_factory is None:
-            camera_factory = _default_camera_factory
-        self._camera = camera_factory(width, height, fps)
+        self.frame_count = 0
+        self.closed = False
 
     @property
     def size(self) -> tuple[int, int]:
         return self._size
 
     def send(self, frame: np.ndarray) -> None:
-        rgb = np.ascontiguousarray(frame[:, :, ::-1])  # BGR -> RGB
-        self._camera.send(rgb)
+        self.frame_count += 1
 
     def close(self) -> None:
-        self._camera.close()
+        self.closed = True
 
 
-def _default_camera_factory(width: int, height: int, fps: int) -> object:
-    """Open a real ``pyvirtualcam.Camera`` (needs a platform backend)."""
-    import pyvirtualcam
+def open_output_sink(device: str, width: int, height: int) -> OutputSink:
+    """Open the loopback output, falling back to a discarding sink.
 
-    return pyvirtualcam.Camera(width=width, height=height, fps=fps)
+    A missing ``v4l2loopback`` module, a wrong device path, or another writer
+    already holding the node must leave the HUD usable — the bench still works
+    without the OBS feed — so we log and fall back rather than fail.
+    """
+    try:
+        return V4l2LoopbackSink(device, width, height)
+    except (OSError, RuntimeError) as exc:
+        log.warning("virtual-camera output unavailable on %s: %s", device, exc)
+        return NullSink(width, height)

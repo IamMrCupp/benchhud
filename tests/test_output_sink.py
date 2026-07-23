@@ -6,24 +6,7 @@ import numpy as np
 import pytest
 
 from benchhud.capture.frame_source import SyntheticFrameSource
-from benchhud.output.sink import FakeSink, OutputSink, VirtualCamSink
-
-
-class _FakeCamera:
-    """Stand-in for pyvirtualcam.Camera: records the RGB frames it's sent."""
-
-    def __init__(self, width: int, height: int, fps: int) -> None:
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.sent: list[np.ndarray] = []
-        self.closed = False
-
-    def send(self, frame: np.ndarray) -> None:
-        self.sent.append(frame)
-
-    def close(self) -> None:
-        self.closed = True
+from benchhud.output.sink import FakeSink, NullSink, OutputSink, open_output_sink
 
 
 def test_fake_sink_satisfies_protocol() -> None:
@@ -44,30 +27,26 @@ def test_fake_sink_send_after_close_raises() -> None:
         sink.send(np.zeros((4, 4, 3), dtype=np.uint8))
 
 
-def test_virtualcam_satisfies_protocol() -> None:
-    sink = VirtualCamSink(64, 48, camera_factory=_FakeCamera)
-    assert isinstance(sink, OutputSink)
+def test_null_sink_satisfies_protocol() -> None:
+    assert isinstance(NullSink(), OutputSink)
 
 
-def test_virtualcam_converts_bgr_to_rgb() -> None:
-    cam = _FakeCamera(2, 2, 15)
-    sink = VirtualCamSink(2, 2, camera_factory=lambda w, h, f: cam)
+def test_null_sink_counts_without_retaining() -> None:
+    """The live fallback runs for hours — it must not accumulate frames."""
+    sink = NullSink(64, 48)
+    for _ in range(3):
+        sink.send(np.zeros((48, 64, 3), dtype=np.uint8))
 
-    frame = np.zeros((2, 2, 3), dtype=np.uint8)
-    frame[:, :, 0] = 255  # pure blue in BGR
-    sink.send(frame)
-
-    assert len(cam.sent) == 1
-    rgb = cam.sent[0]
-    # BGR blue -> RGB (0, 0, 255)
-    assert tuple(rgb[0, 0]) == (0, 0, 255)
+    assert sink.frame_count == 3
+    assert not any(isinstance(v, list) for v in vars(sink).values())
 
 
-def test_virtualcam_close_closes_camera() -> None:
-    cam = _FakeCamera(2, 2, 15)
-    sink = VirtualCamSink(2, 2, camera_factory=lambda w, h, f: cam)
-    sink.close()
-    assert cam.closed is True
+def test_open_output_sink_falls_back_when_device_missing() -> None:
+    """No v4l2loopback (every dev machine, and CI) must not break the HUD."""
+    sink = open_output_sink("/dev/does-not-exist", 64, 48)
+
+    assert isinstance(sink, NullSink)
+    assert sink.size == (64, 48)
 
 
 def test_frame_flows_source_to_sink() -> None:

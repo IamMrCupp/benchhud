@@ -46,6 +46,8 @@ class ShellConfig:
 @dataclass
 class OutputConfig:
     enabled: bool = False
+    # The v4l2loopback node benchhud writes the composite to; OBS reads it.
+    device: str = "/dev/video10"
     width: int = 1280
     height: int = 720
     fps: int = 15
@@ -128,7 +130,11 @@ class Config:
         )
         _apply(cfg.shell.logging, shell_d.get("logging", {}), ("level",))
 
-        _apply(cfg.output, data.get("output", {}), ("enabled", "width", "height", "fps"))
+        _apply(
+            cfg.output,
+            data.get("output", {}),
+            ("enabled", "device", "width", "height", "fps"),
+        )
 
         panels_d = data.get("panels", {})
         _apply(cfg.panels.scope, panels_d.get("scope", {}), ("enabled", "device"))

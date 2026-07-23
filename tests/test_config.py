@@ -14,6 +14,7 @@ def test_defaults() -> None:
     assert c.shell.window_width == 1200
     assert c.shell.logging.level == "INFO"
     assert c.panels.scope.device == "/dev/video4"
+    assert c.output.device == "/dev/video10"
     assert c.panels.telemetry.baud == 115200
     assert c.tools == []
 
@@ -24,6 +25,7 @@ def test_round_trip(tmp_path) -> None:
     c.shell.window_height = 768
     c.shell.logging.level = "DEBUG"
     c.output.enabled = True
+    c.output.device = "/dev/video11"
     c.panels.thermal.enabled = True
     c.tools = [cfg.ToolConfig(name="OpenBoardView", command="openboardview")]
 
