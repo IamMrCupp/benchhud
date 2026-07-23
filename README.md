@@ -22,8 +22,8 @@ the scope" and turned into the bench's command center.
   burned into the stream.
 - **Tool launcher** — opens the repair tools you already use (OpenBoardView,
   minipro-gui, whatever's in your config) straight from the HUD.
-- **Virtual camera out** — the composite goes to a v4l2loopback / OBS virtual
-  cam, so OBS treats it as a normal source.
+- **Virtual camera out** — the composite is written to a v4l2loopback device, so
+  OBS treats it as a normal camera source.
 
 Everything lives in dockable panels — arrange the bench the way you work, and the
 layout sticks across restarts.
@@ -44,8 +44,9 @@ makes "that pad is 78°C" possible instead of just a pretty picture.
 ## Platforms
 
 Linux-first — that's where the bench lives and where v4l2loopback does the
-virtual-cam work. The code stays portable (macOS and Windows go through the OBS
-virtual camera), but Linux is the tested target for now.
+virtual-cam work. The rest of the app is portable and runs on macOS today, but
+virtual-camera output is Linux-only: it writes to a loopback device directly.
+macOS and Windows output will need their own backend.
 
 ## Hardware
 

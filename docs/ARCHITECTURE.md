@@ -15,7 +15,9 @@ bench without touching any consumer.
   `telemetry`, `controls`, `launcher`.
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`, threaded
   `LatestFrameReader` (latest-frame buffer), `FramePump` (Qt-free dispatch).
-- **`output/`** — `OutputSink` protocol, `FakeSink`, `VirtualCamSink` (pyvirtualcam).
+- **`output/`** — `OutputSink` protocol, `FakeSink`, `NullSink`, and
+  `V4l2LoopbackSink` (`v4l2.py`: writes RGB24 straight to a v4l2loopback node
+  via `VIDIOC_S_FMT` + `os.write`, stdlib only).
 - **`instruments/`** — `SerialPort` / `LineInstrument` seam, `OwonSpm8104` driver,
   `read_snapshot` (resilient telemetry).
 - **`thermal/`** — `convert` (Y16→°C, Sipeed spec), `analyze` (hotspot / threshold
@@ -32,7 +34,7 @@ implementing the real side of each — no consumer changes.
 | Seam | Protocol | Tested with | Bench implementation |
 |---|---|---|---|
 | Camera in | `capture.FrameSource` | `SyntheticFrameSource` | `CameraFrameSource` over `cv2.VideoCapture(/dev/videoN)` |
-| Virtual cam out | `output.OutputSink` | `FakeSink` | `VirtualCamSink` live (v4l2loopback backend present) |
+| Virtual cam out | `output.OutputSink` | `FakeSink`, fake `V4l2Device` | `V4l2LoopbackSink` on a real `/dev/videoN` loopback node |
 | Instrument | `instruments.SerialPort` | `FakeSerialPort` | `OwonSpm8104.open_device('/dev/ttyUSB0')` |
 | Thermal frames | `FrameSource` (raw Y16) | synthetic °C arrays | Y16 capture → `thermal.convert.y16_to_celsius` |
 
@@ -47,8 +49,13 @@ When the workspace is on the Linux box:
    `'Y16 '`, trailing space), run `y16_to_celsius`, feed `ThermalPanel` and the
    compositor. Watch for the periodic NUC shutter stall — a brief freeze is
    normal, not an error.
-3. **`VirtualCamSink` live** — confirm it opens against v4l2loopback and shows up
-   as a source in OBS; pace to the slower feed.
+3. **`V4l2LoopbackSink` live** — `sudo modprobe v4l2loopback exclusive_caps=1
+   card_label=benchhud` (creates `/dev/video10` unless `video_nr` says otherwise;
+   `exclusive_caps=1` is what makes OBS list it). Point `output.device` at the
+   node, confirm the sink opens and OBS sees the composite; pace to the slower
+   feed. If the driver adjusts the format, `open_loopback_device` raises rather
+   than writing a desynced stream — match `output.width`/`height` to what it
+   grants.
 4. **`OwonSpm8104.open_device`** — poll on a timer, push `read_snapshot` into
    `TelemetryPanel`. 115200 baud, newline-terminated SCPI.
 5. **Controls → live compose** — connect `ControlsPanel.changed` to a re-render of
@@ -70,3 +77,7 @@ When the workspace is on the Linux box:
   separately, which is why the whole UI is testable offscreen.
 - **The compositor is pure array math.** Given a scope frame, a °C array, a
   transform, and settings, it's deterministic — no hardware, no globals.
+- **Kernel interfaces are packed by hand, not wrapped.** `output/v4l2.py` talks to
+  v4l2loopback through stdlib `fcntl`/`struct` rather than a third-party binding.
+  That keeps the struct layout under test on any OS — and keeps the licensing of
+  benchhud's own output path unencumbered.

@@ -15,9 +15,12 @@ window_height = 900
 level = "INFO" # DEBUG | INFO | WARNING | ERROR
 
 [output]
-# Composited virtual-camera output (pyvirtualcam; v4l2loopback on Linux,
-# OBS virtual cam on macOS/Windows). Off until the pipeline lands (Phase 1).
+# Composited virtual-camera output. Linux only: benchhud writes RGB24 frames
+# straight to a v4l2loopback node, which OBS then reads as a camera.
+#   sudo modprobe v4l2loopback exclusive_caps=1 card_label=benchhud
+# Off until the pipeline lands (Phase 1).
 enabled = false
+device = "/dev/video10" # the loopback node, not a real camera
 width = 1280
 height = 720
 fps = 15 # paced to the slower feed; thermal is 25 fps, see research.md §4
