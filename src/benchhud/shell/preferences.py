@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLineEdit,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -102,6 +103,8 @@ class PreferencesDialog(QDialog):
         out = self._config.output
         self.output_enabled = QCheckBox("Enable virtual camera output")
         self.output_enabled.setChecked(out.enabled)
+        self.output_device = QLineEdit(out.device)
+        self.output_device.setPlaceholderText("/dev/video10")
         self.output_width = _spin(1, 7680, out.width)
         self.output_height = _spin(1, 4320, out.height)
         self.output_fps = _spin(1, 120, out.fps)
@@ -109,6 +112,7 @@ class PreferencesDialog(QDialog):
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow(self.output_enabled)
+        form.addRow("Loopback device", self.output_device)
         form.addRow("Width", self.output_width)
         form.addRow("Height", self.output_height)
         form.addRow("FPS", self.output_fps)
@@ -216,6 +220,7 @@ class PreferencesDialog(QDialog):
         self._config.panels.telemetry.port = self.serial_combo.currentData() or ""
 
         self._config.output.enabled = self.output_enabled.isChecked()
+        self._config.output.device = self.output_device.text().strip()
         self._config.output.width = self.output_width.value()
         self._config.output.height = self.output_height.value()
         self._config.output.fps = self.output_fps.value()

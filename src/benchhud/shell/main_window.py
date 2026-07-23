@@ -12,8 +12,10 @@ shell animates end to end with no camera.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 
+import cv2
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
@@ -33,6 +35,7 @@ from benchhud.devices.discovery import (
 )
 from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.store import JobStore, default_db_path
+from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.composite import colorize, compose
 from benchhud.shell.about import about_html
 from benchhud.shell.composite_view import CompositeView
@@ -56,6 +59,10 @@ _PREVIEW_FPS = 30
 LAYOUT_VERSION = 4
 
 SourceFactory = Callable[[], FrameSource]
+#: Takes ``(device, width, height)`` and returns an open :class:`OutputSink`.
+SinkFactory = Callable[[str, int, int], OutputSink]
+
+log = logging.getLogger(__name__)
 
 
 def _default_scope_source() -> FrameSource:
@@ -98,6 +105,7 @@ class MainWindow(QMainWindow):
         self._job_store = job_store or JobStore(default_db_path())
         self._pump: FramePump | None = None
         self._timer: QTimer | None = None
+        self._sink: OutputSink | None = None
         self._demo: DemoSignal | None = None
         self._demo_timer: QTimer | None = None
         self._demo_t = 0.0
@@ -272,6 +280,7 @@ class MainWindow(QMainWindow):
             self._config, self._scanner, on_save=self._on_persist, parent=self
         )
         dialog.accepted.connect(self._refresh_status)
+        dialog.accepted.connect(self.restart_output)
         dialog.open()
         return dialog
 
@@ -303,18 +312,21 @@ class MainWindow(QMainWindow):
         if scope is None and temps is None:
             return
         if temps is None:
-            self.composite_view.show_frame(scope)
+            self._show_composite(scope)
             return
 
         settings = self.controls_panel.current_settings()
         if scope is None:
             # Thermal only — show it colourised on its own.
-            self.composite_view.show_frame(
-                colorize(temps, settings.tmin, settings.tmax, settings.colormap)
-            )
+            self._show_composite(colorize(temps, settings.tmin, settings.tmax, settings.colormap))
             return
         transform = self.controls_panel.current_transform()
-        self.composite_view.show_frame(compose(scope, temps, transform, settings))
+        self._show_composite(compose(scope, temps, transform, settings))
+
+    def _show_composite(self, frame) -> None:
+        """Put one composed frame on screen and, if open, out to the sink."""
+        self.composite_view.show_frame(frame)
+        self._publish_frame(frame)
 
     def capture_context(self) -> CaptureContext:
         """Current bench state for capture-to-job: scope + thermal + readings."""
@@ -366,6 +378,57 @@ class MainWindow(QMainWindow):
             self._pump.stop()
             self._pump = None
 
+    # --- virtual-camera output -------------------------------------------
+
+    def start_output(self, sink_factory: SinkFactory | None = None) -> None:
+        """Open the virtual-camera sink, if output is enabled (idempotent).
+
+        A sink that won't open is not fatal — ``open_output_sink`` falls back to
+        a discarding sink and logs, so the HUD runs the same on a bench with no
+        loopback module as one with it.
+        """
+        if self._sink is not None or not self._config.output.enabled:
+            return
+        out = self._config.output
+        factory = sink_factory or open_output_sink
+        self._sink = factory(out.device, out.width, out.height)
+
+    def stop_output(self) -> None:
+        """Close the virtual-camera sink (idempotent)."""
+        if self._sink is None:
+            return
+        self._sink.close()
+        self._sink = None
+
+    def restart_output(self) -> None:
+        """Reopen the sink so a Preferences change takes effect immediately.
+
+        Cheap enough to do unconditionally — closing a loopback fd and opening
+        it again costs nothing, and it means the enable checkbox, device, and
+        geometry all apply without a restart.
+        """
+        self.stop_output()
+        self.start_output()
+
+    def _publish_frame(self, frame) -> None:
+        """Send one composed frame to the sink, resized to its geometry.
+
+        The sink's size is fixed by config; the composite is whatever size the
+        scope gives us, so it's scaled to fit. A sink that fails mid-stream (the
+        module unloaded, OBS gone) is dropped rather than raising into the Qt
+        slot on every frame.
+        """
+        if self._sink is None:
+            return
+        width, height = self._sink.size
+        if frame.shape[1] != width or frame.shape[0] != height:
+            frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
+        try:
+            self._sink.send(frame)
+        except Exception:
+            log.exception("virtual-camera output failed; closing the sink")
+            self.stop_output()
+
     # --- persistence -----------------------------------------------------
 
     def persist_into_config(self) -> None:
@@ -379,6 +442,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._stop_demo()
         self.stop_preview()
+        self.stop_output()
         self.persist_into_config()
         if self._on_persist is not None:
             self._on_persist(self._config)
