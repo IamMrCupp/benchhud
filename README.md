@@ -8,18 +8,27 @@ serial, and pushes the whole composite out as a virtual camera for OBS.
 It started as "I want to see which part is overheating without looking away from
 the scope" and turned into the bench's command center.
 
-> **Status: early.** The full application is built and tested off-hardware —
-> shell, capture pipeline, thermal math, overlay compositing, instrument driver,
-> live controls. The device-facing pieces (cameras, virtual cam, serial) sit
-> behind tested interfaces and get wired up on the bench. Not a daily driver yet.
+> **Status: early.** The application is built and tested off-hardware — shell,
+> capture pipeline, thermal math, overlay compositing, instrument driver, live
+> controls, repair log. Scope capture is verified against a real camera; the rest
+> of the device-facing work (thermal Y16, virtual cam, the OWON on serial) sits
+> behind tested interfaces and gets wired up on the bench. Not a daily driver yet.
 
 ## What it does
 
 - **Scope + thermal fusion** — a thermal camera registered onto the microscope
   image, so the heat bloom sits over the actual component. Heatmap blend,
   threshold tint, or a marker with a live temperature label. This is the headline.
-- **Instrument telemetry** — live DMM / PSU readings over SCPI, on-screen and
-  burned into the stream.
+- **Instrument telemetry** — live DMM / PSU readings over SCPI in a bench-style
+  meter with peak-hold and a V/A/W trend graph, on-screen and optionally burned
+  into the stream.
+- **Repair jobs** — a local-first log of what's on the bench. One button attaches
+  the current scope frame, thermal frame, and meter readings to the job timeline,
+  and an over-current trip logs itself. Export a customer-facing report when it's
+  done. [More →](docs/JOBS.md)
+- **Ticket import** — optionally pull the open queue from a shop intake system
+  and drop a ticket onto the bench as a job. Runs standalone without one.
+  [More →](docs/INTAKE.md)
 - **Tool launcher** — opens the repair tools you already use (OpenBoardView,
   minipro-gui, whatever's in your config) straight from the HUD.
 - **Virtual camera out** — the composite is written to a v4l2loopback device, so
@@ -57,7 +66,8 @@ developed against:
 - **Thermal:** Sipeed T256s — 256×192 LWIR, raw Y16 for true temperatures.
 - **Instrument:** OWON SPM8104 (PSU + DMM) over SCPI serial.
 
-Set your device paths in `config.example.toml`.
+Set your device paths in `config.example.toml`, or pick them from dropdowns in
+**Preferences** once the app is running.
 
 ## Development
 
@@ -71,15 +81,24 @@ uv run ruff check  # lint
 ```
 
 The whole thing runs without hardware — the default source is a synthetic test
-pattern, so `uv run benchhud` opens a working shell you can poke at. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map, and
-[docs/BENCH-SETUP.md](docs/BENCH-SETUP.md) for bringing it up on the Linux bench
-(cameras, the OWON, and the v4l2loopback → OBS output).
+pattern, so `uv run benchhud` opens a working shell you can poke at.
+
+| Doc | What's in it |
+|---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, the hardware seams, design rules. |
+| [BENCH-SETUP.md](docs/BENCH-SETUP.md) | Bringing it up on the Linux bench — cameras, the OWON, v4l2loopback → OBS. |
+| [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
+| [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The Y16→°C conversion follows Sipeed's documented
-spec for the T256s; credit to them for the formula.
+**Being finalized.** [LICENSE](LICENSE) currently says MIT, which is where this
+started — but the licensing question is open again and the terms may change
+before any public release. Treat the current file as provisional rather than a
+grant to rely on.
+
+The Y16→°C conversion follows Sipeed's documented spec for the T256s; credit to
+them for the formula.
 
 The meter's segmented-LCD digits use the [DSEG](https://github.com/keshikan/DSEG)
 font by keshikan, bundled under the SIL Open Font License 1.1 — see

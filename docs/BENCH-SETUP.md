@@ -167,6 +167,10 @@ Bring-up checklist:
    thermal lands in the frame's top-left corner. Nudge scale/offset in the
    Controls dock until the bloom sits on the component; it's saved for next time.
 
+Once the hardware's up, the bench-workflow docs take over: [JOBS.md](JOBS.md)
+for the repair log (captures, automatic fault logging, reports) and
+[INTAKE.md](INTAKE.md) if you're pulling tickets from a shop intake system.
+
 ---
 
 ## Troubleshooting
