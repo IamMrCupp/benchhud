@@ -13,12 +13,22 @@ def test_null_sink_carries_no_reason_by_default() -> None:
     assert NullSink().reason == ""
 
 
-def test_non_linux_gets_an_explicit_platform_reason(monkeypatch) -> None:
-    monkeypatch.setattr("benchhud.output.sink.sys.platform", "darwin")
+def test_unsupported_platform_gets_an_explicit_reason(monkeypatch) -> None:
+    monkeypatch.setattr("benchhud.output.sink.sys.platform", "win32")
     sink = open_output_sink("/dev/video10", 320, 240)
     assert isinstance(sink, NullSink)
     assert sink.reason == UNSUPPORTED_PLATFORM
     assert sink.size == (320, 240)
+
+
+def test_macos_gets_its_own_actionable_reason(monkeypatch) -> None:
+    """macOS has a real backend path, so it must not say "unsupported"."""
+    monkeypatch.setattr("benchhud.output.sink.sys.platform", "darwin")
+    monkeypatch.setattr("benchhud.output.cmio.find_obs_sink", lambda: None)
+    sink = open_output_sink("/dev/video10", 320, 240)
+    assert isinstance(sink, NullSink)
+    assert sink.reason != UNSUPPORTED_PLATFORM
+    assert "OBS" in sink.reason
 
 
 def test_non_linux_sink_still_accepts_frames(monkeypatch) -> None:
