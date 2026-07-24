@@ -82,6 +82,13 @@ show_dmm = true        # the DMM header line
 base_url = "" # e.g. "http://intake.repair-bench:8000"
 token = ""
 
+[boards]
+# Local board-view library, searched recursively; files are named after the
+# board's part number (e.g. 820-00239.obv). Leave library_dir empty if you
+# don't keep one. Board files open in OpenBoardView via the Tools launcher.
+library_dir = ""                    # e.g. "~/boards"
+extensions = ["obv", "brd", "bdv"] # formats OpenBoardView reads
+
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
 [[tools]]

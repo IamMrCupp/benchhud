@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from benchhud.boards.library import DEFAULT_EXTENSIONS
 from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
 from benchhud.shell.qt_util import fit_combo_popup
@@ -67,6 +68,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_tools_tab(), "Tools")
         tabs.addTab(self._build_faults_tab(), "Faults")
         tabs.addTab(self._build_tickets_tab(), "Tickets")
+        tabs.addTab(self._build_boards_tab(), "Boards")
         tabs.addTab(self._build_logging_tab(), "Logging")
 
         buttons = QDialogButtonBox(
@@ -249,6 +251,31 @@ class PreferencesDialog(QDialog):
         form.addRow("API token", self.intake_token)
         return widget
 
+    def _build_boards_tab(self) -> QWidget:
+        boards = self._config.boards
+        self.boards_library_dir = QLineEdit(boards.library_dir)
+        self.boards_library_dir.setPlaceholderText("~/boards")
+        self.boards_browse_button = QPushButton("Browse…")
+        self.boards_browse_button.clicked.connect(self.browse_for_board_library)
+        self.boards_extensions = QLineEdit(", ".join(boards.extensions))
+        self.boards_extensions.setToolTip("Comma-separated board-view formats")
+
+        row = QHBoxLayout()
+        row.addWidget(self.boards_library_dir, stretch=1)
+        row.addWidget(self.boards_browse_button)
+
+        widget = QWidget()
+        form = QFormLayout(widget)
+        form.addRow("Board library", row)
+        form.addRow("Formats", self.boards_extensions)
+        return widget
+
+    def browse_for_board_library(self) -> None:
+        """Pick the board-view library directory."""
+        path = QFileDialog.getExistingDirectory(self, "Select the board library folder")
+        if path:
+            self.boards_library_dir.setText(path)
+
     def _build_logging_tab(self) -> QWidget:
         self.logging_combo = QComboBox()
         self.logging_combo.addItems(_LOG_LEVELS)
@@ -288,6 +315,14 @@ class PreferencesDialog(QDialog):
 
         self._config.intake.base_url = self.intake_base_url.text().strip()
         self._config.intake.token = self.intake_token.text().strip()
+
+        self._config.boards.library_dir = self.boards_library_dir.text().strip()
+        extensions = [
+            part.strip().lstrip(".").lower()
+            for part in self.boards_extensions.text().split(",")
+            if part.strip()
+        ]
+        self._config.boards.extensions = extensions or list(DEFAULT_EXTENSIONS)
 
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()
