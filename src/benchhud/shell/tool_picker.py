@@ -51,7 +51,7 @@ class ToolPickerDialog(QDialog):
 
         found = sum(1 for d in self._detected if d.found)
         summary = QLabel(
-            f"Found {found} of {len(self._detected)} known tools. "
+            f"Found {found} of {len(self._detected)} known tools for this platform. "
             "Tick the ones to add to the Tools panel."
         )
         summary.setWordWrap(True)
