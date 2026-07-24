@@ -11,10 +11,13 @@ current scope/thermal frame and live meter readings as timeline entries.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -28,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from benchhud.jobs.capture import CaptureContext, capture_to_job
+from benchhud.jobs.report import export_report
 from benchhud.jobs.store import JobStatus, JobStore
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_util import fit_combo_popup
@@ -38,6 +42,17 @@ CaptureProvider = Callable[[], CaptureContext | None]
 def _short_stamp(iso: str) -> str:
     """``2026-07-22T03:37:53+00:00`` → ``2026-07-22 03:37`` (keeps notes narrow)."""
     return iso[:16].replace("T", " ")
+
+
+def _slug(text: str) -> str:
+    """A filename-safe slug for the export default name (dashes collapsed)."""
+    out: list[str] = []
+    for char in text.lower():
+        if char.isalnum():
+            out.append(char)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-") or "job"
 
 
 class JobsPanel(Panel):
@@ -94,6 +109,14 @@ class JobsPanel(Panel):
         fit_combo_popup(self.status_combo)
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save_current)
+        self.export_button = QPushButton("Export report…")
+        self.export_button.setToolTip("Save a customer-facing repair report (Markdown)")
+        self.export_button.clicked.connect(self.export_report)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.save_button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.export_button)
 
         widget = QWidget()
         form = QFormLayout(widget)
@@ -102,7 +125,7 @@ class JobsPanel(Panel):
         form.addRow("Customer", self.customer_edit)
         form.addRow("Symptoms", self.symptoms_edit)
         form.addRow("Status", self.status_combo)
-        form.addRow("", self.save_button)
+        form.addRow("", buttons)
         return widget
 
     def _build_notes(self) -> QWidget:
@@ -179,6 +202,29 @@ class JobsPanel(Panel):
             return
         capture_to_job(self._store, job_id, context)
         self.refresh_notes()
+
+    def export_report(self) -> None:
+        """Prompt for a path and write the selected job's repair report."""
+        job_id = self.selected_job_id()
+        if job_id is None:
+            return
+        job = self._store.get_job(job_id)
+        suggested = f"repair-report-{_slug(job.device) if job else job_id}.md"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export repair report", suggested, "Markdown (*.md)"
+        )
+        if path:
+            self.write_report(job_id, path)
+
+    def write_report(self, job_id: int, path: str) -> bool:
+        """Render the job's report to ``path``. Returns False if it doesn't exist."""
+        markdown = export_report(
+            self._store, job_id, generated_at=datetime.now(UTC).isoformat(timespec="seconds")
+        )
+        if markdown is None:
+            return False
+        Path(path).write_text(markdown, encoding="utf-8")
+        return True
 
     # --- state -----------------------------------------------------------
 

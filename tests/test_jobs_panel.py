@@ -122,3 +122,40 @@ def test_note_timestamp_is_shortened(qtbot, store) -> None:
     from benchhud.shell.panels.jobs import _short_stamp
 
     assert _short_stamp("2026-07-22T03:37:53+00:00") == "2026-07-22 03:37"
+
+
+def test_write_report_creates_a_markdown_file(qtbot, store, tmp_path) -> None:
+    job = store.create_job("board X", symptoms="no boot")
+    store.add_note(job.id, "checked rails")
+    panel = JobsPanel(store)
+    qtbot.addWidget(panel)
+
+    out = tmp_path / "report.md"
+    assert panel.write_report(job.id, str(out)) is True
+
+    text = out.read_text(encoding="utf-8")
+    assert "# Repair Report" in text
+    assert "board X" in text
+    assert "checked rails" in text
+
+
+def test_write_report_missing_job_returns_false(qtbot, store, tmp_path) -> None:
+    panel = JobsPanel(store)
+    qtbot.addWidget(panel)
+    out = tmp_path / "nope.md"
+
+    assert panel.write_report(999, str(out)) is False
+    assert not out.exists()
+
+
+def test_export_button_present(qtbot, store) -> None:
+    panel = JobsPanel(store)
+    qtbot.addWidget(panel)
+    assert panel.export_button.text() == "Export report…"
+
+
+def test_slug_is_filename_safe() -> None:
+    from benchhud.shell.panels.jobs import _slug
+
+    assert _slug("iPhone 12 / logic board") == "iphone-12-logic-board"
+    assert _slug("") == "job"
