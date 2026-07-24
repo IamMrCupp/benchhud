@@ -140,6 +140,15 @@ class IntakeConfig:
 
 
 @dataclass
+class BoardsConfig:
+    """Local board-view library (empty directory → no library configured)."""
+
+    library_dir: str = ""
+    # Board-view formats OpenBoardView reads.
+    extensions: list[str] = field(default_factory=lambda: ["obv", "brd", "bdv"])
+
+
+@dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -149,6 +158,7 @@ class Config:
     faults: FaultConfig = field(default_factory=FaultConfig)
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
+    boards: BoardsConfig = field(default_factory=BoardsConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -203,6 +213,11 @@ class Config:
             cfg.intake,
             data.get("intake", {}),
             ("base_url", "token"),
+        )
+        _apply(
+            cfg.boards,
+            data.get("boards", {}),
+            ("library_dir", "extensions"),
         )
 
         cfg.tools = [

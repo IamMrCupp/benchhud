@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     status     TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    external_ref TEXT
+    external_ref TEXT,
+    board_id TEXT
 );
 CREATE TABLE IF NOT EXISTS job_notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +44,7 @@ CREATE TABLE IF NOT EXISTS job_notes (
 """
 
 # Fields a caller may update on a job (whitelist — never interpolate raw input).
-_UPDATABLE = ("device", "serial", "customer", "symptoms", "status", "external_ref")
+_UPDATABLE = ("device", "serial", "customer", "symptoms", "status", "external_ref", "board_id")
 
 
 class JobStatus(StrEnum):
@@ -66,6 +67,9 @@ class Job:
     updated_at: str
     # Reference to a ticket in an external shop system, when linked.
     external_ref: str | None = None
+    # The board's part number (e.g. 820-00239) — non-PII, and the key the board
+    # library resolves against. Stored locally so it works with intake offline.
+    board_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,7 @@ class JobStore:
         """Bring an older database up to the current schema (additive only)."""
         self._add_column_if_missing("job_notes", "attachment", "TEXT")
         self._add_column_if_missing("jobs", "external_ref", "TEXT")
+        self._add_column_if_missing("jobs", "board_id", "TEXT")
 
     def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
         rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -136,12 +141,14 @@ class JobStore:
         symptoms: str = "",
         status: str = JobStatus.OPEN,
         external_ref: str | None = None,
+        board_id: str | None = None,
     ) -> Job:
         stamp = self._now()
         cur = self._conn.execute(
             "INSERT INTO jobs (device, serial, customer, symptoms, status,"
-            " created_at, updated_at, external_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (device, serial, customer, symptoms, str(status), stamp, stamp, external_ref),
+            " created_at, updated_at, external_ref, board_id)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (device, serial, customer, symptoms, str(status), stamp, stamp, external_ref, board_id),
         )
         self._conn.commit()
         job = self.get_job(int(cur.lastrowid))
@@ -259,4 +266,5 @@ def _job(row: sqlite3.Row) -> Job:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         external_ref=row["external_ref"],
+        board_id=row["board_id"],
     )
