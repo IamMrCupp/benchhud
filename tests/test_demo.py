@@ -55,6 +55,7 @@ def test_demo_tick_feeds_panels(qtbot) -> None:
     try:
         window._demo_tick()
         assert window.thermal_panel.has_frame is True
-        assert "V" in window.power_panel.voltage_text
+        # the meter got a real reading, not the placeholder
+        assert any(c.isdigit() for c in window.power_panel.voltage_text)
     finally:
         window.set_demo_mode(False)

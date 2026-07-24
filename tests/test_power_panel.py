@@ -29,16 +29,17 @@ def test_add_reading_updates_readouts(qtbot) -> None:
     panel = PowerPanel()
     qtbot.addWidget(panel)
     panel.add_reading(voltage=12.0, current=1.5)
-    assert "12.00 V" in panel.voltage_text
-    assert "1.50 A" in panel.current_text
-    assert "18.0 W" in panel.power_text  # 12 * 1.5
+    # Digits only — the unit is in the cell caption, not the LCD value.
+    assert panel.voltage_text == "12.00"
+    assert panel.current_text == "1.50"
+    assert panel.power_text == "18.0"  # 12 * 1.5
 
 
 def test_update_from_snapshot_with_psu(qtbot) -> None:
     panel = PowerPanel()
     qtbot.addWidget(panel)
     panel.update_from_snapshot(TelemetrySnapshot(voltage=5.0, current=2.0))
-    assert "10.0 W" in panel.power_text
+    assert panel.power_text == "10.0"
 
 
 def test_update_from_snapshot_ignores_missing_psu(qtbot) -> None:
@@ -78,9 +79,9 @@ def test_max_current_peak_hold_and_reset(qtbot) -> None:
     panel.add_reading(4.2, 0.5)
     panel.add_reading(4.2, 1.9)  # peak
     panel.add_reading(4.2, 0.3)  # falls back, but max holds
-    assert "1.90 A" in panel.max_current_text
+    assert panel.max_current_text == "1.90"
     panel.reset_max()
-    assert "0.00 A" in panel.max_current_text
+    assert panel.max_current_text == "0.00"
 
 
 def test_shell_hosts_power_panel_with_embedded_chart(qtbot) -> None:
@@ -97,7 +98,7 @@ def test_meter_embeds_the_trend_chart(qtbot) -> None:
     assert panel.chart.v_series.count() == 0
     panel.update_from_snapshot(TelemetrySnapshot(voltage=12.0, current=1.5), t=0.0)
     # one entry point updates both the numerics and the embedded chart
-    assert "12.00 V" in panel.voltage_text
+    assert panel.voltage_text == "12.00"
     assert panel.chart.v_series.count() == 1
     assert panel.chart.w_series.count() == 1
 
@@ -110,9 +111,11 @@ def test_meter_cells_fit_their_widest_reading(qtbot):
 
     panel = PowerPanel()
     qtbot.addWidget(panel)
+    # Measured in a plain proportional face; the real cell uses the wider LCD
+    # font, so the cell must be at least this wide for the digits-only value.
     font = QFont()
     font.setPointSize(16)
     font.setBold(True)
-    needed = QFontMetrics(font).horizontalAdvance("-000.00 W")
+    needed = QFontMetrics(font).horizontalAdvance("-000.00")
     assert cell_min_width() > needed
     assert panel.minimumWidth() >= 2 * cell_min_width()
