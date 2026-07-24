@@ -92,10 +92,13 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 
 ## License
 
-**Being finalized.** [LICENSE](LICENSE) currently says MIT, which is where this
-started — but the licensing question is open again and the terms may change
-before any public release. Treat the current file as provisional rather than a
-grant to rely on.
+Source-available under the [PolyForm Small Business License 1.0.0](https://polyformproject.org/licenses/small-business/1.0.0/)
+— see [LICENSE](LICENSE). Free to use, modify and distribute if your company has
+fewer than 100 people and under $1M in annual revenue, which covers personal use
+and most small shops. Above that, a commercial licence is required — get in touch.
+
+Note this is *source-available*, not open source: the code is readable and
+freely usable within those limits, but it isn't an OSI-approved licence.
 
 The Y16→°C conversion follows Sipeed's documented spec for the T256s; credit to
 them for the formula.
