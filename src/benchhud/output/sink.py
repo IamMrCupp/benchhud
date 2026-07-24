@@ -98,9 +98,7 @@ class NullSink:
 UNSUPPORTED_PLATFORM = "virtual-camera output is not available on this platform yet"
 
 #: macOS has the plumbing but frame delivery isn't wired up yet (Phase 12 §A.2).
-MACOS_NOT_WIRED = (
-    "OBS Virtual Camera found, but macOS frame delivery isn't wired up yet"
-)
+MACOS_NOT_WIRED = "OBS Virtual Camera found, but macOS frame delivery isn't wired up yet"
 
 
 def _macos_reason() -> str:
