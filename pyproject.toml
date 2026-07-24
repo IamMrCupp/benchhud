@@ -4,7 +4,8 @@ dynamic = ["version"]
 description = "A microsoldering / board-repair bench HUD: fuses scope + thermal video with instrument telemetry and outputs a virtual camera for OBS."
 readme = "README.md"
 requires-python = ">=3.12"
-license = "MIT"
+license = "PolyForm-Small-Business-1.0.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Aaron Cupp" }]
 keywords = ["microsoldering", "board-repair", "thermal", "hud", "obs", "opencv"]
 

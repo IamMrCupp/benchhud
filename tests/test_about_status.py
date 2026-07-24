@@ -12,7 +12,7 @@ def test_about_html_has_version_and_repo() -> None:
     html = about_html()
     assert __version__ in html
     assert "github.com/IamMrCupp/benchhud" in html
-    assert "MIT" in html
+    assert "PolyForm Small Business" in html
 
 
 def test_window_has_about_action(qtbot) -> None:
