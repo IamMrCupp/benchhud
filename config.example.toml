@@ -66,6 +66,15 @@ rotation_deg = 0.0
 auto_log = false
 current_threshold_a = 1.0
 
+[telemetry_overlay]
+# Burn the live power/DMM readings into the composited (streamed) frame — the
+# on-stream copy of the meter dock, in the same 7-segment LCD style. Off by
+# default (the app shows the meter locally regardless); flip on when streaming.
+enabled = false
+corner = "bottom-left" # bottom-left | bottom-right | top-left | top-right
+show_psu = true        # VOLTAGE / CURRENT / POWER / MAX CURRENT
+show_dmm = true        # the DMM header line
+
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
 [[tools]]

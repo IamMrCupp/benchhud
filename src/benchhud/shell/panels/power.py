@@ -210,6 +210,10 @@ class PowerPanel(Panel):
     def dmm_unit_text(self) -> str:
         return self._dmm_unit.text()
 
+    @property
+    def dmm_mode_text(self) -> str:
+        return self._dmm_mode.text()
+
 
 # Point sizes must track the QSS rules above — they're what the labels actually
 # render at, and we size the cells from them so digits are never clipped.
