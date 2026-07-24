@@ -159,3 +159,41 @@ def test_slug_is_filename_safe() -> None:
 
     assert _slug("iPhone 12 / logic board") == "iphone-12-logic-board"
     assert _slug("") == "job"
+
+
+def test_history_hint_hidden_without_prior_jobs(qtbot, store) -> None:
+    store.create_job("solo board")
+    panel = JobsPanel(store)
+    qtbot.addWidget(panel)
+    panel.select_job(1)
+
+    assert panel.history_label.isHidden()
+    assert panel.history_label.text() == ""
+
+
+def test_history_hint_shown_for_repeat_board(qtbot, store) -> None:
+    a = store.create_job("iPhone 12")
+    store.update_job(a.id, serial="RX9")
+    b = store.create_job("iPhone 12")
+    store.update_job(b.id, serial="RX9")
+
+    panel = JobsPanel(store)
+    qtbot.addWidget(panel)
+    panel.select_job(b.id)
+
+    assert not panel.history_label.isHidden()
+    text = panel.history_label.text()
+    assert "Seen before" in text
+    assert "serial" in text
+    assert f"#{a.id}" in text
+
+
+def test_history_hint_uses_model_basis_without_serial(qtbot, store) -> None:
+    store.create_job("MacBook A1707")
+    b = store.create_job("MacBook A1707")
+
+    panel = JobsPanel(store)
+    qtbot.addWidget(panel)
+    panel.select_job(b.id)
+
+    assert "model" in panel.history_label.text()

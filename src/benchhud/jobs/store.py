@@ -157,6 +157,29 @@ class JobStore:
         row = self._conn.execute("SELECT * FROM jobs WHERE external_ref = ?", (ref,)).fetchone()
         return _job(row) if row else None
 
+    def find_related(self, job: Job) -> list[Job]:
+        """Prior jobs for the same board — matched by serial, else by device.
+
+        "I've seen this board before": a non-empty serial is the strong signal
+        (same physical board), so it wins; otherwise fall back to the device
+        model. The job itself is always excluded. Newest first.
+        """
+        serial = job.serial.strip()
+        if serial:
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE id != ? AND serial != '' AND serial = ? ORDER BY id DESC",
+                (job.id, serial),
+            ).fetchall()
+        else:
+            device = job.device.strip()
+            if not device:
+                return []
+            rows = self._conn.execute(
+                "SELECT * FROM jobs WHERE id != ? AND device = ? ORDER BY id DESC",
+                (job.id, device),
+            ).fetchall()
+        return [_job(r) for r in rows]
+
     def list_jobs(self, status: str | None = None) -> list[Job]:
         """Jobs, newest first; optionally filtered by status."""
         if status is None:

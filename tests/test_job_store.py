@@ -167,3 +167,53 @@ def test_migrates_older_database(tmp_path) -> None:
         assert migrated.list_notes(1)[1].attachment == "/tmp/x.png"
     finally:
         migrated.close()
+
+
+# --- find_related (per-board history) ---------------------------------------
+
+
+def test_find_related_matches_by_serial(store) -> None:
+    a = store.create_job("iPhone 12")
+    store.update_job(a.id, serial="SNX1")
+    b = store.create_job("iPhone 12")
+    store.update_job(b.id, serial="SNX1")
+    other = store.create_job("iPhone 12")
+    store.update_job(other.id, serial="DIFFERENT")
+
+    related = store.find_related(store.get_job(b.id))
+
+    assert [j.id for j in related] == [a.id]  # same serial, excludes self and others
+
+
+def test_find_related_falls_back_to_device_when_no_serial(store) -> None:
+    a = store.create_job("MacBook A1707")
+    b = store.create_job("MacBook A1707")  # no serial on either
+    store.create_job("MacBook A1932")
+
+    related = store.find_related(store.get_job(b.id))
+
+    assert [j.id for j in related] == [a.id]
+
+
+def test_find_related_serial_beats_device(store) -> None:
+    """With a serial set, a different board of the same model must NOT match."""
+    same_model_no_serial = store.create_job("iPad")
+    target = store.create_job("iPad")
+    store.update_job(target.id, serial="ONLY-ME")
+
+    assert store.find_related(store.get_job(target.id)) == []
+    assert same_model_no_serial.id  # exists, but not matched (no shared serial)
+
+
+def test_find_related_empty_when_nothing_matches(store) -> None:
+    solo = store.create_job("unique board")
+    assert store.find_related(solo) == []
+
+
+def test_find_related_ignores_blank_device_and_serial(store) -> None:
+    """A job with neither device nor serial shouldn't sweep in every blank job."""
+    blank1 = store.create_job("x")
+    store.update_job(blank1.id, device="")
+    store.create_job("y")  # unrelated
+
+    assert store.find_related(store.get_job(blank1.id)) == []

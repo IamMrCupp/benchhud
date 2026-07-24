@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from benchhud.jobs.capture import CaptureContext, capture_to_job
 from benchhud.jobs.report import export_report
-from benchhud.jobs.store import JobStatus, JobStore
+from benchhud.jobs.store import Job, JobStatus, JobStore
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_util import fit_combo_popup
 
@@ -73,6 +73,11 @@ class JobsPanel(Panel):
         layout.addLayout(self._build_new_row())
         layout.addWidget(self.job_list_widget())
         layout.addWidget(self._build_detail())
+        self.history_label = QLabel()
+        self.history_label.setObjectName("JobHistoryHint")
+        self.history_label.setWordWrap(True)
+        self.history_label.setVisible(False)
+        layout.addWidget(self.history_label)
         layout.addWidget(QLabel("Notes"))
         layout.addWidget(self._build_notes())
 
@@ -265,6 +270,7 @@ class JobsPanel(Panel):
                 edit.clear()
             self.symptoms_edit.clear()
             self.notes_list.clear()
+            self._update_history(None)
             return
         self.device_edit.setText(job.device)
         self.serial_edit.setText(job.serial)
@@ -272,3 +278,23 @@ class JobsPanel(Panel):
         self.symptoms_edit.setPlainText(job.symptoms)
         self.status_combo.setCurrentText(job.status)
         self.refresh_notes()
+        self._update_history(job)
+
+    def _update_history(self, job: Job | None) -> None:
+        """Show a 'seen before' hint when prior jobs match this board."""
+        related = self._store.find_related(job) if job is not None else []
+        if not related:
+            self.history_label.clear()
+            self.history_label.setVisible(False)
+            return
+        basis = "serial" if job.serial.strip() else "model"
+        ids = ", ".join(f"#{j.id}" for j in related[:5])
+        more = "…" if len(related) > 5 else ""
+        plural = "job" if len(related) == 1 else "jobs"
+        self.history_label.setText(
+            f"⟲ Seen before — {len(related)} prior {plural} for this {basis} ({ids}{more})."
+        )
+        self.history_label.setToolTip(
+            "\n".join(f"#{j.id}  {j.device} — {j.status}" for j in related)
+        )
+        self.history_label.setVisible(True)
