@@ -33,7 +33,9 @@ from benchhud.devices.discovery import (
     SystemDeviceScanner,
     resolve_capture_device,
 )
+from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.jobs.capture import CaptureContext
+from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, default_db_path
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.composite import colorize, compose
@@ -110,6 +112,7 @@ class MainWindow(QMainWindow):
         self._demo_timer: QTimer | None = None
         self._demo_t = 0.0
         self._demo_scope = SyntheticFrameSource(960, 540)
+        self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
@@ -260,8 +263,35 @@ class MainWindow(QMainWindow):
         if self._pump is None:
             self.scope_panel.update_frame(self._demo_scope.read())
         self.thermal_panel.update_temps(self._demo.thermal())
-        self.power_panel.update_from_snapshot(snapshot, self._demo_t)
+        self.on_telemetry(snapshot, self._demo_t)
         self.render_composite()
+
+    def on_telemetry(self, snapshot: TelemetrySnapshot, t: float = 0.0) -> None:
+        """Single entry point for a telemetry poll (demo now, bench poll later).
+
+        Feeds the meter, then runs over-current fault detection so a shorted
+        board logs itself to the active job.
+        """
+        self.power_panel.update_from_snapshot(snapshot, t)
+        if snapshot.current is not None:
+            self._check_fault(snapshot.current)
+
+    def _check_fault(self, current: float) -> None:
+        """Auto-log an over-current fault to the selected job, when enabled."""
+        if not self._config.faults.auto_log:
+            return
+        event = self._fault_monitor.observe(current)
+        if event is None:
+            return
+        job_id = self.jobs_panel.selected_job_id()
+        if job_id is None:
+            return  # nothing selected to attach the fault to
+        self._job_store.add_note(job_id, format_fault_note(event))
+        self.jobs_panel.refresh_notes()
+
+    def reconfigure_faults(self) -> None:
+        """Rebuild the fault monitor after a Preferences change."""
+        self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
 
     def _stop_demo(self) -> None:
         if self._demo_timer is not None:
@@ -281,6 +311,7 @@ class MainWindow(QMainWindow):
         )
         dialog.accepted.connect(self._refresh_status)
         dialog.accepted.connect(self.restart_output)
+        dialog.accepted.connect(self.reconfigure_faults)
         dialog.open()
         return dialog
 

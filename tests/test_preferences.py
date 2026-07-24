@@ -103,6 +103,24 @@ def test_apply_writes_selections_to_config(qtbot) -> None:
     assert config.tools == [ToolConfig("minipro-gui", "minipro-gui")]
 
 
+def test_faults_tab_populates_and_applies(qtbot) -> None:
+    config = Config()
+    config.faults.auto_log = True
+    config.faults.current_threshold_a = 2.0
+    dialog = PreferencesDialog(config, _scanner())
+    qtbot.addWidget(dialog)
+    # populated from config
+    assert dialog.fault_auto_log.isChecked() is True
+    assert dialog.fault_threshold.value() == 2.0
+
+    dialog.fault_auto_log.setChecked(False)
+    dialog.fault_threshold.setValue(3.5)
+    dialog.apply_to_config()
+
+    assert config.faults.auto_log is False
+    assert config.faults.current_threshold_a == 3.5
+
+
 def test_accept_calls_on_save(qtbot) -> None:
     saved: list[Config] = []
     config = Config()
