@@ -109,12 +109,21 @@ class RegistrationConfig:
 
 
 @dataclass
+class FaultConfig:
+    """Auto-logging of over-current faults to the selected repair job."""
+
+    auto_log: bool = False
+    current_threshold_a: float = 1.0
+
+
+@dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     panels: PanelsConfig = field(default_factory=PanelsConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
+    faults: FaultConfig = field(default_factory=FaultConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -154,6 +163,11 @@ class Config:
             cfg.registration,
             data.get("registration", {}),
             ("scale", "offset_x", "offset_y", "rotation_deg"),
+        )
+        _apply(
+            cfg.faults,
+            data.get("faults", {}),
+            ("auto_log", "current_threshold_a"),
         )
 
         cfg.tools = [

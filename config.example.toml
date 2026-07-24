@@ -59,6 +59,13 @@ offset_x = 0.0
 offset_y = 0.0
 rotation_deg = 0.0
 
+[faults]
+# Auto-log an over-current fault to the selected repair job when the PSU current
+# first crosses the threshold (e.g. powering a shorted board). One note per
+# excursion, not per poll. Off by default; tune the threshold to the bench.
+auto_log = false
+current_threshold_a = 1.0
+
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
 [[tools]]

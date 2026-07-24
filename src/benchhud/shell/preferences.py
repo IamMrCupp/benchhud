@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -58,6 +59,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_devices_tab(), "Devices")
         tabs.addTab(self._build_output_tab(), "Output")
         tabs.addTab(self._build_tools_tab(), "Tools")
+        tabs.addTab(self._build_faults_tab(), "Faults")
         tabs.addTab(self._build_logging_tab(), "Logging")
 
         buttons = QDialogButtonBox(
@@ -194,6 +196,24 @@ class PreferencesDialog(QDialog):
 
     # --- Logging ---------------------------------------------------------
 
+    def _build_faults_tab(self) -> QWidget:
+        faults = self._config.faults
+        self.fault_auto_log = QCheckBox("Auto-log over-current faults to the selected job")
+        self.fault_auto_log.setChecked(faults.auto_log)
+        self.fault_threshold = QDoubleSpinBox()
+        self.fault_threshold.setRange(0.0, 100.0)
+        self.fault_threshold.setDecimals(2)
+        self.fault_threshold.setSingleStep(0.1)
+        self.fault_threshold.setSuffix(" A")
+        self.fault_threshold.setValue(faults.current_threshold_a)
+        self.fault_threshold.setToolTip("A note is logged when the current first crosses this")
+
+        widget = QWidget()
+        form = QFormLayout(widget)
+        form.addRow(self.fault_auto_log)
+        form.addRow("Current threshold", self.fault_threshold)
+        return widget
+
     def _build_logging_tab(self) -> QWidget:
         self.logging_combo = QComboBox()
         self.logging_combo.addItems(_LOG_LEVELS)
@@ -224,6 +244,9 @@ class PreferencesDialog(QDialog):
         self._config.output.width = self.output_width.value()
         self._config.output.height = self.output_height.value()
         self._config.output.fps = self.output_fps.value()
+
+        self._config.faults.auto_log = self.fault_auto_log.isChecked()
+        self._config.faults.current_threshold_a = self.fault_threshold.value()
 
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()
