@@ -40,6 +40,10 @@ implementing the real side of each — no consumer changes.
 
 ## Bench bring-up checklist
 
+The developer-facing view of the remaining work. For the operator's step-by-step
+(install, identify devices, load v4l2loopback, configure, verify), see
+[BENCH-SETUP.md](BENCH-SETUP.md).
+
 When the workspace is on the Linux box:
 
 1. **`CameraFrameSource`** — a `FrameSource` over `cv2.VideoCapture`, honoring

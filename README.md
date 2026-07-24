@@ -72,8 +72,9 @@ uv run ruff check  # lint
 
 The whole thing runs without hardware — the default source is a synthetic test
 pattern, so `uv run benchhud` opens a working shell you can poke at. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map and the bench
-bring-up checklist.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map, and
+[docs/BENCH-SETUP.md](docs/BENCH-SETUP.md) for bringing it up on the Linux bench
+(cameras, the OWON, and the v4l2loopback → OBS output).
 
 ## License
 
