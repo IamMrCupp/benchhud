@@ -4,8 +4,8 @@ Echoes the bench PSU/DMM's own on-screen overlay: a DMM header (mode + big
 reading + unit) and a cyan LCD-style 2x2 grid (voltage / current / power / max
 current, with peak-hold) with the live V/A/W trend chart beneath it, so the
 whole thing reads as one instrument. Fed from a :class:`TelemetrySnapshot`;
-render-only, testable offscreen. Monospace digits approximate an LCD; a true
-7-segment font can be bundled later.
+render-only, testable offscreen. The numeric readouts use the bundled DSEG
+7-segment font (see :mod:`benchhud.shell.fonts`), falling back to monospace.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from benchhud.instruments.telemetry import TelemetrySnapshot
+from benchhud.shell.fonts import seven_segment_family
 from benchhud.shell.panel import Panel
 from benchhud.shell.power_chart import PowerChart
 
@@ -43,26 +44,40 @@ _DMM_UNITS = {
     "TEMP": "°C",
 }
 
-_STYLE = """
-QFrame#meterHeader {
+# Fallback digit stack when the bundled 7-segment font isn't available.
+_MONO_STACK = '"Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace'
+
+
+def _lcd_font_family(seven_segment_family: str | None) -> str:
+    """The digit font stack, leading with the 7-segment face when we have it."""
+    if seven_segment_family:
+        return f'"{seven_segment_family}",{_MONO_STACK}'
+    return _MONO_STACK
+
+
+def _build_style(seven_segment_family: str | None) -> str:
+    """The meter stylesheet, with the numeric readouts in the LCD font."""
+    lcd = _lcd_font_family(seven_segment_family)
+    return f"""
+QFrame#meterHeader {{
     background: #f4fbfc; border: 1px solid #4f97a8; border-radius: 4px;
-}
-QFrame#meterCell {
+}}
+QFrame#meterCell {{
     background: #86cddf; border: 1px solid #4f97a8; border-radius: 4px;
-}
+}}
 /* Labels must be transparent so the cyan cell shows through — otherwise the
    global dark theme paints their background dark and the digits vanish. */
-QLabel#meterCaption { color: #0a3a45; background: transparent; font-size: 8pt; }
-QLabel#meterValue {
+QLabel#meterCaption {{ color: #0a3a45; background: transparent; font-size: 8pt; }}
+QLabel#meterValue {{
     color: #062028; background: transparent; font-weight: bold; font-size: 16pt;
-    font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
-}
-QLabel#meterMode { color: #2f6472; background: transparent; font-size: 9pt; }
-QLabel#meterPrimary {
+    font-family: {lcd};
+}}
+QLabel#meterMode {{ color: #2f6472; background: transparent; font-size: 9pt; }}
+QLabel#meterPrimary {{
     color: #062028; background: transparent; font-weight: bold; font-size: 18pt;
-    font-family: "Menlo","Monaco","Consolas","DejaVu Sans Mono",monospace;
-}
-QLabel#meterUnit { color: #2f6472; background: transparent; font-size: 11pt; }
+    font-family: {lcd};
+}}
+QLabel#meterUnit {{ color: #2f6472; background: transparent; font-size: 11pt; }}
 """
 
 
@@ -74,7 +89,7 @@ class PowerPanel(Panel):
         super().__init__(parent)
         self._max_current = 0.0
         self._last_snapshot: TelemetrySnapshot | None = None
-        self.setStyleSheet(_STYLE)
+        self.setStyleSheet(_build_style(seven_segment_family()))
         # Two cells side by side; the panel lives in a scroll area, so a truthful
         # minimum means the digits scroll rather than get clipped.
         self.setMinimumWidth(2 * cell_min_width() + 24)
@@ -119,21 +134,23 @@ class PowerPanel(Panel):
 
         widget = QWidget()
         grid = QGridLayout(widget)
-        grid.addWidget(_cell("VOLTAGE", self._v_value), 0, 0)
-        grid.addWidget(_cell("CURRENT", self._a_value), 0, 1)
-        grid.addWidget(_cell("POWER", self._w_value), 1, 0)
-        grid.addWidget(_cell("MAX CURRENT", self._max_value, self._reset_max_button), 1, 1)
+        grid.addWidget(_cell("VOLTAGE (V)", self._v_value), 0, 0)
+        grid.addWidget(_cell("CURRENT (A)", self._a_value), 0, 1)
+        grid.addWidget(_cell("POWER (W)", self._w_value), 1, 0)
+        grid.addWidget(_cell("MAX CURRENT (A)", self._max_value, self._reset_max_button), 1, 1)
         return widget
 
     def add_reading(self, voltage: float, current: float, t: float = 0.0) -> None:
         """Update the numeric readouts and append the reading to the trend chart."""
         self._max_current = max(self._max_current, current)
         self.chart.add_reading(voltage, current, t)
-        # Decimal places match the OWON display (V/A/max 2dp, W 1dp).
-        self._v_value.setText(f"{voltage:.2f} V")
-        self._a_value.setText(f"{current:.2f} A")
-        self._w_value.setText(f"{voltage * current:.1f} W")
-        self._max_value.setText(f"{self._max_current:.2f} A")
+        # Digits only — the LCD font has no true V/A/W glyphs, and the cell
+        # caption already names the unit. Decimals match the OWON display
+        # (V/A/max 2dp, W 1dp).
+        self._v_value.setText(f"{voltage:.2f}")
+        self._a_value.setText(f"{current:.2f}")
+        self._w_value.setText(f"{voltage * current:.1f}")
+        self._max_value.setText(f"{self._max_current:.2f}")
 
     def update_from_snapshot(self, snapshot: TelemetrySnapshot, t: float = 0.0) -> None:
         """Update the DMM header and, when PSU V+I are present, the numeric grid."""
@@ -145,7 +162,7 @@ class PowerPanel(Panel):
     def reset_max(self) -> None:
         """Clear the peak-hold max current."""
         self._max_current = 0.0
-        self._max_value.setText(f"{self._max_current:.2f} A")
+        self._max_value.setText(f"{self._max_current:.2f}")
 
     def _update_dmm(self, snapshot: TelemetrySnapshot) -> None:
         if not snapshot.ok:
@@ -198,23 +215,32 @@ class PowerPanel(Panel):
 # render at, and we size the cells from them so digits are never clipped.
 _VALUE_PT = 16
 _CAPTION_PT = 8
-# Worst case the meter can show: three integer digits, a sign, and a unit.
-_WIDEST_VALUE = "-000.00 W"
-_WIDEST_CAPTION = "MAX CURRENT"
+# Worst case the meter can show: a sign, three integer digits, two decimals.
+# Digits only now — the unit lives in the caption (the LCD font has no V/A/W).
+_WIDEST_VALUE = "-000.00"
+_WIDEST_CAPTION = "MAX CURRENT (A)"
 
 
-def _text_width(text: str, point_size: int, *, bold: bool = False) -> int:
+def _text_width(
+    text: str, point_size: int, *, bold: bool = False, family: str | None = None
+) -> int:
     font = QFont()
+    if family:
+        font.setFamily(family)
     font.setPointSize(point_size)
     font.setBold(bold)
     return QFontMetrics(font).horizontalAdvance(text)
 
 
 def cell_min_width() -> int:
-    """Width one meter cell needs for its widest value and caption, plus padding."""
+    """Width one meter cell needs for its widest value and caption, plus padding.
+
+    The value is measured in the actual LCD font (segmented digits are wider than
+    a proportional face), so nothing clips once the 7-segment font is loaded.
+    """
     return (
         max(
-            _text_width(_WIDEST_VALUE, _VALUE_PT, bold=True),
+            _text_width(_WIDEST_VALUE, _VALUE_PT, bold=True, family=seven_segment_family()),
             _text_width(_WIDEST_CAPTION, _CAPTION_PT),
         )
         + 20  # cell margins + frame border

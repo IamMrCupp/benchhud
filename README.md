@@ -79,3 +79,7 @@ bring-up checklist.
 
 MIT — see [LICENSE](LICENSE). The Y16→°C conversion follows Sipeed's documented
 spec for the T256s; credit to them for the formula.
+
+The meter's segmented-LCD digits use the [DSEG](https://github.com/keshikan/DSEG)
+font by keshikan, bundled under the SIL Open Font License 1.1 — see
+[resources/fonts/OFL.txt](src/benchhud/resources/fonts/OFL.txt).
