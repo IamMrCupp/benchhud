@@ -39,6 +39,7 @@ from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, default_db_path
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.composite import colorize, compose
+from benchhud.overlay.telemetry import MeterReadout, draw_telemetry_overlay
 from benchhud.shell.about import about_html
 from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
@@ -355,9 +356,34 @@ class MainWindow(QMainWindow):
         self._show_composite(compose(scope, temps, transform, settings))
 
     def _show_composite(self, frame) -> None:
-        """Put one composed frame on screen and, if open, out to the sink."""
+        """Put one composed frame on screen and, if open, out to the sink.
+
+        The telemetry overlay is applied here — the single point every composite
+        path (scope-only, thermal-only, fused) flows through — so the on-screen
+        preview and the virtual-cam output stay identical (WYSIWYG).
+        """
+        frame = self._apply_telemetry_overlay(frame)
         self.composite_view.show_frame(frame)
         self._publish_frame(frame)
+
+    def _apply_telemetry_overlay(self, frame):
+        """Burn the live meter readout onto the frame, when the overlay is on."""
+        if not self._config.telemetry_overlay.enabled:
+            return frame
+        return draw_telemetry_overlay(frame, self._meter_readout(), self._config.telemetry_overlay)
+
+    def _meter_readout(self) -> MeterReadout:
+        """Snapshot the meter panel's formatted strings for the overlay."""
+        panel = self.power_panel
+        return MeterReadout(
+            voltage=panel.voltage_text,
+            current=panel.current_text,
+            power=panel.power_text,
+            max_current=panel.max_current_text,
+            dmm_mode=panel.dmm_mode_text,
+            dmm_value=panel.dmm_text,
+            dmm_unit=panel.dmm_unit_text,
+        )
 
     def capture_context(self) -> CaptureContext:
         """Current bench state for capture-to-job: scope + thermal + readings."""

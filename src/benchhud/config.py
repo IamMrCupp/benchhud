@@ -117,6 +117,21 @@ class FaultConfig:
 
 
 @dataclass
+class TelemetryOverlayConfig:
+    """Burn live power/DMM readings into the composited (streamed) frame.
+
+    Off by default — benchhud is a standalone bench app, so the meter dock
+    already shows readings locally; this is the on-stream copy. PII-free by
+    nature (electrical readings only)."""
+
+    enabled: bool = False
+    # Where the readout sits on the frame.
+    corner: str = "bottom-left"  # bottom-left | bottom-right | top-left | top-right
+    show_psu: bool = True  # VOLTAGE / CURRENT / POWER / MAX CURRENT
+    show_dmm: bool = True  # the DMM header line
+
+
+@dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -124,6 +139,7 @@ class Config:
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     faults: FaultConfig = field(default_factory=FaultConfig)
+    telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -168,6 +184,11 @@ class Config:
             cfg.faults,
             data.get("faults", {}),
             ("auto_log", "current_threshold_a"),
+        )
+        _apply(
+            cfg.telemetry_overlay,
+            data.get("telemetry_overlay", {}),
+            ("enabled", "corner", "show_psu", "show_dmm"),
         )
 
         cfg.tools = [

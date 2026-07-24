@@ -38,6 +38,12 @@ from benchhud.shell.tool_picker import ToolPickerDialog
 
 SaveCallback = Callable[[Config], None]
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+_OVERLAY_CORNERS = (
+    ("Bottom left", "bottom-left"),
+    ("Bottom right", "bottom-right"),
+    ("Top left", "top-left"),
+    ("Top right", "top-right"),
+)
 
 
 class PreferencesDialog(QDialog):
@@ -111,6 +117,18 @@ class PreferencesDialog(QDialog):
         self.output_height = _spin(1, 4320, out.height)
         self.output_fps = _spin(1, 120, out.fps)
 
+        overlay = self._config.telemetry_overlay
+        self.overlay_enabled = QCheckBox("Overlay live meter readings on the output")
+        self.overlay_enabled.setChecked(overlay.enabled)
+        self.overlay_enabled.setToolTip("Burn the power/DMM readout into the streamed frame")
+        self.overlay_corner = QComboBox()
+        for label, data in _OVERLAY_CORNERS:
+            self.overlay_corner.addItem(label, data)
+        corner_idx = self.overlay_corner.findData(overlay.corner)
+        if corner_idx >= 0:
+            self.overlay_corner.setCurrentIndex(corner_idx)
+        fit_combo_popup(self.overlay_corner)
+
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow(self.output_enabled)
@@ -118,6 +136,8 @@ class PreferencesDialog(QDialog):
         form.addRow("Width", self.output_width)
         form.addRow("Height", self.output_height)
         form.addRow("FPS", self.output_fps)
+        form.addRow(self.overlay_enabled)
+        form.addRow("Overlay position", self.overlay_corner)
         return widget
 
     # --- Tools -----------------------------------------------------------
@@ -244,6 +264,9 @@ class PreferencesDialog(QDialog):
         self._config.output.width = self.output_width.value()
         self._config.output.height = self.output_height.value()
         self._config.output.fps = self.output_fps.value()
+
+        self._config.telemetry_overlay.enabled = self.overlay_enabled.isChecked()
+        self._config.telemetry_overlay.corner = self.overlay_corner.currentData() or "bottom-left"
 
         self._config.faults.auto_log = self.fault_auto_log.isChecked()
         self._config.faults.current_threshold_a = self.fault_threshold.value()
