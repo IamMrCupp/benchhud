@@ -51,6 +51,19 @@ def test_in_memory_source_lists_and_looks_up() -> None:
     assert source.get_ticket("nope") is None
 
 
+# --- board_id --------------------------------------------------------------
+
+
+def test_board_id_defaults_to_none() -> None:
+    """A six-field response (intake not yet sending board_id) still constructs."""
+    assert _ticket().board_id is None
+
+
+def test_board_id_is_carried_when_present() -> None:
+    ticket = Ticket(ref="T-5", device="iPhone 12", board_id="820-00239")
+    assert ticket.board_id == "820-00239"
+
+
 # --- importing -------------------------------------------------------------
 
 
