@@ -376,11 +376,13 @@ class MainWindow(QMainWindow):
         dialog = PreferencesDialog(
             self._config, self._scanner, on_save=self._on_persist, parent=self
         )
-        dialog.accepted.connect(self._refresh_status)
         dialog.accepted.connect(self.restart_output)
         dialog.accepted.connect(self.reconfigure_faults)
         dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.accepted.connect(self.reconfigure_boards)
+        # Last: the status line reports sink state, so it must run after the
+        # sink has been rebuilt or it shows the previous one.
+        dialog.accepted.connect(self._refresh_status)
         dialog.open()
         return dialog
 
@@ -461,14 +463,28 @@ class MainWindow(QMainWindow):
             snapshot=self.power_panel.last_snapshot,
         )
 
+    def output_warning(self) -> str | None:
+        """Why the virtual-camera output isn't actually publishing, if it isn't.
+
+        Output enabled + frames going nowhere is the one failure the operator
+        must not discover mid-stream, so it gets said out loud.
+        """
+        if not self._config.output.enabled:
+            return None  # deliberately off — nothing to warn about
+        reason = getattr(self._sink, "reason", "")
+        return reason or None
+
     def _refresh_status(self) -> None:
         panels = self._config.panels
         prefix = "◉ DEMO MODE   ·   " if self.demo_active else ""
+        warning = self.output_warning()
+        suffix = f"   ·   ⚠ virtual cam inactive — {warning}" if warning else ""
         self.statusBar().showMessage(
             f"{prefix}benchhud {__version__}   ·   "
             f"scope {panels.scope.device or '—'}   ·   "
             f"thermal {panels.thermal.device or '—'}   ·   "
             f"psu/dmm {panels.telemetry.port or '—'}"
+            f"{suffix}"
         )
 
     # --- capture preview -------------------------------------------------
@@ -517,6 +533,7 @@ class MainWindow(QMainWindow):
         out = self._config.output
         factory = sink_factory or open_output_sink
         self._sink = factory(out.device, out.width, out.height)
+        self._refresh_status()
 
     def stop_output(self) -> None:
         """Close the virtual-camera sink (idempotent)."""
