@@ -35,8 +35,12 @@ from benchhud.jobs.report import export_report
 from benchhud.jobs.store import Job, JobStatus, JobStore
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_util import fit_combo_popup
+from benchhud.shell.ticket_picker import TicketPickerDialog
+from benchhud.tickets.importer import import_ticket
+from benchhud.tickets.source import Ticket, TicketSource
 
 CaptureProvider = Callable[[], CaptureContext | None]
+TicketSourceProvider = Callable[[], TicketSource]
 
 
 def _short_stamp(iso: str) -> str:
@@ -63,11 +67,13 @@ class JobsPanel(Panel):
         self,
         store: JobStore,
         capture_provider: CaptureProvider | None = None,
+        ticket_source: TicketSourceProvider | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._store = store
         self._capture_provider = capture_provider
+        self._ticket_source = ticket_source
 
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_new_row())
@@ -91,10 +97,16 @@ class JobsPanel(Panel):
         self.new_device_edit.returnPressed.connect(self.create_job)
         self.new_button = QPushButton("New job")
         self.new_button.clicked.connect(self.create_job)
+        self.import_button = QPushButton("Import…")
+        self.import_button.setToolTip("Import an open ticket from intake onto the bench")
+        self.import_button.clicked.connect(self.import_from_ticket)
+        # Only useful when a ticket source is wired in.
+        self.import_button.setVisible(self._ticket_source is not None)
 
         row = QHBoxLayout()
         row.addWidget(self.new_device_edit, stretch=1)
         row.addWidget(self.new_button)
+        row.addWidget(self.import_button)
         return row
 
     def job_list_widget(self) -> QListWidget:
@@ -170,6 +182,32 @@ class JobsPanel(Panel):
         self.new_device_edit.clear()
         self.refresh_jobs()
         self.select_job(job.id)
+
+    def import_from_ticket(self) -> TicketPickerDialog | None:
+        """Open the intake queue, let the operator pick a ticket, import it."""
+        if self._ticket_source is None:
+            return None
+        tickets = self._ticket_source().list_open_tickets()
+        dialog = TicketPickerDialog(tickets, parent=self)
+        dialog.accepted.connect(lambda: self._import_selected(dialog))
+        dialog.open()
+        return dialog
+
+    def _import_selected(self, dialog: TicketPickerDialog) -> None:
+        ticket = dialog.selected_ticket()
+        if ticket is not None:
+            self.import_ticket_onto_bench(ticket)
+
+    def import_ticket_onto_bench(self, ticket: Ticket) -> Job:
+        """Create (or reselect) the local job for ``ticket`` and focus it.
+
+        Idempotent via :func:`import_ticket` — re-importing the same ticket
+        reselects the existing job rather than duplicating it.
+        """
+        job = import_ticket(self._store, ticket)
+        self.refresh_jobs()
+        self.select_job(job.id)
+        return job
 
     def save_current(self) -> None:
         """Write the detail fields back to the selected job."""

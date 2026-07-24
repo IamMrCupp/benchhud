@@ -148,7 +148,11 @@ class MainWindow(QMainWindow):
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
         self.controls_panel.changed.connect(self.render_composite)
-        self.jobs_panel = JobsPanel(self._job_store, capture_provider=self.capture_context)
+        self.jobs_panel = JobsPanel(
+            self._job_store,
+            capture_provider=self.capture_context,
+            ticket_source=lambda: self._ticket_source,
+        )
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
 
