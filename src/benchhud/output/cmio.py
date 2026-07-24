@@ -22,11 +22,14 @@ worth testing — pixel conversion and stream selection — are pure.
 from __future__ import annotations
 
 import ctypes
+import logging
 import sys
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 # OBS's camera-extension device, from its Info.plist (OBSCameraDeviceUUID).
 # Stable since the extension shipped; verified against OBS 32.1.2.
@@ -260,3 +263,217 @@ def find_obs_sink() -> tuple[CmioDevice, CmioStream] | None:
         return None
     stream = select_sink_stream(device.streams)
     return None if stream is None else (device, stream)
+
+
+# --- frame delivery (macOS only) ------------------------------------------
+#
+# The pixel path — CVPixelBuffer → CMSampleBuffer → the sink's CMSimpleQueue —
+# lives in CoreMedia/CoreVideo, not CoreMediaIO. It was verified end to end on a
+# real Mac: with a non-NULL altered-callback the extension vended a queue and
+# dequeued every one of 300 pushed frames (that callback firing is OBS's
+# extension consuming our frames), with stable memory. The lifetime rules below
+# come from that run, not from docs.
+
+_CM_FRAMEWORK = "/System/Library/Frameworks/CoreMedia.framework/CoreMedia"
+_CV_FRAMEWORK = "/System/Library/Frameworks/CoreVideo.framework/CoreVideo"
+
+#: kCVPixelFormatType_422YpCbCr8 — ``'2vuy'`` (packed UYVY), what the sink takes.
+_PIXEL_FORMAT_UYVY = 0x32767579
+_TIMESCALE = 600  # CMTime ticks per second; fine granularity for live timing
+
+
+class _CMTime(ctypes.Structure):
+    _fields_ = [
+        ("value", ctypes.c_int64),
+        ("timescale", ctypes.c_int32),
+        ("flags", ctypes.c_uint32),
+        ("epoch", ctypes.c_int64),
+    ]
+
+
+class _CMSampleTimingInfo(ctypes.Structure):
+    _fields_ = [
+        ("duration", _CMTime),
+        ("presentationTimeStamp", _CMTime),
+        ("decodeTimeStamp", _CMTime),
+    ]
+
+
+#: void(CMIOStreamID, void* token, void* refcon) — fired when the extension
+#: dequeues, signalling room to enqueue more. Kept as a module type so the bound
+#: instance can be retained (letting Python GC it crashes the CMIO thread).
+_QueueAlteredProc = ctypes.CFUNCTYPE(None, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_void_p)
+
+
+class _DeliveryFrameworks:
+    """CoreMedia + CoreVideo + CoreMediaIO calls for pushing frames (macOS)."""
+
+    def __init__(self) -> None:
+        if not sys.platform.startswith("darwin"):
+            raise CoreMediaIOUnavailable("CoreMediaIO is macOS-only")
+        try:
+            self.cm = ctypes.CDLL(_CM_FRAMEWORK)
+            self.cv = ctypes.CDLL(_CV_FRAMEWORK)
+            self.cmio = ctypes.CDLL(_CMIO_FRAMEWORK)
+            self.cf = ctypes.CDLL(_CF_FRAMEWORK)
+        except OSError as exc:  # pragma: no cover - a macOS without the frameworks
+            raise CoreMediaIOUnavailable(str(exc)) from exc
+        vp = ctypes.c_void_p
+        self.cv.CVPixelBufferCreate.argtypes = [
+            vp,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            vp,
+            ctypes.POINTER(vp),
+        ]
+        self.cv.CVPixelBufferCreate.restype = ctypes.c_int32
+        self.cv.CVPixelBufferLockBaseAddress.argtypes = [vp, ctypes.c_uint64]
+        self.cv.CVPixelBufferUnlockBaseAddress.argtypes = [vp, ctypes.c_uint64]
+        self.cv.CVPixelBufferGetBaseAddress.argtypes = [vp]
+        self.cv.CVPixelBufferGetBaseAddress.restype = vp
+        self.cv.CVPixelBufferGetBytesPerRow.argtypes = [vp]
+        self.cv.CVPixelBufferGetBytesPerRow.restype = ctypes.c_size_t
+        self.cv.CVPixelBufferRelease.argtypes = [vp]
+        self.cm.CMVideoFormatDescriptionCreateForImageBuffer.argtypes = [vp, vp, ctypes.POINTER(vp)]
+        self.cm.CMVideoFormatDescriptionCreateForImageBuffer.restype = ctypes.c_int32
+        self.cm.CMSampleBufferCreateForImageBuffer.argtypes = [
+            vp,
+            vp,
+            ctypes.c_char,
+            vp,
+            vp,
+            vp,
+            ctypes.POINTER(_CMSampleTimingInfo),
+            ctypes.POINTER(vp),
+        ]
+        self.cm.CMSampleBufferCreateForImageBuffer.restype = ctypes.c_int32
+        self.cm.CMSimpleQueueEnqueue.argtypes = [vp, vp]
+        self.cm.CMSimpleQueueEnqueue.restype = ctypes.c_int32
+        self.cf.CFRelease.argtypes = [vp]
+        self.cmio.CMIOStreamCopyBufferQueue.argtypes = [ctypes.c_uint32, vp, vp, ctypes.POINTER(vp)]
+        self.cmio.CMIOStreamCopyBufferQueue.restype = ctypes.c_int32
+        self.cmio.CMIODeviceStartStream.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        self.cmio.CMIODeviceStartStream.restype = ctypes.c_int32
+        self.cmio.CMIODeviceStopStream.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+
+
+class CmioSink:
+    """Publish BGR frames into OBS's virtual camera. Implements ``OutputSink``.
+
+    Frames that arrive faster than the extension drains them are dropped rather
+    than blocking the GUI thread — a dropped frame beats a stalled HUD.
+    """
+
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        device_id: int,
+        stream_id: int,
+        frameworks: _DeliveryFrameworks | None = None,
+    ) -> None:
+        self._size = (width, height)
+        self._api = frameworks or _DeliveryFrameworks()
+        self._device_id = device_id
+        self._stream_id = stream_id
+        self._frame = 0
+        self._closed = False
+        # Retain the callback for the stream's lifetime — if Python collects it,
+        # the extension calls a freed pointer and the process dies.
+        self._altered = _QueueAlteredProc(lambda _s, _t, _r: None)
+
+        queue = ctypes.c_void_p()
+        err = self._api.cmio.CMIOStreamCopyBufferQueue(
+            stream_id, self._altered, None, ctypes.byref(queue)
+        )
+        if err or not queue:
+            raise RuntimeError(f"CMIOStreamCopyBufferQueue failed (err={err})")
+        self._queue = queue
+        err = self._api.cmio.CMIODeviceStartStream(device_id, stream_id)
+        if err:
+            raise RuntimeError(f"CMIODeviceStartStream failed (err={err})")
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return self._size
+
+    def send(self, frame: np.ndarray) -> None:
+        if self._closed:
+            return
+        uyvy = bgr_to_uyvy(frame)
+        height, width = uyvy.shape[0], uyvy.shape[1]
+        api = self._api
+
+        pixel_buffer = ctypes.c_void_p()
+        if api.cv.CVPixelBufferCreate(
+            None, width, height, _PIXEL_FORMAT_UYVY, None, ctypes.byref(pixel_buffer)
+        ):
+            return
+        try:
+            self._fill(pixel_buffer, uyvy, width, height)
+            sample = self._wrap(pixel_buffer)
+        finally:
+            api.cv.CVPixelBufferRelease(pixel_buffer)  # the sample retains it
+        if sample is None:
+            return
+        # On success the queue owns the sample (the consumer releases it); only
+        # release it ourselves when the enqueue is rejected (queue full).
+        if api.cm.CMSimpleQueueEnqueue(self._queue, sample):
+            api.cf.CFRelease(sample)
+        else:
+            self._frame += 1
+
+    def _fill(self, pixel_buffer, uyvy: np.ndarray, width: int, height: int) -> None:
+        api = self._api
+        api.cv.CVPixelBufferLockBaseAddress(pixel_buffer, 0)
+        try:
+            base = api.cv.CVPixelBufferGetBaseAddress(pixel_buffer)
+            stride = api.cv.CVPixelBufferGetBytesPerRow(pixel_buffer)
+            row_bytes = width * 2  # UYVY = 2 bytes/pixel
+            contiguous = np.ascontiguousarray(uyvy)
+            if stride == row_bytes:
+                ctypes.memmove(base, contiguous.ctypes.data, row_bytes * height)
+            else:
+                # CoreVideo padded each row for alignment — copy row by row.
+                src = contiguous.ctypes.data
+                for row in range(height):
+                    ctypes.memmove(base + row * stride, src + row * row_bytes, row_bytes)
+        finally:
+            api.cv.CVPixelBufferUnlockBaseAddress(pixel_buffer, 0)
+
+    def _wrap(self, pixel_buffer) -> ctypes.c_void_p | None:
+        api = self._api
+        fmt = ctypes.c_void_p()
+        if api.cm.CMVideoFormatDescriptionCreateForImageBuffer(
+            None, pixel_buffer, ctypes.byref(fmt)
+        ):
+            return None
+        pts = _CMTime(self._frame * _TIMESCALE // 30, _TIMESCALE, 1, 0)  # ~30fps clock
+        duration = _CMTime(_TIMESCALE // 30, _TIMESCALE, 1, 0)
+        timing = _CMSampleTimingInfo(duration, pts, _CMTime(0, 0, 0, 0))
+        sample = ctypes.c_void_p()
+        err = api.cm.CMSampleBufferCreateForImageBuffer(
+            None, pixel_buffer, b"\x01", None, None, fmt, ctypes.byref(timing), ctypes.byref(sample)
+        )
+        api.cf.CFRelease(fmt)
+        return None if err else sample
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._api.cmio.CMIODeviceStopStream(self._device_id, self._stream_id)
+
+
+def open_cmio_sink(width: int, height: int) -> CmioSink | None:
+    """Open a sink into OBS's virtual camera, or ``None`` if it isn't available."""
+    found = find_obs_sink()
+    if found is None:
+        return None
+    device, stream = found
+    try:
+        return CmioSink(width, height, device.device_id, stream.stream_id)
+    except (RuntimeError, CoreMediaIOUnavailable) as exc:
+        log.warning("could not open OBS virtual-camera sink: %s", exc)
+        return None

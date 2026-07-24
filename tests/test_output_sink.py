@@ -41,8 +41,13 @@ def test_null_sink_counts_without_retaining() -> None:
     assert not any(isinstance(v, list) for v in vars(sink).values())
 
 
-def test_open_output_sink_falls_back_when_device_missing() -> None:
-    """No v4l2loopback (every dev machine, and CI) must not break the HUD."""
+def test_open_output_sink_falls_back_when_device_missing(monkeypatch) -> None:
+    """No v4l2loopback (CI, and a dev Linux box) must not break the HUD.
+
+    Pinned to Linux: on macOS ``open_output_sink`` now legitimately returns a
+    CoreMediaIO sink when OBS's extension is present, which is a different path.
+    """
+    monkeypatch.setattr("benchhud.output.sink.sys.platform", "linux")
     sink = open_output_sink("/dev/does-not-exist", 64, 48)
 
     assert isinstance(sink, NullSink)

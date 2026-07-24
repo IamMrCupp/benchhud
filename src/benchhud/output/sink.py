@@ -126,6 +126,11 @@ def open_output_sink(device: str, width: int, height: int) -> OutputSink:
     the worst outcome, so the reason is surfaced rather than only logged.
     """
     if sys.platform.startswith("darwin"):
+        from benchhud.output.cmio import open_cmio_sink
+
+        sink = open_cmio_sink(width, height)
+        if sink is not None:
+            return sink
         reason = _macos_reason()
         log.warning("%s; frames will be discarded", reason)
         return NullSink(width, height, reason=reason)

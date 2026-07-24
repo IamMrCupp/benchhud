@@ -169,3 +169,51 @@ def test_real_enumeration_returns_devices_with_uids() -> None:
     for device in devices:
         for stream in device.streams:
             assert stream.direction in (0, 1, None)
+
+
+# --- sink construction / open path ---------------------------------------
+
+
+def test_open_cmio_sink_returns_none_without_obs(monkeypatch) -> None:
+    from benchhud.output import cmio
+
+    monkeypatch.setattr(cmio, "find_obs_sink", lambda: None)
+    assert cmio.open_cmio_sink(1280, 720) is None
+
+
+def test_open_cmio_sink_returns_none_if_stream_wont_open(monkeypatch) -> None:
+    """A found device whose stream fails to open must degrade, not raise."""
+    from benchhud.output import cmio
+
+    monkeypatch.setattr(cmio, "find_obs_sink", lambda: (CmioDevice(1, OBS_DEVICE_UID), _SINK))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("stream busy")
+
+    monkeypatch.setattr(cmio, "CmioSink", _boom)
+    assert cmio.open_cmio_sink(1280, 720) is None
+
+
+# --- real delivery into OBS (dev Mac with the extension approved) ---------
+
+_obs = None
+if sys.platform.startswith("darwin"):
+    from benchhud.output.cmio import find_obs_sink
+
+    _obs = find_obs_sink()
+
+
+@pytest.mark.skipif(_obs is None, reason="needs macOS with OBS's camera extension approved")
+def test_real_delivery_into_obs() -> None:
+    """Push real frames and confirm OBS's extension consumes them, then close."""
+    from benchhud.output.cmio import open_cmio_sink
+
+    sink = open_cmio_sink(320, 240)
+    assert sink is not None
+    assert sink.size == (320, 240)
+    for i in range(30):
+        sink.send(np.full((240, 320, 3), i % 256, dtype=np.uint8))
+    assert sink._frame > 0, "no frames were accepted by the queue"
+    sink.close()
+    sink.close()  # idempotent
+    sink.send(np.zeros((240, 320, 3), dtype=np.uint8))  # no-op after close, must not raise
