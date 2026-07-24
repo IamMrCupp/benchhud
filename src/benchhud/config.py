@@ -132,6 +132,14 @@ class TelemetryOverlayConfig:
 
 
 @dataclass
+class IntakeConfig:
+    """Connection to a benchhud-intake ticket API (empty base URL → disabled)."""
+
+    base_url: str = ""
+    token: str = ""
+
+
+@dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -140,6 +148,7 @@ class Config:
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     faults: FaultConfig = field(default_factory=FaultConfig)
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
+    intake: IntakeConfig = field(default_factory=IntakeConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -189,6 +198,11 @@ class Config:
             cfg.telemetry_overlay,
             data.get("telemetry_overlay", {}),
             ("enabled", "corner", "show_psu", "show_dmm"),
+        )
+        _apply(
+            cfg.intake,
+            data.get("intake", {}),
+            ("base_url", "token"),
         )
 
         cfg.tools = [
