@@ -27,6 +27,10 @@ class Ticket:
 
     ``ref`` is the stable external identifier benchhud stores against a job.
     ``customer`` is sensitive — never render it into the stream surface.
+    ``board_id`` is the board's part number (e.g. ``820-00239``) — **not** PII,
+    safe to show anywhere, and the key the board-docs library resolves against.
+    It is optional so benchhud still parses responses from an intake that does
+    not send it yet.
     """
 
     ref: str
@@ -35,6 +39,7 @@ class Ticket:
     customer: str = ""
     status: str = ""
     url: str | None = None
+    board_id: str | None = None
 
 
 @runtime_checkable
