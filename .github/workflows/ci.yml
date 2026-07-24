@@ -19,7 +19,7 @@ jobs:
       # PySide6 uses the offscreen Qt platform plugin in CI (no display).
       QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
         run: |
