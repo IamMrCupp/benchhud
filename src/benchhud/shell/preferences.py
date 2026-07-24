@@ -132,6 +132,15 @@ class PreferencesDialog(QDialog):
             self.overlay_corner.setCurrentIndex(corner_idx)
         fit_combo_popup(self.overlay_corner)
 
+        self.overlay_show_psu = QCheckBox("PSU (voltage / current / power / max)")
+        self.overlay_show_psu.setChecked(overlay.show_psu)
+        self.overlay_show_dmm = QCheckBox("DMM reading")
+        self.overlay_show_dmm.setChecked(overlay.show_dmm)
+        self.overlay_scale = _ratio_spin(0.3, 4.0, overlay.scale)
+        self.overlay_scale.setToolTip("Size multiplier on top of the automatic frame scaling")
+        self.overlay_opacity = _ratio_spin(0.1, 1.0, overlay.opacity)
+        self.overlay_opacity.setToolTip("Below 1.0 lets the board show through the readout")
+
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow(self.output_enabled)
@@ -141,6 +150,10 @@ class PreferencesDialog(QDialog):
         form.addRow("FPS", self.output_fps)
         form.addRow(self.overlay_enabled)
         form.addRow("Overlay position", self.overlay_corner)
+        form.addRow("Overlay shows", self.overlay_show_psu)
+        form.addRow("", self.overlay_show_dmm)
+        form.addRow("Overlay size", self.overlay_scale)
+        form.addRow("Overlay opacity", self.overlay_opacity)
         return widget
 
     # --- Tools -----------------------------------------------------------
@@ -309,6 +322,10 @@ class PreferencesDialog(QDialog):
 
         self._config.telemetry_overlay.enabled = self.overlay_enabled.isChecked()
         self._config.telemetry_overlay.corner = self.overlay_corner.currentData() or "bottom-left"
+        self._config.telemetry_overlay.show_psu = self.overlay_show_psu.isChecked()
+        self._config.telemetry_overlay.show_dmm = self.overlay_show_dmm.isChecked()
+        self._config.telemetry_overlay.scale = self.overlay_scale.value()
+        self._config.telemetry_overlay.opacity = self.overlay_opacity.value()
 
         self._config.faults.auto_log = self.fault_auto_log.isChecked()
         self._config.faults.current_threshold_a = self.fault_threshold.value()
@@ -361,6 +378,16 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
 def _cell(table: QTableWidget, row: int, col: int) -> str:
     item = table.item(row, col)
     return item.text().strip() if item is not None else ""
+
+
+def _ratio_spin(lo: float, hi: float, value: float) -> QDoubleSpinBox:
+    """A 0.1-step float spin for size/opacity ratios."""
+    spin = QDoubleSpinBox()
+    spin.setRange(lo, hi)
+    spin.setDecimals(2)
+    spin.setSingleStep(0.1)
+    spin.setValue(value)
+    return spin
 
 
 def _spin(lo: int, hi: int, value: int) -> QSpinBox:

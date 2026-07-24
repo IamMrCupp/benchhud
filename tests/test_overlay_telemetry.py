@@ -196,3 +196,67 @@ def test_telemetry_overlay_defaults_when_absent() -> None:
     assert cfg.telemetry_overlay.enabled is False
     assert cfg.telemetry_overlay.corner == "bottom-left"
     assert cfg.telemetry_overlay.show_psu is True
+
+
+# --- scaling + opacity (§C.2 polish) -------------------------------------
+
+
+def test_auto_scale_tracks_frame_width() -> None:
+    from benchhud.overlay.telemetry import auto_scale
+
+    assert auto_scale(1280) == 1.0
+    assert auto_scale(1920) > 1.0
+    assert auto_scale(640) < 1.0
+
+
+def test_auto_scale_is_clamped() -> None:
+    from benchhud.overlay.telemetry import auto_scale
+
+    assert auto_scale(100) == 0.5  # never vanishingly small
+    assert auto_scale(10000) == 2.5  # never absurdly large
+    assert auto_scale(0) == 1.0  # degenerate frame
+
+
+def test_render_scales_the_panel(qtbot) -> None:
+    model = build_model(_READOUT, TelemetryOverlayConfig())
+    small = render_overlay_image(model, 1.0)
+    big = render_overlay_image(model, 2.0)
+    assert big.width() > small.width()
+    assert big.height() > small.height()
+
+
+def test_wider_frame_gets_a_bigger_overlay(qtbot) -> None:
+    """The gap this fixes: a fixed-size readout looked tiny on a 1920 feed."""
+    narrow = draw_telemetry_overlay(_frame(540, 960), _READOUT, TelemetryOverlayConfig())
+    wide = draw_telemetry_overlay(_frame(1080, 1920), _READOUT, TelemetryOverlayConfig())
+
+    def _painted(frame):
+        return int((frame != 0).any(axis=2).sum())
+
+    # Proportionally, the readout should cover a comparable share of each frame.
+    narrow_share = _painted(narrow) / (540 * 960)
+    wide_share = _painted(wide) / (1080 * 1920)
+    assert abs(narrow_share - wide_share) < 0.05
+
+
+def test_opacity_lightens_the_overlay() -> None:
+    frame = np.zeros((40, 40, 3), dtype=np.uint8)
+    over = _overlay(10, 10, bgr=(200, 200, 200), alpha=255)
+    solid = blit_rgba(frame, over, "top-left", 0, opacity=1.0)
+    faded = blit_rgba(frame, over, "top-left", 0, opacity=0.5)
+    assert faded[0, 0, 0] < solid[0, 0, 0]
+
+
+def test_opacity_zero_leaves_the_frame_alone() -> None:
+    frame = np.full((30, 30, 3), 9, dtype=np.uint8)
+    out = blit_rgba(frame, _overlay(10, 10), "top-left", 0, opacity=0.0)
+    assert np.array_equal(out, frame)
+
+
+def test_scale_and_opacity_round_trip_in_config() -> None:
+    cfg = Config()
+    cfg.telemetry_overlay.scale = 1.5
+    cfg.telemetry_overlay.opacity = 0.7
+    restored = Config.from_dict(cfg.to_dict())
+    assert restored.telemetry_overlay.scale == 1.5
+    assert restored.telemetry_overlay.opacity == 0.7

@@ -129,6 +129,10 @@ class TelemetryOverlayConfig:
     corner: str = "bottom-left"  # bottom-left | bottom-right | top-left | top-right
     show_psu: bool = True  # VOLTAGE / CURRENT / POWER / MAX CURRENT
     show_dmm: bool = True  # the DMM header line
+    # Size multiplier on top of the automatic frame-relative scaling.
+    scale: float = 1.0
+    # Overlay alpha — below 1.0 lets the board show through the readout.
+    opacity: float = 1.0
 
 
 @dataclass
@@ -207,7 +211,7 @@ class Config:
         _apply(
             cfg.telemetry_overlay,
             data.get("telemetry_overlay", {}),
-            ("enabled", "corner", "show_psu", "show_dmm"),
+            ("enabled", "corner", "show_psu", "show_dmm", "scale", "opacity"),
         )
         _apply(
             cfg.intake,

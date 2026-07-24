@@ -127,36 +127,63 @@ def _label_font(px: int, *, bold: bool = False) -> QFont:
     return font
 
 
-def render_overlay_image(model: OverlayModel) -> QImage:
+#: Frame width the base sizes above are tuned for. The readout scales relative to
+#: this, so it reads the same on a 960-wide preview as on a 1920 scope feed
+#: instead of being fixed-size and looking tiny (or enormous) as the feed changes.
+_REFERENCE_WIDTH = 1280
+
+
+def auto_scale(frame_width: int) -> float:
+    """Scale factor for a frame of this width, clamped to sane extremes."""
+    if frame_width <= 0:
+        return 1.0
+    return min(2.5, max(0.5, frame_width / _REFERENCE_WIDTH))
+
+
+def render_overlay_image(model: OverlayModel, scale: float = 1.0) -> QImage:
     """Paint the readout to an ARGB image (transparent where there's no panel)."""
-    caption_fm = QFontMetrics(_label_font(_CAPTION_PX, bold=True))
-    value_fm = QFontMetrics(_digit_font(_VALUE_PX))
-    dmm_value_fm = QFontMetrics(_digit_font(_DMM_VALUE_PX))
-    dmm_label_fm = QFontMetrics(_label_font(_DMM_LABEL_PX))
+    factor = max(0.3, scale)
+    caption_px = max(6, round(_CAPTION_PX * factor))
+    value_px = max(8, round(_VALUE_PX * factor))
+    label_px = max(7, round(_DMM_LABEL_PX * factor))
+    big_px = max(10, round(_DMM_VALUE_PX * factor))
+    pad = max(2, round(_PAD * factor))
+    gap = max(2, round(_GAP * factor))
+    radius = max(2, round(_RADIUS * factor))
+
+    caption_font = _label_font(caption_px, bold=True)
+    value_font = _digit_font(value_px)
+    label_font = _label_font(label_px)
+    big_font = _digit_font(big_px)
+
+    caption_fm = QFontMetrics(caption_font)
+    value_fm = QFontMetrics(value_font)
+    dmm_value_fm = QFontMetrics(big_font)
+    dmm_label_fm = QFontMetrics(label_font)
 
     cell_content_w = max(
         value_fm.horizontalAdvance(_WIDEST_VALUE),
         caption_fm.horizontalAdvance(_WIDEST_CAPTION),
     )
-    cell_w = cell_content_w + 2 * _PAD
-    cell_h = caption_fm.height() + value_fm.height() + 3 * _PAD
-    grid_w = 2 * cell_w + _GAP if model.cells else 0
-    grid_h = 2 * cell_h + _GAP if model.cells else 0
+    cell_w = cell_content_w + 2 * pad
+    cell_h = caption_fm.height() + value_fm.height() + 3 * pad
+    grid_w = 2 * cell_w + gap if model.cells else 0
+    grid_h = 2 * cell_h + gap if model.cells else 0
 
     header_h = 0
     header_w = 0
     if model.dmm is not None:
         mode, value, unit = model.dmm
-        header_h = dmm_value_fm.height() + 2 * _PAD
+        header_h = dmm_value_fm.height() + 2 * pad
         header_w = (
             dmm_label_fm.horizontalAdvance(mode)
             + dmm_value_fm.horizontalAdvance(value)
             + dmm_label_fm.horizontalAdvance(unit)
-            + 4 * _PAD
+            + 4 * pad
         )
 
     panel_w = max(grid_w, header_w)
-    panel_h = header_h + (_GAP if header_h and grid_h else 0) + grid_h
+    panel_h = header_h + (gap if header_h and grid_h else 0) + grid_h
     if panel_w == 0 or panel_h == 0:
         return QImage()
 
@@ -168,33 +195,33 @@ def render_overlay_image(model: OverlayModel) -> QImage:
         y = 0
         if model.dmm is not None:
             mode, value, unit = model.dmm
-            _panel(painter, QRectF(0, 0, panel_w, header_h), _HEADER_BG, _CELL_BORDER)
-            inner = QRectF(_PAD, 0, panel_w - 2 * _PAD, header_h)
-            painter.setFont(_label_font(_DMM_LABEL_PX))
+            _panel(painter, QRectF(0, 0, panel_w, header_h), _HEADER_BG, _CELL_BORDER, radius)
+            inner = QRectF(pad, 0, panel_w - 2 * pad, header_h)
+            painter.setFont(label_font)
             painter.setPen(QColor(_LABEL_FG))
             painter.drawText(inner, _ALIGN_LEFT, mode)
             painter.drawText(inner, _ALIGN_RIGHT, unit)
-            painter.setFont(_digit_font(_DMM_VALUE_PX))
+            painter.setFont(big_font)
             painter.setPen(QColor(_VALUE_FG))
             painter.drawText(inner, _ALIGN_CENTER, value)
-            y = header_h + _GAP
+            y = header_h + gap
 
         for i, cell in enumerate(model.cells):
             col, row = i % 2, i // 2
-            x = col * (cell_w + _GAP)
-            cy = y + row * (cell_h + _GAP)
-            _panel(painter, QRectF(x, cy, cell_w, cell_h), _CELL_BG, _CELL_BORDER)
-            painter.setFont(_label_font(_CAPTION_PX, bold=True))
+            x = col * (cell_w + gap)
+            cy = y + row * (cell_h + gap)
+            _panel(painter, QRectF(x, cy, cell_w, cell_h), _CELL_BG, _CELL_BORDER, radius)
+            painter.setFont(caption_font)
             painter.setPen(QColor(_CAPTION_FG))
             painter.drawText(
-                QRectF(x + _PAD, cy + _PAD, cell_w - 2 * _PAD, caption_fm.height()),
+                QRectF(x + pad, cy + pad, cell_w - 2 * pad, caption_fm.height()),
                 int(Qt.AlignmentFlag.AlignLeft),
                 cell.caption,
             )
-            painter.setFont(_digit_font(_VALUE_PX))
+            painter.setFont(value_font)
             painter.setPen(QColor(_VALUE_FG))
             painter.drawText(
-                QRectF(x, cy + _PAD + caption_fm.height(), cell_w, value_fm.height() + _PAD),
+                QRectF(x, cy + pad + caption_fm.height(), cell_w, value_fm.height() + pad),
                 _ALIGN_CENTER,
                 cell.value,
             )
@@ -203,10 +230,10 @@ def render_overlay_image(model: OverlayModel) -> QImage:
     return image
 
 
-def _panel(painter: QPainter, rect: QRectF, fill: str, border: str) -> None:
+def _panel(painter: QPainter, rect: QRectF, fill: str, border: str, radius: int) -> None:
     painter.setPen(QPen(QColor(border), 1))
     painter.setBrush(QColor(fill))
-    painter.drawRoundedRect(rect, _RADIUS, _RADIUS)
+    painter.drawRoundedRect(rect, radius, radius)
 
 
 def _qimage_to_bgra(image: QImage) -> np.ndarray:
@@ -234,12 +261,14 @@ def blit_rgba(
     overlay: np.ndarray,
     corner: str = "bottom-left",
     margin: int = 16,
+    opacity: float = 1.0,
 ) -> np.ndarray:
     """Alpha-composite a BGRA ``overlay`` onto a BGR ``frame`` at ``corner``.
 
-    Returns a new frame; the input is left untouched. An overlay larger than the
-    frame is cropped rather than refused, so the HUD never crashes on a tiny
-    preview.
+    ``opacity`` scales the overlay's own alpha, so the readout can sit lightly
+    over the board instead of hiding it. Returns a new frame; the input is left
+    untouched. An overlay larger than the frame is cropped rather than refused,
+    so the HUD never crashes on a tiny preview.
     """
     fh, fw = frame.shape[:2]
     oh, ow = overlay.shape[:2]
@@ -253,6 +282,7 @@ def blit_rgba(
     roi = out[y : y + oh, x : x + ow].astype(np.float32)
     color = overlay[:, :, :3].astype(np.float32)
     alpha = overlay[:, :, 3:4].astype(np.float32) / 255.0
+    alpha = alpha * min(1.0, max(0.0, opacity))
     out[y : y + oh, x : x + ow] = (color * alpha + roi * (1.0 - alpha)).astype(np.uint8)
     return out
 
@@ -262,11 +292,17 @@ def draw_telemetry_overlay(
     readout: MeterReadout,
     config: TelemetryOverlayConfig,
 ) -> np.ndarray:
-    """Render the readout and composite it onto ``frame`` (frame unchanged if hidden)."""
+    """Render the readout and composite it onto ``frame`` (frame unchanged if hidden).
+
+    The readout is sized relative to the frame (see :func:`auto_scale`) and then
+    by the operator's own ``scale``, so it stays legible whatever the feed is.
+    """
     model = build_model(readout, config)
     if model.is_empty:
         return frame
-    image = render_overlay_image(model)
+    scale = auto_scale(frame.shape[1]) * max(0.1, config.scale)
+    image = render_overlay_image(model, scale)
     if image.isNull() or image.width() == 0 or image.height() == 0:
         return frame
-    return blit_rgba(frame, _qimage_to_bgra(image), config.corner)
+    margin = max(4, round(16 * scale))
+    return blit_rgba(frame, _qimage_to_bgra(image), config.corner, margin, opacity=config.opacity)

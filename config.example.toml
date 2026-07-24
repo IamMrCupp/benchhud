@@ -74,6 +74,9 @@ enabled = false
 corner = "bottom-left" # bottom-left | bottom-right | top-left | top-right
 show_psu = true        # VOLTAGE / CURRENT / POWER / MAX CURRENT
 show_dmm = true        # the DMM header line
+# The readout auto-scales to the frame (tuned for 1280 wide); these adjust it.
+scale = 1.0            # size multiplier on top of the automatic scaling
+opacity = 1.0          # below 1.0 lets the board show through the readout
 
 [intake]
 # benchhud-intake ticket API (LAN-only, read-only). Leave base_url empty to run
