@@ -51,6 +51,7 @@ from benchhud.shell.panels.power import PowerPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
+from benchhud.tickets import HttpTicketSource, NullTicketSource, TicketSource
 
 # Preview refresh rate for the on-screen scope panel (the virtual-cam output has
 # its own fps in config; this is just how often the GUI repaints).
@@ -114,6 +115,7 @@ class MainWindow(QMainWindow):
         self._demo_t = 0.0
         self._demo_scope = SyntheticFrameSource(960, 540)
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
+        self._ticket_source: TicketSource = self._make_ticket_source()
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
@@ -294,6 +296,17 @@ class MainWindow(QMainWindow):
         """Rebuild the fault monitor after a Preferences change."""
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
 
+    def _make_ticket_source(self) -> TicketSource:
+        """Build the ticket source from config: intake when set, else standalone."""
+        intake = self._config.intake
+        if intake.base_url.strip():
+            return HttpTicketSource(intake.base_url, intake.token)
+        return NullTicketSource()
+
+    def reconfigure_ticket_source(self) -> None:
+        """Rebuild the ticket source after a Preferences change."""
+        self._ticket_source = self._make_ticket_source()
+
     def _stop_demo(self) -> None:
         if self._demo_timer is not None:
             self._demo_timer.stop()
@@ -313,6 +326,7 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self._refresh_status)
         dialog.accepted.connect(self.restart_output)
         dialog.accepted.connect(self.reconfigure_faults)
+        dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.open()
         return dialog
 

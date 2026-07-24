@@ -75,6 +75,13 @@ corner = "bottom-left" # bottom-left | bottom-right | top-left | top-right
 show_psu = true        # VOLTAGE / CURRENT / POWER / MAX CURRENT
 show_dmm = true        # the DMM header line
 
+[intake]
+# benchhud-intake ticket API (LAN-only, read-only). Leave base_url empty to run
+# standalone with no ticket queue. token is intake's INTAKE_API_TOKEN (sent as a
+# bearer token). Customer names from tickets are PII — never composited.
+base_url = "" # e.g. "http://intake.repair-bench:8000"
+token = ""
+
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
 [[tools]]

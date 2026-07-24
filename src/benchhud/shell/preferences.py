@@ -66,6 +66,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_output_tab(), "Output")
         tabs.addTab(self._build_tools_tab(), "Tools")
         tabs.addTab(self._build_faults_tab(), "Faults")
+        tabs.addTab(self._build_tickets_tab(), "Tickets")
         tabs.addTab(self._build_logging_tab(), "Logging")
 
         buttons = QDialogButtonBox(
@@ -234,6 +235,20 @@ class PreferencesDialog(QDialog):
         form.addRow("Current threshold", self.fault_threshold)
         return widget
 
+    def _build_tickets_tab(self) -> QWidget:
+        intake = self._config.intake
+        self.intake_base_url = QLineEdit(intake.base_url)
+        self.intake_base_url.setPlaceholderText("http://intake.repair-bench:8000")
+        self.intake_token = QLineEdit(intake.token)
+        self.intake_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.intake_token.setPlaceholderText("intake API token")
+
+        widget = QWidget()
+        form = QFormLayout(widget)
+        form.addRow("Intake base URL", self.intake_base_url)
+        form.addRow("API token", self.intake_token)
+        return widget
+
     def _build_logging_tab(self) -> QWidget:
         self.logging_combo = QComboBox()
         self.logging_combo.addItems(_LOG_LEVELS)
@@ -270,6 +285,9 @@ class PreferencesDialog(QDialog):
 
         self._config.faults.auto_log = self.fault_auto_log.isChecked()
         self._config.faults.current_threshold_a = self.fault_threshold.value()
+
+        self._config.intake.base_url = self.intake_base_url.text().strip()
+        self._config.intake.token = self.intake_token.text().strip()
 
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()
