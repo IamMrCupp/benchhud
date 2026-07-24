@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from benchhud.boards.library import BoardFile, BoardLibrary
 from benchhud.jobs.capture import CaptureContext, capture_to_job
 from benchhud.jobs.report import export_report
 from benchhud.jobs.store import Job, JobStatus, JobStore
@@ -41,6 +42,17 @@ from benchhud.tickets.source import Ticket, TicketSource
 
 CaptureProvider = Callable[[], CaptureContext | None]
 TicketSourceProvider = Callable[[], TicketSource]
+BoardLibraryProvider = Callable[[], BoardLibrary]
+OpenBoardFn = Callable[[Path], bool]
+
+
+def preferred_board_file(files: list[BoardFile]) -> BoardFile | None:
+    """Pick which format to hand OpenBoardView — its native .obv first."""
+    for fmt in ("obv", "brd", "bdv"):
+        for board in files:
+            if board.format == fmt:
+                return board
+    return files[0] if files else None
 
 
 def _short_stamp(iso: str) -> str:
@@ -68,12 +80,17 @@ class JobsPanel(Panel):
         store: JobStore,
         capture_provider: CaptureProvider | None = None,
         ticket_source: TicketSourceProvider | None = None,
+        board_library: BoardLibraryProvider | None = None,
+        open_board: OpenBoardFn | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._store = store
         self._capture_provider = capture_provider
         self._ticket_source = ticket_source
+        self._board_library = board_library
+        self._open_board = open_board
+        self._board_files: list[BoardFile] = []
 
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_new_row())
@@ -84,6 +101,7 @@ class JobsPanel(Panel):
         self.history_label.setWordWrap(True)
         self.history_label.setVisible(False)
         layout.addWidget(self.history_label)
+        layout.addWidget(self._build_board_row())
         layout.addWidget(QLabel("Notes"))
         layout.addWidget(self._build_notes())
 
@@ -169,6 +187,24 @@ class JobsPanel(Panel):
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(self.notes_list)
         box.addLayout(row)
+        return widget
+
+    def _build_board_row(self) -> QWidget:
+        self.board_label = QLabel()
+        self.board_label.setObjectName("JobBoardHint")
+        self.board_label.setWordWrap(True)
+        self.open_board_button = QPushButton("Open board")
+        self.open_board_button.setToolTip("Open this board's view in OpenBoardView")
+        self.open_board_button.clicked.connect(self.open_board_for_selected)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.board_label, stretch=1)
+        row.addWidget(self.open_board_button)
+        widget = QWidget()
+        widget.setLayout(row)
+        self._board_row = widget
+        widget.setVisible(False)
         return widget
 
     # --- actions ---------------------------------------------------------
@@ -309,6 +345,7 @@ class JobsPanel(Panel):
             self.symptoms_edit.clear()
             self.notes_list.clear()
             self._update_history(None)
+            self._update_board(None)
             return
         self.device_edit.setText(job.device)
         self.serial_edit.setText(job.serial)
@@ -317,6 +354,32 @@ class JobsPanel(Panel):
         self.status_combo.setCurrentText(job.status)
         self.refresh_notes()
         self._update_history(job)
+        self._update_board(job)
+
+    def _update_board(self, job: Job | None) -> None:
+        """Show the job's board and whether its view is in the local library."""
+        board_id = (job.board_id or "").strip() if job is not None else ""
+        if not board_id:
+            self._board_files = []
+            self._board_row.setVisible(False)
+            return
+        library = self._board_library() if self._board_library is not None else None
+        self._board_files = library.resolve(board_id) if library is not None else []
+        self._board_row.setVisible(True)
+        if self._board_files:
+            formats = ", ".join(sorted({b.format for b in self._board_files}))
+            self.board_label.setText(f"▦ Board {board_id} — in library ({formats})")
+            self.open_board_button.setEnabled(self._open_board is not None)
+        else:
+            self.board_label.setText(f"▦ Board {board_id} — not in library")
+            self.open_board_button.setEnabled(False)
+
+    def open_board_for_selected(self) -> bool:
+        """Open the selected job's board view. False when there's nothing to open."""
+        board = preferred_board_file(self._board_files)
+        if board is None or self._open_board is None:
+            return False
+        return self._open_board(board.path)
 
     def _update_history(self, job: Job | None) -> None:
         """Show a 'seen before' hint when prior jobs match this board."""

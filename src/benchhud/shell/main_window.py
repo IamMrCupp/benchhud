@@ -21,6 +21,9 @@ from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
 
 from benchhud import __version__
+from benchhud.boards.library import BoardLibrary
+from benchhud.boards.opener import open_board
+from benchhud.boards.worklist import boards_to_source
 from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
@@ -41,6 +44,7 @@ from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.composite import colorize, compose
 from benchhud.overlay.telemetry import MeterReadout, draw_telemetry_overlay
 from benchhud.shell.about import about_html
+from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
@@ -116,6 +120,7 @@ class MainWindow(QMainWindow):
         self._demo_scope = SyntheticFrameSource(960, 540)
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
         self._ticket_source: TicketSource = self._make_ticket_source()
+        self._board_library = self._make_board_library()
 
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
@@ -152,6 +157,8 @@ class MainWindow(QMainWindow):
             self._job_store,
             capture_provider=self.capture_context,
             ticket_source=lambda: self._ticket_source,
+            board_library=lambda: self._board_library,
+            open_board=self.open_board_file,
         )
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
@@ -159,6 +166,7 @@ class MainWindow(QMainWindow):
         scope_dock.raise_()
         controls_dock.raise_()
 
+        self._build_boards_menu()
         self._build_view_menu()
         self._default_state = self.saveState()  # for "Reset layout"
 
@@ -208,6 +216,18 @@ class MainWindow(QMainWindow):
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
         quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
+
+    def _build_boards_menu(self) -> None:
+        menu = self.menuBar().addMenu("Boards")
+        self.find_board_action = QAction("Find board…", self)
+        self.find_board_action.setToolTip("Search the local board-view library")
+        self.find_board_action.triggered.connect(self.open_board_search)
+        menu.addAction(self.find_board_action)
+
+        self.boards_to_source_action = QAction("Boards to source…", self)
+        self.boards_to_source_action.setToolTip("Open tickets whose board isn't in the library")
+        self.boards_to_source_action.triggered.connect(self.open_boards_to_source)
+        menu.addAction(self.boards_to_source_action)
 
     def _build_view_menu(self) -> None:
         menu = self.menuBar().addMenu("View")
@@ -311,6 +331,35 @@ class MainWindow(QMainWindow):
         """Rebuild the ticket source after a Preferences change."""
         self._ticket_source = self._make_ticket_source()
 
+    # --- board docs ------------------------------------------------------
+
+    def _make_board_library(self) -> BoardLibrary:
+        boards = self._config.boards
+        return BoardLibrary.from_config(boards.library_dir, boards.extensions)
+
+    def reconfigure_boards(self) -> None:
+        """Rebuild the board library after a Preferences change."""
+        self._board_library = self._make_board_library()
+
+    def open_board_file(self, path) -> bool:
+        """Open a board file in OpenBoardView (or the OS handler)."""
+        return open_board(path, self._config.tools)
+
+    def open_board_search(self) -> BoardSearchDialog:
+        """ "Do I have this board?" — search the library (returned for tests)."""
+        dialog = BoardSearchDialog(
+            self._board_library, open_board=self.open_board_file, parent=self
+        )
+        dialog.open()
+        return dialog
+
+    def open_boards_to_source(self) -> BoardsToSourceDialog:
+        """Boards the open tickets need that the library lacks (for tests)."""
+        needs = boards_to_source(self._ticket_source.list_open_tickets(), self._board_library)
+        dialog = BoardsToSourceDialog(needs, parent=self)
+        dialog.open()
+        return dialog
+
     def _stop_demo(self) -> None:
         if self._demo_timer is not None:
             self._demo_timer.stop()
@@ -331,6 +380,7 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.restart_output)
         dialog.accepted.connect(self.reconfigure_faults)
         dialog.accepted.connect(self.reconfigure_ticket_source)
+        dialog.accepted.connect(self.reconfigure_boards)
         dialog.open()
         return dialog
 
