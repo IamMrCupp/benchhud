@@ -82,6 +82,7 @@ class JobsPanel(Panel):
         ticket_source: TicketSourceProvider | None = None,
         board_library: BoardLibraryProvider | None = None,
         open_board: OpenBoardFn | None = None,
+        open_schematic: OpenBoardFn | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -90,7 +91,9 @@ class JobsPanel(Panel):
         self._ticket_source = ticket_source
         self._board_library = board_library
         self._open_board = open_board
+        self._open_schematic = open_schematic
         self._board_files: list[BoardFile] = []
+        self._schematic_files: list[BoardFile] = []
 
         layout = QVBoxLayout(self)
         layout.addLayout(self._build_new_row())
@@ -194,13 +197,17 @@ class JobsPanel(Panel):
         self.board_label.setObjectName("JobBoardHint")
         self.board_label.setWordWrap(True)
         self.open_board_button = QPushButton("Open board")
-        self.open_board_button.setToolTip("Open this board's view in OpenBoardView")
+        self.open_board_button.setToolTip("Open this board in the configured viewer")
         self.open_board_button.clicked.connect(self.open_board_for_selected)
+        self.open_schematic_button = QPushButton("Open schematic")
+        self.open_schematic_button.setToolTip("Open this board's schematic PDF")
+        self.open_schematic_button.clicked.connect(self.open_schematic_for_selected)
 
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.board_label, stretch=1)
         row.addWidget(self.open_board_button)
+        row.addWidget(self.open_schematic_button)
         widget = QWidget()
         widget.setLayout(row)
         self._board_row = widget
@@ -357,19 +364,29 @@ class JobsPanel(Panel):
         self._update_board(job)
 
     def _update_board(self, job: Job | None) -> None:
-        """Show the job's board and whether its view is in the local library."""
+        """Show the job's board, its formats, and whether a schematic is filed."""
         board_id = (job.board_id or "").strip() if job is not None else ""
         if not board_id:
             self._board_files = []
+            self._schematic_files = []
             self._board_row.setVisible(False)
             return
         library = self._board_library() if self._board_library is not None else None
         self._board_files = library.resolve(board_id) if library is not None else []
+        self._schematic_files = library.resolve_schematic(board_id) if library is not None else []
         self._board_row.setVisible(True)
+
+        has_schematic = bool(self._schematic_files)
+        self.open_schematic_button.setEnabled(has_schematic and self._open_schematic is not None)
         if self._board_files:
             formats = ", ".join(sorted({b.format for b in self._board_files}))
-            self.board_label.setText(f"▦ Board {board_id} — in library ({formats})")
+            schematic = " · 📄 schematic" if has_schematic else ""
+            self.board_label.setText(f"▦ Board {board_id} — in library ({formats}){schematic}")
             self.open_board_button.setEnabled(self._open_board is not None)
+        elif has_schematic:
+            # No boardview, but the schematic is here — still worth surfacing.
+            self.board_label.setText(f"▦ Board {board_id} — schematic only, no boardview")
+            self.open_board_button.setEnabled(False)
         else:
             self.board_label.setText(f"▦ Board {board_id} — not in library")
             self.open_board_button.setEnabled(False)
@@ -380,6 +397,12 @@ class JobsPanel(Panel):
         if board is None or self._open_board is None:
             return False
         return self._open_board(board.path)
+
+    def open_schematic_for_selected(self) -> bool:
+        """Open the selected job's schematic PDF. False when there's none."""
+        if not self._schematic_files or self._open_schematic is None:
+            return False
+        return self._open_schematic(self._schematic_files[0].path)
 
     def _update_history(self, job: Job | None) -> None:
         """Show a 'seen before' hint when prior jobs match this board."""

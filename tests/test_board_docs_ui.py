@@ -25,24 +25,39 @@ _FLEX = ToolConfig(name="FlexBV", command="flexbv")
 def library(tmp_path) -> BoardLibrary:
     (tmp_path / "820-00239.obv").write_text("x")
     (tmp_path / "820-00239.brd").write_text("x")
-    (tmp_path / "051-01234.bdv").write_text("x")
+    (tmp_path / "820-00239.pdf").write_text("x")  # schematic for 820-00239
+    (tmp_path / "051-01234.bdv").write_text("x")  # boardview, no schematic
     return BoardLibrary(root=tmp_path)
 
 
 # --- viewer discovery ----------------------------------------------------
 
 
-def test_finds_the_configured_obv_tool() -> None:
-    assert find_board_viewer([_FLEX, _OBV]) is _OBV
+def test_auto_uses_first_known_viewer_in_order() -> None:
+    assert find_board_viewer([_FLEX, _OBV]) is _FLEX
+    assert find_board_viewer([_OBV, _FLEX]) is _OBV
 
 
 def test_matches_on_command_and_ignores_spacing_or_case() -> None:
     assert find_board_viewer([ToolConfig(name="Open Board View", command="/opt/obv")]) is not None
 
 
-def test_flexbv_is_not_treated_as_obv() -> None:
-    """The handoff specifies OBV, not FlexBV."""
-    assert find_board_viewer([_FLEX]) is None
+def test_flexbv_is_now_a_recognised_viewer() -> None:
+    """FlexBV is a first-class viewer (its Pro edition adds schematic cross-probe)."""
+    assert find_board_viewer([_FLEX]) is _FLEX
+
+
+def test_prefer_pins_a_specific_viewer() -> None:
+    assert find_board_viewer([_OBV, _FLEX], prefer="flexbv") is _FLEX
+    assert find_board_viewer([_OBV, _FLEX], prefer="openboardview") is _OBV
+
+
+def test_prefer_a_viewer_thats_not_configured_returns_none() -> None:
+    assert find_board_viewer([_OBV], prefer="flexbv") is None
+
+
+def test_unknown_prefer_falls_back_to_auto() -> None:
+    assert find_board_viewer([_OBV], prefer="nonsense") is _OBV
 
 
 # --- open_board ----------------------------------------------------------
@@ -163,11 +178,19 @@ def test_to_source_dialog_lists_needs(qtbot, library) -> None:
 # --- Jobs panel board row ------------------------------------------------
 
 
-def _panel(qtbot, library: BoardLibrary, opened: list[Path]) -> JobsPanel:
+def _panel(
+    qtbot,
+    library: BoardLibrary,
+    opened: list[Path],
+    schematics: list[Path] | None = None,
+) -> JobsPanel:
     panel = JobsPanel(
         JobStore(":memory:"),
         board_library=lambda: library,
         open_board=lambda p: bool(opened.append(p)) or True,
+        open_schematic=(
+            None if schematics is None else lambda p: bool(schematics.append(p)) or True
+        ),
     )
     qtbot.addWidget(panel)
     return panel
@@ -238,3 +261,74 @@ def test_boards_to_source_dialog_from_the_live_queue(qtbot, tmp_path) -> None:
     qtbot.addWidget(dialog)
     assert dialog.tree.topLevelItemCount() == 1
     dialog.close()
+
+
+# --- schematics ----------------------------------------------------------
+
+
+def test_open_schematic_uses_the_os_handler(tmp_path) -> None:
+    from benchhud.boards.opener import open_schematic
+
+    pdf = tmp_path / "820-00239.pdf"
+    pdf.write_text("x")
+    opened: list[Path] = []
+    assert open_schematic(pdf, os_open=opened.append) is True
+    assert opened == [pdf]
+
+
+def test_open_schematic_missing_file_is_false(tmp_path) -> None:
+    from benchhud.boards.opener import open_schematic
+
+    assert open_schematic(tmp_path / "nope.pdf", os_open=lambda p: None) is False
+
+
+def test_board_row_flags_a_schematic_and_enables_the_button(qtbot, library) -> None:
+    opened_schem: list[Path] = []
+    panel = _panel(qtbot, library, [], opened_schem)
+    job = panel._store.create_job("CDJ-3000", board_id="820-00239")
+    panel.refresh_jobs()
+    panel.select_job(job.id)
+    assert "schematic" in panel.board_label.text()
+    assert panel.open_schematic_button.isEnabled()
+    assert panel.open_schematic_for_selected() is True
+    assert opened_schem[0].suffix == ".pdf"
+
+
+def test_schematic_button_disabled_without_a_schematic(qtbot, library) -> None:
+    panel = _panel(qtbot, library, [], [])
+    job = panel._store.create_job("CDJ-3000", board_id="051-01234")  # boardview, no pdf
+    panel.refresh_jobs()
+    panel.select_job(job.id)
+    assert "schematic" not in panel.board_label.text()
+    assert not panel.open_schematic_button.isEnabled()
+
+
+def test_schematic_only_board_is_surfaced(qtbot, tmp_path) -> None:
+    (tmp_path / "999-00001.pdf").write_text("x")  # schematic, no boardview
+    panel = _panel(qtbot, BoardLibrary(root=tmp_path), [], [])
+    job = panel._store.create_job("iPhone", board_id="999-00001")
+    panel.refresh_jobs()
+    panel.select_job(job.id)
+    assert "schematic only" in panel.board_label.text()
+    assert not panel.open_board_button.isEnabled()
+    assert panel.open_schematic_button.isEnabled()
+
+
+def test_window_opens_the_board_in_the_configured_viewer(qtbot, tmp_path, monkeypatch) -> None:
+    board = tmp_path / "820-00239.brd"
+    board.write_text("x")
+    cfg = Config()
+    cfg.boards.viewer = "flexbv"
+    cfg.tools = [_OBV, _FLEX]
+    window = MainWindow(cfg)
+    qtbot.addWidget(window)
+    launched: list = []
+    from benchhud.boards import opener
+
+    monkeypatch.setattr(
+        opener,
+        "ToolLauncher",
+        lambda: type("L", (), {"launch": lambda _s, t, a: launched.append((t, a))})(),
+    )
+    assert window.open_board_file(board) is True
+    assert launched[0][0] is _FLEX  # honoured the viewer preference

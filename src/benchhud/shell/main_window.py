@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
 
 from benchhud import __version__
 from benchhud.boards.library import BoardLibrary
-from benchhud.boards.opener import open_board
+from benchhud.boards.opener import open_board, open_schematic
 from benchhud.boards.worklist import boards_to_source
 from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
             ticket_source=lambda: self._ticket_source,
             board_library=lambda: self._board_library,
             open_board=self.open_board_file,
+            open_schematic=self.open_schematic_file,
         )
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
@@ -335,15 +336,21 @@ class MainWindow(QMainWindow):
 
     def _make_board_library(self) -> BoardLibrary:
         boards = self._config.boards
-        return BoardLibrary.from_config(boards.library_dir, boards.extensions)
+        return BoardLibrary.from_config(
+            boards.library_dir, boards.extensions, boards.schematic_extensions
+        )
 
     def reconfigure_boards(self) -> None:
         """Rebuild the board library after a Preferences change."""
         self._board_library = self._make_board_library()
 
     def open_board_file(self, path) -> bool:
-        """Open a board file in OpenBoardView (or the OS handler)."""
-        return open_board(path, self._config.tools)
+        """Open a board file in the configured viewer (or the OS handler)."""
+        return open_board(path, self._config.tools, prefer=self._config.boards.viewer)
+
+    def open_schematic_file(self, path) -> bool:
+        """Open a schematic PDF on its own via the OS handler."""
+        return open_schematic(path)
 
     def open_board_search(self) -> BoardSearchDialog:
         """ "Do I have this board?" — search the library (returned for tests)."""

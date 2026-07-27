@@ -88,9 +88,14 @@ token = ""
 [boards]
 # Local board-view library, searched recursively; files are named after the
 # board's part number (e.g. 820-00239.obv). Leave library_dir empty if you
-# don't keep one. Board files open in OpenBoardView via the Tools launcher.
-library_dir = ""                    # e.g. "~/boards"
-extensions = ["obv", "brd", "bdv"] # formats OpenBoardView reads
+# don't keep one. Board files open in the configured viewer via the Tools
+# launcher. Keep a schematic PDF beside the board with the same name
+# (820-00239.pdf) — FlexBV auto-loads it and cross-probes; benchhud also offers
+# an "Open schematic" action for a standalone look.
+library_dir = ""                       # e.g. "~/boards"
+extensions = ["obv", "brd", "bdv"]     # board-view formats
+schematic_extensions = ["pdf"]         # schematic formats filed alongside
+viewer = "auto"                        # auto | openboardview | flexbv
 
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
