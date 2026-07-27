@@ -148,8 +148,13 @@ class BoardsConfig:
     """Local board-view library (empty directory → no library configured)."""
 
     library_dir: str = ""
-    # Board-view formats OpenBoardView reads.
+    # Board-view formats a viewer reads.
     extensions: list[str] = field(default_factory=lambda: ["obv", "brd", "bdv"])
+    # Schematic formats stored alongside the board (same stem). A viewer like
+    # FlexBV auto-loads the matching-name PDF and cross-probes against it.
+    schematic_extensions: list[str] = field(default_factory=lambda: ["pdf"])
+    # Which board viewer to open a board in: auto | openboardview | flexbv.
+    viewer: str = "auto"
 
 
 @dataclass
@@ -221,7 +226,7 @@ class Config:
         _apply(
             cfg.boards,
             data.get("boards", {}),
-            ("library_dir", "extensions"),
+            ("library_dir", "extensions", "schematic_extensions", "viewer"),
         )
 
         cfg.tools = [

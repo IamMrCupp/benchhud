@@ -6,7 +6,11 @@ import sqlite3
 
 import pytest
 
-from benchhud.boards.library import DEFAULT_EXTENSIONS, BoardLibrary
+from benchhud.boards.library import (
+    DEFAULT_EXTENSIONS,
+    DEFAULT_SCHEMATIC_EXTENSIONS,
+    BoardLibrary,
+)
 from benchhud.config import Config
 from benchhud.jobs.store import JobStore
 from benchhud.tickets.importer import import_ticket
@@ -179,3 +183,54 @@ def test_boards_config_defaults() -> None:
     cfg = Config.from_dict({})
     assert cfg.boards.library_dir == ""
     assert cfg.boards.extensions == ["obv", "brd", "bdv"]
+
+
+# --- schematics + viewer config ------------------------------------------
+
+
+def test_resolve_schematic_finds_the_pdf(tmp_path) -> None:
+    (tmp_path / "820-00239.brd").write_text("x")
+    (tmp_path / "820-00239.pdf").write_text("x")
+    lib = BoardLibrary(root=tmp_path)
+    schem = lib.resolve_schematic("820-00239")
+    assert [s.format for s in schem] == ["pdf"]
+    assert lib.has_schematic("820-00239")
+
+
+def test_schematic_is_not_listed_as_a_boardview(tmp_path) -> None:
+    (tmp_path / "820-00239.pdf").write_text("x")
+    lib = BoardLibrary(root=tmp_path)
+    assert lib.resolve("820-00239") == []  # a PDF is not a board file
+    assert lib.list_all() == []
+    assert lib.has_schematic("820-00239")
+
+
+def test_no_schematic_when_absent(tmp_path) -> None:
+    (tmp_path / "051-01234.bdv").write_text("x")
+    lib = BoardLibrary(root=tmp_path)
+    assert not lib.has_schematic("051-01234")
+    assert lib.resolve_schematic("051-01234") == []
+
+
+def test_from_config_sets_schematic_extensions() -> None:
+    lib = BoardLibrary.from_config("/tmp/x", ["brd"], [".PDF", "svg"])
+    assert lib.schematic_extensions == ("pdf", "svg")
+
+
+def test_from_config_defaults_schematic_extensions() -> None:
+    assert BoardLibrary.from_config("/tmp/x").schematic_extensions == DEFAULT_SCHEMATIC_EXTENSIONS
+
+
+def test_boards_config_viewer_and_schematics_round_trip() -> None:
+    cfg = Config()
+    cfg.boards.viewer = "flexbv"
+    cfg.boards.schematic_extensions = ["pdf", "svg"]
+    restored = Config.from_dict(cfg.to_dict())
+    assert restored.boards.viewer == "flexbv"
+    assert restored.boards.schematic_extensions == ["pdf", "svg"]
+
+
+def test_boards_config_new_defaults() -> None:
+    cfg = Config.from_dict({})
+    assert cfg.boards.viewer == "auto"
+    assert cfg.boards.schematic_extensions == ["pdf"]

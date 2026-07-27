@@ -45,6 +45,11 @@ _OVERLAY_CORNERS = (
     ("Top left", "top-left"),
     ("Top right", "top-right"),
 )
+_BOARD_VIEWERS = (
+    ("Auto (any installed)", "auto"),
+    ("OpenBoardView", "openboardview"),
+    ("FlexBV", "flexbv"),
+)
 
 
 class PreferencesDialog(QDialog):
@@ -272,6 +277,18 @@ class PreferencesDialog(QDialog):
         self.boards_browse_button.clicked.connect(self.browse_for_board_library)
         self.boards_extensions = QLineEdit(", ".join(boards.extensions))
         self.boards_extensions.setToolTip("Comma-separated board-view formats")
+        self.boards_schematic_extensions = QLineEdit(", ".join(boards.schematic_extensions))
+        self.boards_schematic_extensions.setToolTip(
+            "Schematic formats filed next to the board (same name)"
+        )
+        self.boards_viewer = QComboBox()
+        for label, data in _BOARD_VIEWERS:
+            self.boards_viewer.addItem(label, data)
+        viewer_idx = self.boards_viewer.findData(boards.viewer)
+        if viewer_idx >= 0:
+            self.boards_viewer.setCurrentIndex(viewer_idx)
+        self.boards_viewer.setToolTip("Which viewer 'Open board' launches")
+        fit_combo_popup(self.boards_viewer)
 
         row = QHBoxLayout()
         row.addWidget(self.boards_library_dir, stretch=1)
@@ -280,7 +297,9 @@ class PreferencesDialog(QDialog):
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow("Board library", row)
-        form.addRow("Formats", self.boards_extensions)
+        form.addRow("Board formats", self.boards_extensions)
+        form.addRow("Schematic formats", self.boards_schematic_extensions)
+        form.addRow("Open board in", self.boards_viewer)
         return widget
 
     def browse_for_board_library(self) -> None:
@@ -334,12 +353,13 @@ class PreferencesDialog(QDialog):
         self._config.intake.token = self.intake_token.text().strip()
 
         self._config.boards.library_dir = self.boards_library_dir.text().strip()
-        extensions = [
-            part.strip().lstrip(".").lower()
-            for part in self.boards_extensions.text().split(",")
-            if part.strip()
-        ]
-        self._config.boards.extensions = extensions or list(DEFAULT_EXTENSIONS)
+        self._config.boards.extensions = _parse_extensions(self.boards_extensions.text()) or list(
+            DEFAULT_EXTENSIONS
+        )
+        self._config.boards.schematic_extensions = _parse_extensions(
+            self.boards_schematic_extensions.text()
+        ) or ["pdf"]
+        self._config.boards.viewer = self.boards_viewer.currentData() or "auto"
 
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()
@@ -373,6 +393,11 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
     if selected >= 0:
         combo.setCurrentIndex(selected)
     fit_combo_popup(combo)
+
+
+def _parse_extensions(text: str) -> list[str]:
+    """Comma-separated formats → normalised list (``".PDF, brd"`` → ``["pdf", "brd"]``)."""
+    return [part.strip().lstrip(".").lower() for part in text.split(",") if part.strip()]
 
 
 def _cell(table: QTableWidget, row: int, col: int) -> str:
