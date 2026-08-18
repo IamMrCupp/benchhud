@@ -31,7 +31,8 @@ the scope" and turned into the bench's command center.
   [More →](docs/INTAKE.md)
 - **Board docs** — a local library of board-view files keyed by part number.
   "Do I have this board?" answered from the job, from a quick search, or across
-  the whole open ticket queue as a boards-to-source list. Opens in your viewer.
+  the whole open ticket queue as a boards-to-source list. Opens in OpenBoardView
+  or FlexBV; file a schematic PDF beside the board and FlexBV cross-probes it.
   [More →](docs/BOARDS.md)
 - **Tool launcher** — opens the repair tools you already use (OpenBoardView,
   minipro-gui, whatever's in your config) straight from the HUD.
