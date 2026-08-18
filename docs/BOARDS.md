@@ -88,10 +88,70 @@ empty by construction.
 **Open board** resolves your viewer from the **Tools launcher** entries you've
 already configured — there's no second place to point at the same binary. The
 file is appended as an argument. With no matching viewer configured, it falls
-back to the OS file handler for that extension.
+back to the OS file handler for that extension. A missing file or a viewer that
+won't start is logged, never raised — a bad board file can't take the HUD down.
 
-Which viewer, and how schematics come into it, is configurable — see the
-`viewer` and `schematic_extensions` keys in `config.example.toml`.
+### Which viewer
+
+benchhud recognises **OpenBoardView** and **FlexBV** as board viewers, by name or
+command in your Tools entries. `boards.viewer` picks between them:
+
+```toml
+[boards]
+viewer = "auto"      # auto | openboardview | flexbv
+```
+
+- **`auto`** — whichever viewer is configured, in the order your Tools are
+  listed. Have both, and the first one wins.
+- **`openboardview`** / **`flexbv`** — pin one. If it isn't in your Tools,
+  nothing matches and Open board falls through to the OS handler.
+
+Same setting in **Preferences → Boards → Open board in**.
+
+Which one to pick depends on what you want out of it. OBV is free and opens
+`.brd`/`.bdv`/`.obv` fine. FlexBV — the paid Professional tier — does the thing
+that makes a schematic worth filing: **click a component on the board, jump to
+it on the schematic.** If cross-probe is the workflow you're after, FlexBV is
+the tool that does it, and benchhud's job is just to get the right files in
+front of it.
+
+---
+
+## Schematics
+
+File a schematic PDF **beside the board file, with the same name**:
+
+```
+~/boards/
+  820-00239.brd
+  820-00239.pdf     ← the schematic
+```
+
+That's the whole convention, and it's FlexBV's, not ours: FlexBV auto-loads a
+PDF that shares the board file's stem in the same folder and cross-probes
+against it — no CLI plumbing, benchhud doesn't pass it, it just gets found. The
+library is already keyed by board id, so the co-located layout falls out for
+free.
+
+```toml
+[boards]
+schematic_extensions = ["pdf"]   # kept distinct from board-view formats
+```
+
+benchhud tracks schematics **separately** from board views — a PDF is never
+mistaken for a board file, and vice versa. In the Jobs dock's board row:
+
+| Row shows | Meaning |
+|---|---|
+| `▦ Board 820-00239 · 📄 schematic` | Board view *and* schematic filed. Open board (FlexBV picks up the PDF); or **Open schematic** for a standalone look. |
+| `▦ Board 820-00239` | Board view only. Open board works; no schematic to open. |
+| `▦ Board 820-00239 — schematic only, no boardview` | You've got the PDF but no board file. Open schematic works; source the board view. |
+| `▦ Board 820-00239 — not in library` | Neither. It'll show up in Boards to source. |
+
+**Open schematic** opens the PDF directly via the OS handler, ignoring the
+viewer setting. It's for glancing at the schematic on its own — most useful when
+your viewer is OBV, which has no schematic view, so opening the board wouldn't
+show it.
 
 ---
 
