@@ -144,17 +144,53 @@ def test_enumerate_handles_a_device_with_one_stream() -> None:
 # --- reason reported to the operator -------------------------------------
 
 
-def test_macos_reason_is_actionable_when_obs_is_absent(monkeypatch) -> None:
-    monkeypatch.setattr("benchhud.output.cmio.find_obs_sink", lambda: None)
-    reason = sink_module._macos_reason()
-    assert "approve its camera extension" in reason
+def test_reason_is_actionable_when_obs_is_absent(monkeypatch) -> None:
+    from benchhud.output import cmio
+
+    monkeypatch.setattr(cmio, "find_obs_sink", lambda: None)
+    with pytest.raises(cmio.CmioSinkUnavailable) as info:
+        cmio.open_cmio_sink(1280, 720)
+    assert "approve its camera extension" in info.value.reason
 
 
-def test_macos_reason_differs_once_obs_is_present(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "benchhud.output.cmio.find_obs_sink", lambda: (_device(OBS_DEVICE_UID), _SINK)
-    )
-    assert sink_module._macos_reason() == sink_module.MACOS_NOT_WIRED
+def test_reason_names_the_real_cause_when_stream_wont_open(monkeypatch) -> None:
+    """OBS present but the stream fails: say so — never 'not wired up yet' (#152).
+
+    That message was true when discovery landed before delivery; after delivery
+    shipped it sent operators to wait for a feature that already existed, when
+    the actual cause was almost always OBS's own virtual camera holding the
+    stream.
+    """
+    from benchhud.output import cmio
+
+    monkeypatch.setattr(cmio, "find_obs_sink", lambda: (_device(OBS_DEVICE_UID), _SINK))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("stream busy")
+
+    monkeypatch.setattr(cmio, "CmioSink", _boom)
+    with pytest.raises(cmio.CmioSinkUnavailable) as info:
+        cmio.open_cmio_sink(1280, 720)
+    reason = info.value.reason
+    assert "not wired up" not in reason
+    assert "Start Virtual Camera" in reason
+    assert "stream busy" in reason  # the underlying error is carried through
+    assert not hasattr(sink_module, "MACOS_NOT_WIRED")  # the stale constant is gone
+
+
+def test_open_output_sink_on_macos_reports_the_open_failure(monkeypatch) -> None:
+    """The shell-facing fallback carries the same reason the open raised with."""
+    from benchhud.output import cmio
+
+    monkeypatch.setattr(sink_module.sys, "platform", "darwin")
+
+    def _unavailable(*_a, **_k):
+        raise cmio.CmioSinkUnavailable("why it failed")
+
+    monkeypatch.setattr(cmio, "open_cmio_sink", _unavailable)
+    sink = sink_module.open_output_sink("/dev/ignored", 640, 480)
+    assert isinstance(sink, sink_module.NullSink)
+    assert sink.reason == "why it failed"
 
 
 # --- real framework smoke test (macOS only) ------------------------------
@@ -169,29 +205,6 @@ def test_real_enumeration_returns_devices_with_uids() -> None:
     for device in devices:
         for stream in device.streams:
             assert stream.direction in (0, 1, None)
-
-
-# --- sink construction / open path ---------------------------------------
-
-
-def test_open_cmio_sink_returns_none_without_obs(monkeypatch) -> None:
-    from benchhud.output import cmio
-
-    monkeypatch.setattr(cmio, "find_obs_sink", lambda: None)
-    assert cmio.open_cmio_sink(1280, 720) is None
-
-
-def test_open_cmio_sink_returns_none_if_stream_wont_open(monkeypatch) -> None:
-    """A found device whose stream fails to open must degrade, not raise."""
-    from benchhud.output import cmio
-
-    monkeypatch.setattr(cmio, "find_obs_sink", lambda: (CmioDevice(1, OBS_DEVICE_UID), _SINK))
-
-    def _boom(*_a, **_k):
-        raise RuntimeError("stream busy")
-
-    monkeypatch.setattr(cmio, "CmioSink", _boom)
-    assert cmio.open_cmio_sink(1280, 720) is None
 
 
 # --- real delivery into OBS (dev Mac with the extension approved) ---------
@@ -209,7 +222,6 @@ def test_real_delivery_into_obs() -> None:
     from benchhud.output.cmio import open_cmio_sink
 
     sink = open_cmio_sink(320, 240)
-    assert sink is not None
     assert sink.size == (320, 240)
     for i in range(30):
         sink.send(np.full((240, 320, 3), i % 256, dtype=np.uint8))
