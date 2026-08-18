@@ -60,7 +60,8 @@ Linux-first, because that's the OS the reference bench runs — not because the
 others are optional. **macOS and Windows are committed targets**, not ports
 someone might get to. The app itself is portable and runs on all three today;
 what's platform-specific is virtual-camera output, which talks to a different OS
-interface on each: v4l2loopback on Linux, OBS's camera extension on macOS, and a
+interface on each: v4l2loopback on Linux ([BENCH-SETUP.md](docs/BENCH-SETUP.md)),
+OBS's camera extension on macOS ([MACOS-SETUP.md](docs/MACOS-SETUP.md)), and a
 Windows backend still to come. Where a backend isn't available, the status bar
 says so rather than streaming nothing quietly.
 
@@ -94,6 +95,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, the hardware seams, design rules. |
 | [BENCH-SETUP.md](docs/BENCH-SETUP.md) | Bringing it up on the Linux bench — cameras, the OWON, v4l2loopback → OBS. |
+| [MACOS-SETUP.md](docs/MACOS-SETUP.md) | Publishing into OBS's virtual camera on a Mac. |
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |
