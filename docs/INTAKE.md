@@ -55,10 +55,10 @@ Parsing is forward-compatible in both directions: **extra keys are ignored**, an
 absent optional keys fall back to the defaults. An intake that only sends the
 first six keys parses fine — `board_id` just comes back `None`.
 
-> **Current state:** benchhud reads `board_id`, but the reference intake doesn't
-> send it yet — that's a one-line projection change on the intake side. Until
-> then the field is always `None`, which is why board-docs resolution
-> (Phase 11 §C) isn't wired up.
+> **On `board_id`:** benchhud resolves it against the local board library the
+> moment a ticket lands — see [BOARDS.md](BOARDS.md). If your intake doesn't send
+> it yet, the field comes back `None`, the board row stays quiet, and a later
+> re-sync backfills it once intake starts including it. Nothing breaks either way.
 
 HTTP goes through the stdlib `urllib` — no new dependency, matching the
 project's dep-conscious habit elsewhere.
@@ -75,7 +75,10 @@ local job, with `external_ref` set to the ticket's `ref`.
 job rather than duplicating it — matched on `external_ref` — so re-syncing the
 queue whenever you feel like it is safe.
 
-Import copies `device`, `customer`, and `symptoms` onto the job. It's a snapshot,
+Import copies `device`, `customer`, `symptoms`, and `board_id` onto the job.
+The one exception to "snapshot" is `board_id`: re-importing a ticket **backfills**
+it onto the existing job if intake has started sending it since. Otherwise it's a
+snapshot,
 not a live link: editing the job on the bench doesn't write back to intake, and
 benchhud never PUTs or POSTs anything. The API is read-only by design.
 

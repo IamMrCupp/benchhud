@@ -25,6 +25,7 @@ optional and layered on top — see [INTAKE.md](INTAKE.md).
 | `symptoms` | What it does wrong, as reported. |
 | `status` | One of the five below. |
 | `external_ref` | The ticket reference, when the job came from intake. |
+| `board_id` | The board's part number (e.g. `820-00239`). Not PII. Resolves against the local board library — see [BOARDS.md](BOARDS.md). |
 
 Statuses are `open`, `in_progress`, `waiting` (on parts or on the customer),
 `done`, and `scrapped`. Reports render them as human labels — `scrapped` prints
@@ -43,9 +44,11 @@ The dock has three parts, top to bottom:
 **Import…** to pull a ticket from intake (see [INTAKE.md](INTAKE.md)). The list
 below shows jobs newest first.
 
-**Detail form** — device, serial, customer, symptoms, status. **Save** writes
-changes and bumps the timestamp. **Export report…** writes a customer-facing
-Markdown report.
+**Detail form** — device, serial, customer, symptoms, status, board id. **Save**
+writes changes and bumps the timestamp. **Export report…** writes a
+customer-facing Markdown report. Below the form, the **board row** resolves the
+job's `board_id` against your local library and offers **Open board** when it's
+found — see [BOARDS.md](BOARDS.md).
 
 **Notes timeline** — the work log. Type and hit **Add note** (or Enter) for a
 text entry, or hit **Capture bench** to attach the live bench state.

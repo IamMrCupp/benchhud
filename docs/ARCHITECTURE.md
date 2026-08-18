@@ -17,10 +17,11 @@ ticket system is a protocol with a fake, not a dependency.
 - **`config.py`** — typed config tree + TOML load/save. Deliberately cv2-free.
 - **`shell/`** — `MainWindow` (dockable panel host + preview loop), `PanelManager`,
   the `Panel` base, `CompositeView` (the centre pane's live composite),
-  `Preferences` (device dropdowns, tools editor, intake settings), `qt_image`
-  (BGR→QImage), `theme` / `fonts` / `icon` / `about`, and the panels: `scope`,
-  `thermal`, `power` (the styled meter), `controls`, `launcher`, `jobs`, plus
-  `telemetry` (superseded by `power`, class retained).
+  `Preferences` (device dropdowns, tools editor, intake + boards settings),
+  `qt_image` (BGR→QImage), `theme` / `fonts` / `icon` / `about`, the dialogs
+  `ticket_picker` and `board_dialogs` (Find board / Boards to source), and the
+  panels: `scope`, `thermal`, `power` (the styled meter), `controls`,
+  `launcher`, `jobs`, plus `telemetry` (superseded by `power`, class retained).
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`,
   `CameraFrameSource` (cv2), threaded `LatestFrameReader` (latest-frame buffer),
   `FramePump` (Qt-free dispatch).
@@ -44,7 +45,14 @@ ticket system is a protocol with a fake, not a dependency.
   [JOBS.md](JOBS.md).
 - **`tickets/`** — the shop-ticket client seam: `source` (`Ticket`,
   `TicketSource`, null / in-memory), `http_source` (the intake API over stdlib
-  `urllib`), `importer` (idempotent ticket → job). See [INTAKE.md](INTAKE.md).
+  `urllib`), `importer` (idempotent ticket → job, backfills `board_id`). See
+  [INTAKE.md](INTAKE.md).
+- **`boards/`** — the local board-doc library: `library` (`BoardLibrary` —
+  recursive scan keyed by filename stem, resolve / search / missing, schematics
+  kept distinct from board views), `opener` (`find_board_viewer` from the Tools
+  entries + `open_board` / `open_schematic`, OS-handler fallback), `worklist`
+  (`boards_to_source` — open tickets minus the library, `customer`-free). Pure
+  path logic; nothing renders. See [BOARDS.md](BOARDS.md).
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
 ## The seams
@@ -60,6 +68,7 @@ implementing the real side of each — no consumer changes.
 | Thermal frames | `FrameSource` (raw Y16) | synthetic °C arrays | Y16 capture → `thermal.convert.y16_to_celsius` |
 | Device discovery | `devices.DeviceScanner` | canned `/sys` + `list_ports` fakes | `SystemDeviceScanner` over real `/dev` nodes |
 | Ticket queue | `tickets.TicketSource` | `InMemoryTicketSource`, injected opener | `HttpTicketSource` against the intake API |
+| Board library | `boards.BoardLibrary` + injected `os_open` | `tmp_path` libraries, fake opener | A real `library_dir`; viewer via the Tools entries or the OS handler |
 
 ## Bench bring-up checklist
 
