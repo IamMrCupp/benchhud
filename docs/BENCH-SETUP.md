@@ -2,8 +2,10 @@
 
 Bringing benchhud up on the repair bench: identify the cameras and the
 instrument, create the virtual-camera output OBS reads, and point the config at
-them. Linux-first — this is the tested platform. macOS/Windows run the app but
-have no virtual-camera output yet (see [ARCHITECTURE.md](ARCHITECTURE.md)).
+them. Linux is the reference bench, so this is the most-tested path. On a Mac
+the cameras and instrument work the same but output goes into OBS's own virtual
+camera instead of a loopback node — see [MACOS-SETUP.md](MACOS-SETUP.md). Windows
+has no output backend yet.
 
 The verified reference bench (Ubuntu 26.04): a Sipeed T256s thermal camera, a
 BTER 4K scope camera, and an OWON SPM8104 combined PSU/DMM. Your device numbers

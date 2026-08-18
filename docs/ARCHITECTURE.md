@@ -25,9 +25,13 @@ ticket system is a protocol with a fake, not a dependency.
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`,
   `CameraFrameSource` (cv2), threaded `LatestFrameReader` (latest-frame buffer),
   `FramePump` (Qt-free dispatch).
-- **`output/`** — `OutputSink` protocol, `FakeSink`, `NullSink`, and
-  `V4l2LoopbackSink` (`v4l2.py`: writes RGB24 straight to a v4l2loopback node
-  via `VIDIOC_S_FMT` + `os.write`, stdlib only).
+- **`output/`** — `OutputSink` protocol, `FakeSink`, `NullSink` (carries a
+  `reason` the status bar shows), and one real backend per platform, chosen by
+  `open_output_sink`: `V4l2LoopbackSink` (`v4l2.py`: writes RGB24 straight to a
+  v4l2loopback node via `VIDIOC_S_FMT` + `os.write`, stdlib only) on Linux, and
+  `CmioSink` (`cmio.py`: publishes UYVY frames into OBS's camera-extension sink
+  stream through Apple's public CoreMediaIO API via `ctypes` — no PyObjC, no
+  compiled extension) on macOS. Windows has no backend yet.
 - **`instruments/`** — `SerialPort` / `LineInstrument` seam, `OwonSpm8104` driver,
   `read_snapshot` (resilient telemetry), `PowerHistory` (rolling V/A/W buffer for
   the trend chart).
@@ -63,7 +67,8 @@ implementing the real side of each — no consumer changes.
 | Seam | Protocol | Tested with | Bench implementation |
 |---|---|---|---|
 | Camera in | `capture.FrameSource` | `SyntheticFrameSource` | `CameraFrameSource` over `cv2.VideoCapture(/dev/videoN)` |
-| Virtual cam out | `output.OutputSink` | `FakeSink`, fake `V4l2Device` | `V4l2LoopbackSink` on a real `/dev/videoN` loopback node |
+| Virtual cam out (Linux) | `output.OutputSink` | `FakeSink`, fake `V4l2Device` | `V4l2LoopbackSink` on a real `/dev/videoN` loopback node |
+| Virtual cam out (macOS) | `output.OutputSink` | pure helpers (fourcc, stream selection, BGR→UYVY) + injected fake enumeration | `CmioSink` into OBS's camera extension; the real-delivery test runs only on a Mac with the extension approved |
 | Instrument | `instruments.SerialPort` | `FakeSerialPort` | `OwonSpm8104.open_device('/dev/ttyUSB0')` |
 | Thermal frames | `FrameSource` (raw Y16) | synthetic °C arrays | Y16 capture → `thermal.convert.y16_to_celsius` |
 | Device discovery | `devices.DeviceScanner` | canned `/sys` + `list_ports` fakes | `SystemDeviceScanner` over real `/dev` nodes |
@@ -113,10 +118,17 @@ When the workspace is on the Linux box:
   separately, which is why the whole UI is testable offscreen.
 - **The compositor is pure array math.** Given a scope frame, a °C array, a
   transform, and settings, it's deterministic — no hardware, no globals.
-- **Kernel interfaces are packed by hand, not wrapped.** `output/v4l2.py` talks to
-  v4l2loopback through stdlib `fcntl`/`struct` rather than a third-party binding.
-  That keeps the struct layout under test on any OS — and keeps the licensing of
-  benchhud's own output path unencumbered.
+- **OS interfaces are called directly, not wrapped.** `output/v4l2.py` talks to
+  v4l2loopback through stdlib `fcntl`/`struct`; `output/cmio.py` talks to
+  CoreMediaIO through `ctypes`. No third-party binding on either path. That keeps
+  the pure parts (struct layout, pixel conversion, stream selection) under test on
+  any OS — and keeps the licensing of benchhud's own output path unencumbered.
+- **Interoperating with OBS is not linking to it.** The GPL problem that got
+  `pyvirtualcam` removed was *linking* a GPLv2 library into this process. The
+  macOS backend calls only Apple's public frameworks and hands frames to OBS's
+  separately-installed camera extension across an OS IPC boundary — the same
+  relationship as writing to a v4l2loopback node on Linux. Keep it that way: no
+  OBS code, no OBS libraries, in-process.
 - **The bench log is local-first.** Jobs live in a SQLite file beside the config —
   no server, no account, works with the network down. A shop ticket system is an
   optional source layered on top, never a dependency.
