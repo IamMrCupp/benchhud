@@ -37,6 +37,12 @@ from benchhud.devices.discovery import (
     resolve_capture_device,
 )
 from benchhud.instruments.telemetry import TelemetrySnapshot
+from benchhud.inventory import (
+    HttpInventorySource,
+    InventorySource,
+    NullInventorySource,
+    Part,
+)
 from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, default_db_path
@@ -49,6 +55,7 @@ from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
+from benchhud.shell.panels.inventory import InventoryPanel
 from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
@@ -120,6 +127,7 @@ class MainWindow(QMainWindow):
         self._demo_scope = SyntheticFrameSource(960, 540)
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
         self._ticket_source: TicketSource = self._make_ticket_source()
+        self._inventory_source: InventorySource = self._make_inventory_source()
         self._board_library = self._make_board_library()
 
         self.setObjectName("BenchhudMainWindow")
@@ -163,6 +171,13 @@ class MainWindow(QMainWindow):
         )
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
+        self.inventory_panel = InventoryPanel(
+            lambda: self._inventory_source,
+            job_ref=self.selected_job_ref,
+            on_consumed=self._note_parts_used,
+        )
+        inventory_dock = self.panels.add_panel(self.inventory_panel, left)
+        self.tabifyDockWidget(jobs_dock, inventory_dock)  # …and inventory
 
         scope_dock.raise_()
         controls_dock.raise_()
@@ -332,6 +347,43 @@ class MainWindow(QMainWindow):
         """Rebuild the ticket source after a Preferences change."""
         self._ticket_source = self._make_ticket_source()
 
+    def _make_inventory_source(self) -> InventorySource:
+        """Build the inventory source from config: bench-parts when set, else standalone."""
+        inventory = self._config.inventory
+        if inventory.base_url.strip():
+            return HttpInventorySource(inventory.base_url, inventory.token)
+        return NullInventorySource()
+
+    def reconfigure_inventory_source(self) -> None:
+        """Rebuild the inventory source after a Preferences change."""
+        self._inventory_source = self._make_inventory_source()
+        self.inventory_panel.refresh()
+
+    def selected_job_ref(self) -> str | None:
+        """The selected job's shop-ticket ref — what consumption is billed to.
+
+        None when no job is selected or the job isn't linked to a ticket;
+        bench-parts records the movement without a ref in that case.
+        """
+        job_id = self.jobs_panel.selected_job_id()
+        if job_id is None:
+            return None
+        job = self._job_store.get_job(job_id)
+        return job.external_ref if job is not None else None
+
+    def _note_parts_used(self, part: Part, quantity: int) -> None:
+        """Drop a note on the selected job's timeline after a consume.
+
+        The shop ledger is the source of truth; this is the bench-side echo so
+        the job report tells the whole story without opening bench-parts.
+        """
+        job_id = self.jobs_panel.selected_job_id()
+        if job_id is None:
+            return
+        name = part.mpn or part.description
+        self._job_store.add_note(job_id, f"Used {quantity} \u00d7 {name}")
+        self.jobs_panel.refresh_notes()
+
     # --- board docs ------------------------------------------------------
 
     def _make_board_library(self) -> BoardLibrary:
@@ -386,6 +438,7 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.restart_output)
         dialog.accepted.connect(self.reconfigure_faults)
         dialog.accepted.connect(self.reconfigure_ticket_source)
+        dialog.accepted.connect(self.reconfigure_inventory_source)
         dialog.accepted.connect(self.reconfigure_boards)
         # Last: the status line reports sink state, so it must run after the
         # sink has been rebuilt or it shows the previous one.

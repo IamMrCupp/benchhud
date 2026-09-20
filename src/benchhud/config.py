@@ -144,6 +144,14 @@ class IntakeConfig:
 
 
 @dataclass
+class InventoryConfig:
+    """Connection to a bench-parts inventory API (empty base URL → disabled)."""
+
+    base_url: str = ""
+    token: str = ""
+
+
+@dataclass
 class BoardsConfig:
     """Local board-view library (empty directory → no library configured)."""
 
@@ -167,6 +175,7 @@ class Config:
     faults: FaultConfig = field(default_factory=FaultConfig)
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
+    inventory: InventoryConfig = field(default_factory=InventoryConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
@@ -221,6 +230,11 @@ class Config:
         _apply(
             cfg.intake,
             data.get("intake", {}),
+            ("base_url", "token"),
+        )
+        _apply(
+            cfg.inventory,
+            data.get("inventory", {}),
             ("base_url", "token"),
         )
         _apply(
