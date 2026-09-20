@@ -466,14 +466,44 @@ class CmioSink:
         self._api.cmio.CMIODeviceStopStream(self._device_id, self._stream_id)
 
 
-def open_cmio_sink(width: int, height: int) -> CmioSink | None:
-    """Open a sink into OBS's virtual camera, or ``None`` if it isn't available."""
+#: Shown when OBS's extension is present but its sink stream wouldn't start.
+#: The usual cause is single-writer: OBS's own **Start Virtual Camera** already
+#: holds the stream, so benchhud can't.
+OBS_SINK_BUSY = (
+    "OBS Virtual Camera found, but its sink stream wouldn't open — "
+    "stop OBS's own Start Virtual Camera, then re-enable output"
+)
+
+
+class CmioSinkUnavailable(RuntimeError):
+    """OBS's virtual camera can't be published to right now.
+
+    ``reason`` is operator-facing — it names what to go fix, and it's what the
+    shell puts in the status bar. Two distinct situations get two distinct
+    reasons, because they need different fixes: OBS's extension isn't installed
+    or approved (:data:`OBS_CAMERA_MISSING`), or it *is* there but the stream
+    wouldn't open (:data:`OBS_SINK_BUSY`).
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def open_cmio_sink(width: int, height: int) -> CmioSink:
+    """Open a sink into OBS's virtual camera.
+
+    Raises :class:`CmioSinkUnavailable` — never a bare framework error — with a
+    reason the operator can act on. Callers that must not raise catch it and
+    fall back; the reason travels with the exception rather than being
+    re-derived after the fact.
+    """
     found = find_obs_sink()
     if found is None:
-        return None
+        raise CmioSinkUnavailable(OBS_CAMERA_MISSING)
     device, stream = found
     try:
         return CmioSink(width, height, device.device_id, stream.stream_id)
     except (RuntimeError, CoreMediaIOUnavailable) as exc:
         log.warning("could not open OBS virtual-camera sink: %s", exc)
-        return None
+        raise CmioSinkUnavailable(f"{OBS_SINK_BUSY} ({exc})") from exc

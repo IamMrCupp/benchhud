@@ -4,8 +4,10 @@ Consumers depend on the :class:`OutputSink` protocol. :class:`FakeSink` records
 frames in memory for tests; :class:`~benchhud.output.v4l2.V4l2LoopbackSink`
 writes them to a v4l2loopback device for OBS to capture.
 
-Virtual-camera output is Linux-only today. macOS and Windows are P2 portability
-targets and their backends need a non-GPL path — see ``docs/ARCHITECTURE.md``.
+One real backend per platform, chosen by :func:`open_output_sink`: v4l2loopback
+on Linux, OBS's camera extension on macOS (:mod:`benchhud.output.cmio`). Windows
+has none yet. Where a backend can't open, the fallback :class:`NullSink` carries
+a ``reason`` the shell shows — see ``docs/ARCHITECTURE.md``.
 """
 
 from __future__ import annotations
@@ -91,25 +93,11 @@ class NullSink:
         self.closed = True
 
 
-#: Why there is no virtual-camera backend on this OS yet. v4l2loopback is a Linux
-#: kernel facility; the macOS/Windows backends were lost when ``pyvirtualcam``
-#: (GPLv2) was dropped. macOS is being replaced by a CoreMediaIO client of OBS's
-#: camera extension (:mod:`benchhud.output.cmio`); Windows is still outstanding.
+#: Why there is no virtual-camera backend on this OS yet. Linux publishes to a
+#: v4l2loopback node and macOS into OBS's camera extension
+#: (:mod:`benchhud.output.cmio`); this is what any other platform — Windows,
+#: today — is told until it gets a backend of its own.
 UNSUPPORTED_PLATFORM = "virtual-camera output is not available on this platform yet"
-
-#: macOS has the plumbing but frame delivery isn't wired up yet (Phase 12 §A.2).
-MACOS_NOT_WIRED = "OBS Virtual Camera found, but macOS frame delivery isn't wired up yet"
-
-
-def _macos_reason() -> str:
-    """Why macOS output isn't publishing — distinguishes 'no OBS' from 'not yet built'.
-
-    Reported instead of a generic message so the operator knows whether to go
-    approve an extension or simply wait for the feature.
-    """
-    from benchhud.output.cmio import OBS_CAMERA_MISSING, find_obs_sink
-
-    return MACOS_NOT_WIRED if find_obs_sink() is not None else OBS_CAMERA_MISSING
 
 
 def open_output_sink(device: str, width: int, height: int) -> OutputSink:
@@ -124,14 +112,15 @@ def open_output_sink(device: str, width: int, height: int) -> OutputSink:
     the worst outcome, so the reason is surfaced rather than only logged.
     """
     if sys.platform.startswith("darwin"):
-        from benchhud.output.cmio import open_cmio_sink
+        from benchhud.output.cmio import CmioSinkUnavailable, open_cmio_sink
 
-        sink = open_cmio_sink(width, height)
-        if sink is not None:
-            return sink
-        reason = _macos_reason()
-        log.warning("%s; frames will be discarded", reason)
-        return NullSink(width, height, reason=reason)
+        try:
+            return open_cmio_sink(width, height)
+        except CmioSinkUnavailable as exc:
+            # The reason rides on the exception, so it describes the failure
+            # that actually happened — not a second probe that might disagree.
+            log.warning("%s; frames will be discarded", exc.reason)
+            return NullSink(width, height, reason=exc.reason)
     if not sys.platform.startswith("linux"):
         log.warning("%s; frames will be discarded", UNSUPPORTED_PLATFORM)
         return NullSink(width, height, reason=UNSUPPORTED_PLATFORM)
