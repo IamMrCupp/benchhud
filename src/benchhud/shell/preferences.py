@@ -73,6 +73,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_tools_tab(), "Tools")
         tabs.addTab(self._build_faults_tab(), "Faults")
         tabs.addTab(self._build_tickets_tab(), "Tickets")
+        tabs.addTab(self._build_inventory_tab(), "Inventory")
         tabs.addTab(self._build_boards_tab(), "Boards")
         tabs.addTab(self._build_logging_tab(), "Logging")
 
@@ -269,6 +270,20 @@ class PreferencesDialog(QDialog):
         form.addRow("API token", self.intake_token)
         return widget
 
+    def _build_inventory_tab(self) -> QWidget:
+        inventory = self._config.inventory
+        self.inventory_base_url = QLineEdit(inventory.base_url)
+        self.inventory_base_url.setPlaceholderText("http://192.168.7.204:8000")
+        self.inventory_token = QLineEdit(inventory.token)
+        self.inventory_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.inventory_token.setPlaceholderText("bench-parts API token")
+
+        widget = QWidget()
+        form = QFormLayout(widget)
+        form.addRow("bench-parts base URL", self.inventory_base_url)
+        form.addRow("API token", self.inventory_token)
+        return widget
+
     def _build_boards_tab(self) -> QWidget:
         boards = self._config.boards
         self.boards_library_dir = QLineEdit(boards.library_dir)
@@ -351,6 +366,9 @@ class PreferencesDialog(QDialog):
 
         self._config.intake.base_url = self.intake_base_url.text().strip()
         self._config.intake.token = self.intake_token.text().strip()
+
+        self._config.inventory.base_url = self.inventory_base_url.text().strip()
+        self._config.inventory.token = self.inventory_token.text().strip()
 
         self._config.boards.library_dir = self.boards_library_dir.text().strip()
         self._config.boards.extensions = _parse_extensions(self.boards_extensions.text()) or list(
