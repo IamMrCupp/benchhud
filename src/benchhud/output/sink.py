@@ -5,9 +5,10 @@ frames in memory for tests; :class:`~benchhud.output.v4l2.V4l2LoopbackSink`
 writes them to a v4l2loopback device for OBS to capture.
 
 One real backend per platform, chosen by :func:`open_output_sink`: v4l2loopback
-on Linux, OBS's camera extension on macOS (:mod:`benchhud.output.cmio`). Windows
-has none yet. Where a backend can't open, the fallback :class:`NullSink` carries
-a ``reason`` the shell shows — see ``docs/ARCHITECTURE.md``.
+on Linux, OBS's camera extension on macOS (:mod:`benchhud.output.cmio`), and
+softcam on Windows (:mod:`benchhud.output.softcam`). Where a backend can't open,
+the fallback :class:`NullSink` carries a ``reason`` the shell shows — see
+``docs/ARCHITECTURE.md``.
 """
 
 from __future__ import annotations
@@ -93,10 +94,10 @@ class NullSink:
         self.closed = True
 
 
-#: Why there is no virtual-camera backend on this OS yet. Linux publishes to a
-#: v4l2loopback node and macOS into OBS's camera extension
-#: (:mod:`benchhud.output.cmio`); this is what any other platform — Windows,
-#: today — is told until it gets a backend of its own.
+#: Why there is no virtual-camera backend on this OS. Linux publishes to a
+#: v4l2loopback node, macOS into OBS's camera extension
+#: (:mod:`benchhud.output.cmio`) and Windows through softcam
+#: (:mod:`benchhud.output.softcam`); this is what anything else is told.
 UNSUPPORTED_PLATFORM = "virtual-camera output is not available on this platform yet"
 
 
@@ -119,6 +120,14 @@ def open_output_sink(device: str, width: int, height: int) -> OutputSink:
         except CmioSinkUnavailable as exc:
             # The reason rides on the exception, so it describes the failure
             # that actually happened — not a second probe that might disagree.
+            log.warning("%s; frames will be discarded", exc.reason)
+            return NullSink(width, height, reason=exc.reason)
+    if sys.platform.startswith("win"):
+        from benchhud.output.softcam import SoftcamUnavailable, open_softcam_sink
+
+        try:
+            return open_softcam_sink(width, height)
+        except SoftcamUnavailable as exc:
             log.warning("%s; frames will be discarded", exc.reason)
             return NullSink(width, height, reason=exc.reason)
     if not sys.platform.startswith("linux"):

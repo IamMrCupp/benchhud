@@ -28,10 +28,12 @@ ticket system is a protocol with a fake, not a dependency.
 - **`output/`** — `OutputSink` protocol, `FakeSink`, `NullSink` (carries a
   `reason` the status bar shows), and one real backend per platform, chosen by
   `open_output_sink`: `V4l2LoopbackSink` (`v4l2.py`: writes RGB24 straight to a
-  v4l2loopback node via `VIDIOC_S_FMT` + `os.write`, stdlib only) on Linux, and
+  v4l2loopback node via `VIDIOC_S_FMT` + `os.write`, stdlib only) on Linux,
   `CmioSink` (`cmio.py`: publishes UYVY frames into OBS's camera-extension sink
   stream through Apple's public CoreMediaIO API via `ctypes` — no PyObjC, no
-  compiled extension) on macOS. Windows has no backend yet.
+  compiled extension) on macOS, and `SoftcamSink` (`softcam.py`: sends BGR24
+  straight into softcam's DirectShow filter DLL via `ctypes` — the one backend
+  that converts nothing) on Windows.
 - **`instruments/`** — `SerialPort` / `LineInstrument` seam, `OwonSpm8104` driver,
   `read_snapshot` (resilient telemetry), `PowerHistory` (rolling V/A/W buffer for
   the trend chart).
@@ -120,7 +122,8 @@ When the workspace is on the Linux box:
   transform, and settings, it's deterministic — no hardware, no globals.
 - **OS interfaces are called directly, not wrapped.** `output/v4l2.py` talks to
   v4l2loopback through stdlib `fcntl`/`struct`; `output/cmio.py` talks to
-  CoreMediaIO through `ctypes`. No third-party binding on either path. That keeps
+  CoreMediaIO and `output/softcam.py` to softcam's DLL, both through `ctypes`.
+  No third-party binding on any of the three paths. That keeps
   the pure parts (struct layout, pixel conversion, stream selection) under test on
   any OS — and keeps the licensing of benchhud's own output path unencumbered.
 - **Interoperating with OBS is not linking to it.** The GPL problem that got
@@ -128,7 +131,9 @@ When the workspace is on the Linux box:
   macOS backend calls only Apple's public frameworks and hands frames to OBS's
   separately-installed camera extension across an OS IPC boundary — the same
   relationship as writing to a v4l2loopback node on Linux. Keep it that way: no
-  OBS code, no OBS libraries, in-process.
+  OBS code, no OBS libraries, in-process. Windows takes the same posture for the
+  same reason, which is why it goes through softcam (MIT) rather than OBS's own
+  shared-memory protocol — that protocol's only public spec is GPL source.
 - **The bench log is local-first.** Jobs live in a SQLite file beside the config —
   no server, no account, works with the network down. A shop ticket system is an
   optional source layered on top, never a dependency.

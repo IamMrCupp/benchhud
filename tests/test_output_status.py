@@ -14,7 +14,8 @@ def test_null_sink_carries_no_reason_by_default() -> None:
 
 
 def test_unsupported_platform_gets_an_explicit_reason(monkeypatch) -> None:
-    monkeypatch.setattr("benchhud.output.sink.sys.platform", "win32")
+    """Linux, macOS and Windows all have backends now — this is everything else."""
+    monkeypatch.setattr("benchhud.output.sink.sys.platform", "freebsd14")
     sink = open_output_sink("/dev/video10", 320, 240)
     assert isinstance(sink, NullSink)
     assert sink.reason == UNSUPPORTED_PLATFORM
@@ -31,9 +32,23 @@ def test_macos_gets_its_own_actionable_reason(monkeypatch) -> None:
     assert "OBS" in sink.reason
 
 
+def test_windows_gets_its_own_actionable_reason(monkeypatch) -> None:
+    """Windows has a real backend path, so it must not say "unsupported".
+
+    The DLL is absent wherever this runs, which is the case being pinned: an
+    unregistered driver reports how to register it, not that the OS is
+    unsupported.
+    """
+    monkeypatch.setattr("benchhud.output.sink.sys.platform", "win32")
+    sink = open_output_sink("/dev/video10", 320, 240)
+    assert isinstance(sink, NullSink)
+    assert sink.reason != UNSUPPORTED_PLATFORM
+    assert "softcam" in sink.reason
+
+
 def test_non_linux_sink_still_accepts_frames(monkeypatch) -> None:
     """Falling back must keep the HUD usable, just not publishing."""
-    monkeypatch.setattr("benchhud.output.sink.sys.platform", "win32")
+    monkeypatch.setattr("benchhud.output.sink.sys.platform", "freebsd14")
     sink = open_output_sink("/dev/video10", 32, 24)
     sink.send(np.zeros((24, 32, 3), dtype=np.uint8))
     assert sink.frame_count == 1
