@@ -152,6 +152,27 @@ class InventoryConfig:
 
 
 @dataclass
+class InstrumentsConfig:
+    """Control policy for the bench instrument (#164).
+
+    Policy only — the serial device itself stays on ``panels.telemetry``, which
+    already owns it. Two places naming the same port is how they drift apart.
+
+    ``control`` is off by default and is the switch that lets the HUD change
+    instrument state at all. This is a supply wired to other people's boards:
+    read-only telemetry is the posture you get unless you ask for more.
+    """
+
+    control: bool = False
+    # Hard ceilings the driver refuses to exceed. Conservative on purpose —
+    # enough for logic rails and phone-board work.
+    max_voltage: float = 5.5
+    max_current: float = 1.0
+    # Seconds between telemetry polls on the session's owner thread.
+    poll_interval: float = 0.2
+
+
+@dataclass
 class BoardsConfig:
     """Local board-view library (empty directory → no library configured)."""
 
@@ -176,6 +197,7 @@ class Config:
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
+    instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
@@ -236,6 +258,12 @@ class Config:
             cfg.inventory,
             data.get("inventory", {}),
             ("base_url", "token"),
+        )
+
+        _apply(
+            cfg.instruments,
+            data.get("instruments", {}),
+            ("control", "max_voltage", "max_current", "poll_interval"),
         )
         _apply(
             cfg.boards,

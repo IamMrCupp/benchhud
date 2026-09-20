@@ -35,6 +35,14 @@ class InstrumentLimitError(Exception):
     """
 
 
+class ControlDisabledError(Exception):
+    """A state-changing command was attempted with control turned off.
+
+    Read-only telemetry is the default posture (``[instruments] control``), so a
+    HUD that can energize a rail is something the operator switched on.
+    """
+
+
 @dataclass(frozen=True)
 class InstrumentLimits:
     """Hard ceilings the driver refuses to exceed.
@@ -92,14 +100,28 @@ class OwonSpm8104:
         self,
         instrument: LineInstrument,
         limits: InstrumentLimits = DEFAULT_LIMITS,
+        *,
+        control_enabled: bool = False,
     ) -> None:
         self._inst = instrument
         self._limits = limits
+        self._control_enabled = control_enabled
 
     @property
     def limits(self) -> InstrumentLimits:
         """The ceilings this driver enforces on setpoints."""
         return self._limits
+
+    @property
+    def control_enabled(self) -> bool:
+        """Whether state-changing commands are permitted at all."""
+        return self._control_enabled
+
+    def _require_control(self, what: str) -> None:
+        if not self._control_enabled:
+            raise ControlDisabledError(
+                f"{what} refused — instrument control is off ([instruments] control)"
+            )
 
     def identify(self) -> str:
         """Return the ``*IDN?`` identity string."""
@@ -132,23 +154,28 @@ class OwonSpm8104:
 
     def set_voltage(self, volts: float) -> None:
         """Set the PSU output voltage. UNVERIFIED command."""
+        self._require_control("setting voltage")
         self._check_setpoint(volts, self._limits.max_voltage, "V")
         self._inst.command(f"VOLT {volts:.3f}")
 
     def set_current_limit(self, amps: float) -> None:
         """Set the PSU current limit. UNVERIFIED command."""
+        self._require_control("setting current limit")
         self._check_setpoint(amps, self._limits.max_current, "A")
         self._inst.command(f"CURR {amps:.3f}")
 
     def output_on(self) -> None:
         """Enable the PSU output. UNVERIFIED command."""
+        self._require_control("enabling the output")
         self._inst.command("OUTP ON")
 
     def output_off(self) -> None:
         """Disable the PSU output. UNVERIFIED command.
 
-        The safe direction. Callers may fire this without a preceding read —
-        it's what connect, disconnect and error paths fall back to.
+        **Deliberately exempt from the control gate.** The gate exists to stop
+        the HUD energizing a rail, never to stop it de-energizing one — a
+        read-only session that somehow found a live output should still be able
+        to drop it, and shutdown paths must not depend on a config flag.
         """
         self._inst.command("OUTP OFF")
 
@@ -159,6 +186,7 @@ class OwonSpm8104:
         smuggle a second command onto the wire — rejected rather than stripped,
         because a caller passing one is confused about something.
         """
+        self._require_control("switching DMM mode")
         token = mode.strip()
         if not token:
             raise ValueError("DMM mode must not be empty")
@@ -170,9 +198,14 @@ class OwonSpm8104:
         self._inst.close()
 
 
-def from_serial_port(port: SerialPort, limits: InstrumentLimits = DEFAULT_LIMITS) -> OwonSpm8104:
+def from_serial_port(
+    port: SerialPort,
+    limits: InstrumentLimits = DEFAULT_LIMITS,
+    *,
+    control_enabled: bool = False,
+) -> OwonSpm8104:
     """Build a driver over an existing :class:`SerialPort` (test seam)."""
-    return OwonSpm8104(LineInstrument(port), limits)
+    return OwonSpm8104(LineInstrument(port), limits, control_enabled=control_enabled)
 
 
 def open_device(
@@ -181,6 +214,7 @@ def open_device(
     baud: int = 115200,
     timeout: float = 1.0,
     limits: InstrumentLimits = DEFAULT_LIMITS,
+    control_enabled: bool = False,
 ) -> OwonSpm8104:
     """Open the real OWON on a serial ``device`` (e.g. ``/dev/ttyUSB0``).
 
@@ -190,4 +224,4 @@ def open_device(
     import serial
 
     port = serial.Serial(device, baudrate=baud, timeout=timeout)
-    return from_serial_port(port, limits)
+    return from_serial_port(port, limits, control_enabled=control_enabled)

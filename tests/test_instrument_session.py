@@ -32,7 +32,8 @@ def _wait_for(predicate, timeout: float = 2.0) -> bool:
 @pytest.fixture
 def session(fake_owon_serial):
     """A started session; always stopped without closing the shared fake port."""
-    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+    driver = from_serial_port(fake_owon_serial, control_enabled=True)
+    s = InstrumentSession(driver, poll_interval=SLOW_POLL)
     s.start()
     assert _wait_for(lambda: s.latest() is not None), "first poll never landed"
     yield s
@@ -170,3 +171,67 @@ def test_context_manager_runs_and_stops(fake_owon_serial) -> None:
         assert _wait_for(lambda: s.latest() is not None)
     assert not s.is_running
     assert fake_owon_serial.closed is True
+
+
+# --- safety invariants ---------------------------------------------------
+
+
+class _WedgedDriver:
+    """A driver whose port has gone away — every call raises."""
+
+    control_enabled = True
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def _fail(self, *_args) -> None:
+        raise OSError("port is wedged")
+
+    read_dmm = measure_voltage = measure_current = output_off = _fail
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_the_rail_is_dropped_on_connect(fake_owon_serial) -> None:
+    """Never inherit whatever the front panel was left at — OUTP OFF, then read."""
+    driver = from_serial_port(fake_owon_serial, control_enabled=True)
+    s = InstrumentSession(driver, poll_interval=SLOW_POLL)
+    s.start()
+    try:
+        assert _wait_for(lambda: s.latest() is not None)
+        assert fake_owon_serial.written[0] == "OUTP OFF"
+    finally:
+        s.stop(close_driver=False)
+
+
+def test_the_rail_is_dropped_on_stop(fake_owon_serial) -> None:
+    driver = from_serial_port(fake_owon_serial, control_enabled=True)
+    s = InstrumentSession(driver, poll_interval=SLOW_POLL)
+    s.start()
+    assert _wait_for(lambda: s.latest() is not None)
+    s.stop(close_driver=False)
+    assert fake_owon_serial.written[-1] == "OUTP OFF"
+
+
+def test_a_read_only_session_writes_nothing(fake_owon_serial) -> None:
+    """Control off means genuinely read-only — not even a safety OUTP OFF."""
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+    s.start()
+    assert _wait_for(lambda: s.latest() is not None)
+    s.stop(close_driver=False)
+    assert set(fake_owon_serial.written) <= {"CONFigure:ALL?", "MEAS:VOLT?", "MEAS:CURR?"}
+
+
+def test_a_wedged_port_does_not_raise_out_of_stop() -> None:
+    """Risk #5: the failure path is exactly when the drop fails, and exactly
+    when raising would be useless."""
+    driver = _WedgedDriver()
+    s = InstrumentSession(driver, poll_interval=SLOW_POLL)
+    s.start()
+    assert _wait_for(lambda: s.latest() is not None)
+    assert s.latest().error is not None
+
+    s.stop()  # must not raise
+    assert not s.is_running
+    assert driver.closed is True

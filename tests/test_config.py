@@ -94,3 +94,30 @@ def test_configure_logging_never_raises(level, expected_present) -> None:
 
     configure_logging(level)  # must not raise, even on a bogus level
     assert expected_present
+
+
+# --- [instruments] control policy (#164) ---
+
+
+def test_instruments_control_is_off_by_default() -> None:
+    c = cfg.Config()
+    assert c.instruments.control is False
+    assert c.instruments.max_voltage == 5.5
+    assert c.instruments.max_current == 1.0
+
+
+def test_instruments_block_is_read_from_toml() -> None:
+    c = cfg.Config.from_dict(
+        {"instruments": {"control": True, "max_voltage": 30.0, "poll_interval": 0.5}}
+    )
+    assert c.instruments.control is True
+    assert c.instruments.max_voltage == 30.0
+    assert c.instruments.poll_interval == 0.5
+    assert c.instruments.max_current == 1.0  # untouched keys keep their default
+
+
+def test_instruments_survives_a_round_trip() -> None:
+    c = cfg.Config()
+    c.instruments.control = True
+    c.instruments.max_voltage = 12.0
+    assert cfg.Config.from_dict(c.to_dict()).instruments == c.instruments

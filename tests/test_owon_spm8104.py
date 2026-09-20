@@ -6,6 +6,7 @@ import pytest
 
 from benchhud.instruments.owon_spm8104 import (
     DEFAULT_LIMITS,
+    ControlDisabledError,
     DmmReading,
     InstrumentLimitError,
     InstrumentLimits,
@@ -77,47 +78,47 @@ def test_parse_dmm_config_handles_short_and_empty() -> None:
 
 
 def test_set_voltage_writes_command(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     owon.set_voltage(3.3)
     assert fake_owon_serial.written == ["VOLT 3.300"]
 
 
 def test_set_current_limit_writes_command(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     owon.set_current_limit(0.5)
     assert fake_owon_serial.written == ["CURR 0.500"]
 
 
 def test_output_on_off_write_commands(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     owon.output_on()
     owon.output_off()
     assert fake_owon_serial.written == ["OUTP ON", "OUTP OFF"]
 
 
 def test_set_dmm_mode_writes_command(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     owon.set_dmm_mode("VDC")
     assert fake_owon_serial.written == ["CONFigure:VDC"]
 
 
 def test_voltage_above_ceiling_never_reaches_the_wire(fake_owon_serial) -> None:
     """The point of the ceiling: refused setpoints are not sent, not clamped."""
-    owon = from_serial_port(fake_owon_serial, InstrumentLimits(max_voltage=5.5, max_current=1.0))
+    owon = from_serial_port(fake_owon_serial, InstrumentLimits(5.5, 1.0), control_enabled=True)
     with pytest.raises(InstrumentLimitError, match="exceeds the configured"):
         owon.set_voltage(12.0)
     assert fake_owon_serial.written == []
 
 
 def test_current_above_ceiling_never_reaches_the_wire(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial, InstrumentLimits(max_voltage=5.5, max_current=1.0))
+    owon = from_serial_port(fake_owon_serial, InstrumentLimits(5.5, 1.0), control_enabled=True)
     with pytest.raises(InstrumentLimitError, match="exceeds the configured"):
         owon.set_current_limit(3.0)
     assert fake_owon_serial.written == []
 
 
 def test_negative_setpoint_refused(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     with pytest.raises(InstrumentLimitError, match="negative"):
         owon.set_voltage(-1.0)
     assert fake_owon_serial.written == []
@@ -125,20 +126,20 @@ def test_negative_setpoint_refused(fake_owon_serial) -> None:
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_non_finite_setpoint_refused(fake_owon_serial, value) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     with pytest.raises(InstrumentLimitError, match="not a finite"):
         owon.set_voltage(value)
     assert fake_owon_serial.written == []
 
 
 def test_raised_ceiling_allows_a_higher_setpoint(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial, InstrumentLimits(max_voltage=30.0, max_current=5.0))
+    owon = from_serial_port(fake_owon_serial, InstrumentLimits(30.0, 5.0), control_enabled=True)
     owon.set_voltage(12.0)
     assert fake_owon_serial.written == ["VOLT 12.000"]
 
 
 def test_setpoint_exactly_at_ceiling_is_allowed(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial, InstrumentLimits(max_voltage=5.5, max_current=1.0))
+    owon = from_serial_port(fake_owon_serial, InstrumentLimits(5.5, 1.0), control_enabled=True)
     owon.set_voltage(5.5)
     assert fake_owon_serial.written == ["VOLT 5.500"]
 
@@ -157,14 +158,52 @@ def test_limits_are_readable(fake_owon_serial) -> None:
 @pytest.mark.parametrize("mode", ["VDC\nOUTP ON", "VDC\r\nOUTP ON"])
 def test_dmm_mode_rejects_a_smuggled_second_command(fake_owon_serial, mode) -> None:
     """A newline in the mode would put a second command on the wire."""
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     with pytest.raises(ValueError, match="single line"):
         owon.set_dmm_mode(mode)
     assert fake_owon_serial.written == []
 
 
 def test_dmm_mode_rejects_empty(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial)
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
     with pytest.raises(ValueError, match="must not be empty"):
         owon.set_dmm_mode("   ")
     assert fake_owon_serial.written == []
+
+
+# --- the control gate ----------------------------------------------------
+
+
+def test_control_is_off_by_default(fake_owon_serial) -> None:
+    """Read-only telemetry is the posture you get unless you ask for more."""
+    assert from_serial_port(fake_owon_serial).control_enabled is False
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        lambda d: d.set_voltage(3.3),
+        lambda d: d.set_current_limit(0.5),
+        lambda d: d.output_on(),
+        lambda d: d.set_dmm_mode("VDC"),
+    ],
+    ids=["set_voltage", "set_current_limit", "output_on", "set_dmm_mode"],
+)
+def test_state_changing_commands_refused_when_control_is_off(fake_owon_serial, action) -> None:
+    owon = from_serial_port(fake_owon_serial)
+    with pytest.raises(ControlDisabledError, match="instrument control is off"):
+        action(owon)
+    assert fake_owon_serial.written == []
+
+
+def test_output_off_works_with_control_disabled(fake_owon_serial) -> None:
+    """The gate stops the HUD energizing a rail, never de-energizing one."""
+    owon = from_serial_port(fake_owon_serial)
+    owon.output_off()
+    assert fake_owon_serial.written == ["OUTP OFF"]
+
+
+def test_reads_are_unaffected_by_the_control_gate(fake_owon_serial) -> None:
+    owon = from_serial_port(fake_owon_serial)
+    assert owon.measure_voltage() == 3.300
+    assert owon.read_dmm().mode == "CONT"
