@@ -17,6 +17,12 @@ absorbs that; the HUD sees a stale snapshot, not a dropped frame.
 output-enable that waits 200 ms feels broken. Submitting also wakes the loop
 early rather than letting it sit out the poll interval.
 
+**The rail is dropped on connect and on shutdown** when the session can control
+the instrument at all. Inheriting whatever the front panel was left at is how a
+board gets powered at the wrong voltage by a HUD nobody asked to energize
+anything; ``OUTP OFF`` first, then read. A read-only session (control off) stays
+genuinely read-only and writes nothing.
+
 Qt-free by design, like everything else in ``instruments/`` — the shell drives
 it, the same way :class:`FramePump` drives capture.
 """
@@ -111,6 +117,7 @@ class InstrumentSession:
 
     def _run(self) -> None:
         try:
+            self._drop_output("on connect")
             while not self._stop.is_set():
                 self._drain_commands()
                 if self._stop.is_set():
@@ -121,6 +128,9 @@ class InstrumentSession:
                 self._wake.wait(self._poll_interval)
                 self._wake.clear()
         finally:
+            # Whatever took the loop down — stop(), or an unexpected raise — the
+            # rail must not outlive the thread that was watching it.
+            self._drop_output("on shutdown")
             # Never leave a caller blocked on a future this thread owned.
             self._fail_pending()
 
@@ -144,6 +154,21 @@ class InstrumentSession:
                 # A refused command must not take the session down with it.
                 _log.warning("instrument command failed: %s", exc)
                 future.set_exception(exc)
+
+    def _drop_output(self, when: str) -> None:
+        """Best-effort ``OUTP OFF``. Never raises — this runs on failure paths.
+
+        Skipped entirely when control is off, so a read-only session doesn't
+        write to an instrument the operator only asked it to watch.
+        """
+        if not self._driver.control_enabled:
+            return
+        try:
+            self._driver.output_off()
+        except Exception as exc:
+            # A wedged port is exactly when this fails, and exactly when raising
+            # would be useless — the operator needs the log line, not a crash.
+            _log.warning("could not drop the output %s: %s", when, exc)
 
     def _fail_pending(self) -> None:
         """Resolve anything still queued, so no caller waits forever."""

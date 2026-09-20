@@ -85,6 +85,19 @@ opacity = 1.0          # below 1.0 lets the board show through the readout
 base_url = "" # e.g. "http://intake.repair-bench:8000"
 token = ""
 
+[instruments]
+# Control policy for the bench instrument (#164). The serial device itself lives
+# on [panels.telemetry] — it is not repeated here.
+#
+# control = false means read-only telemetry: benchhud watches the instrument and
+# writes nothing to it. Turning it on lets the HUD set voltage/current, enable
+# the output and switch DMM modes. This is a supply wired to other people's
+# boards, so that is a deliberate switch, not a default.
+control = false
+max_voltage = 5.5      # hard ceiling; setpoints above it are refused, not clamped
+max_current = 1.0
+poll_interval = 0.2    # seconds between telemetry polls
+
 [boards]
 # Local board-view library, searched recursively; files are named after the
 # board's part number (e.g. 820-00239.obv). Leave library_dir empty if you
