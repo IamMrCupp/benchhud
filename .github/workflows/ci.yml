@@ -14,7 +14,13 @@ concurrency:
 
 jobs:
   lint-test:
-    runs-on: ubuntu-latest
+    # Pinned deliberately, not out of caution about a specific break: GitHub
+    # migrates `ubuntu-latest` to 26.04 over 2026-10-19 → 2026-11-19, and during
+    # that window the label is non-deterministic — some runs land on 24.04, some
+    # on 26.04. A failure would look like flakiness rather than an OS change.
+    # Bump to `ubuntu-26.04` deliberately once it's out (#158); the bench runs
+    # 26.04, so that's the target, not something to avoid.
+    runs-on: ubuntu-24.04
     env:
       # PySide6 uses the offscreen Qt platform plugin in CI (no display).
       QT_QPA_PLATFORM: offscreen
