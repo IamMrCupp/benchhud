@@ -36,6 +36,8 @@ from benchhud.devices.discovery import (
     SystemDeviceScanner,
     resolve_capture_device,
 )
+from benchhud.instruments.owon_spm8104 import InstrumentLimits, open_device
+from benchhud.instruments.session import InstrumentSession
 from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.inventory import (
     HttpInventorySource,
@@ -76,6 +78,8 @@ LAYOUT_VERSION = 4
 SourceFactory = Callable[[], FrameSource]
 #: Takes ``(device, width, height)`` and returns an open :class:`OutputSink`.
 SinkFactory = Callable[[str, int, int], OutputSink]
+#: Builds the live instrument session, or None when there's no instrument.
+InstrumentSessionFactory = Callable[[], "InstrumentSession | None"]
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +129,9 @@ class MainWindow(QMainWindow):
         self._demo_timer: QTimer | None = None
         self._demo_t = 0.0
         self._demo_scope = SyntheticFrameSource(960, 540)
+        self._instrument_session: InstrumentSession | None = None
+        self._instrument_timer: QTimer | None = None
+        self._instrument_t = 0.0
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
         self._ticket_source: TicketSource = self._make_ticket_source()
         self._inventory_source: InventorySource = self._make_inventory_source()
@@ -278,11 +285,18 @@ class MainWindow(QMainWindow):
     # --- demo mode -------------------------------------------------------
 
     def set_demo_mode(self, enabled: bool) -> None:
-        """Toggle demo mode (synthetic data across the whole HUD)."""
+        """Toggle demo mode (synthetic data across the whole HUD).
+
+        Demo and the live poll both feed :meth:`on_telemetry`, so exactly one of
+        them runs — otherwise the meter alternates between real and synthetic
+        readings, which is worse than either.
+        """
         if enabled:
+            self.stop_telemetry()
             self._start_demo()
         else:
             self._stop_demo()
+            self.start_telemetry()
 
     def _start_demo(self) -> None:
         if self._demo_timer is not None:
@@ -440,6 +454,7 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.accepted.connect(self.reconfigure_inventory_source)
         dialog.accepted.connect(self.reconfigure_boards)
+        dialog.accepted.connect(self.reconfigure_instrument_session)
         # Last: the status line reports sink state, so it must run after the
         # sink has been rebuilt or it shows the previous one.
         dialog.accepted.connect(self._refresh_status)
@@ -570,6 +585,82 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._pump.tick)
         self._timer.start(1000 // _PREVIEW_FPS)
 
+    # --- live instrument telemetry ---------------------------------------
+
+    def _make_instrument_session(self) -> InstrumentSession | None:
+        """Build the live session from config, or None when there's no instrument.
+
+        Forgiving like :class:`CameraFrameSource`: an unplugged instrument, a
+        missing pyserial or a bad port must leave the HUD running on synthetic
+        data, not refuse to start.
+        """
+        telemetry = self._config.panels.telemetry
+        if not telemetry.enabled or not telemetry.port.strip():
+            return None
+        instruments = self._config.instruments
+        try:
+            driver = open_device(
+                telemetry.port,
+                baud=telemetry.baud,
+                limits=InstrumentLimits(instruments.max_voltage, instruments.max_current),
+                control_enabled=instruments.control,
+            )
+        except Exception as exc:
+            log.warning("no instrument on %s: %s", telemetry.port, exc)
+            return None
+        return InstrumentSession(driver, poll_interval=instruments.poll_interval)
+
+    def start_telemetry(self, session_factory: InstrumentSessionFactory | None = None) -> None:
+        """Start polling the bench instrument (idempotent).
+
+        This is what finally makes ``read_snapshot`` reachable — until now the
+        meter has only ever been fed by :class:`DemoSignal`.
+        """
+        if self._instrument_timer is not None or self.demo_active:
+            return
+        factory = session_factory or self._make_instrument_session
+        session = factory()
+        if session is None:
+            return  # nothing configured or nothing plugged in — not an error
+        self._instrument_session = session
+        self._instrument_t = 0.0
+        session.start()
+        # The session polls on its own thread; this timer only reads the latest
+        # snapshot, so a wedged port can never stall the GUI.
+        interval = self._config.instruments.poll_interval
+        self._instrument_timer = QTimer(self)
+        self._instrument_timer.timeout.connect(self._telemetry_tick)
+        self._instrument_timer.start(max(50, int(interval * 1000)))
+
+    def _telemetry_tick(self) -> None:
+        session = self._instrument_session
+        if session is None:
+            return
+        snapshot = session.latest()
+        if snapshot is None:
+            return  # first poll hasn't landed yet
+        self._instrument_t += self._config.instruments.poll_interval
+        self.on_telemetry(snapshot, self._instrument_t)
+
+    def stop_telemetry(self) -> None:
+        """Stop polling and drop the rail (idempotent)."""
+        if self._instrument_timer is not None:
+            self._instrument_timer.stop()
+            self._instrument_timer = None
+        if self._instrument_session is not None:
+            # stop() runs the output-off invariant before closing the port.
+            self._instrument_session.stop()
+            self._instrument_session = None
+
+    def reconfigure_instrument_session(self) -> None:
+        """Rebuild the live session after a Preferences change."""
+        self.stop_telemetry()
+        self.start_telemetry()
+
+    @property
+    def telemetry_active(self) -> bool:
+        return self._instrument_timer is not None
+
     def stop_preview(self) -> None:
         """Stop the scope preview loop (idempotent)."""
         if self._timer is not None:
@@ -643,6 +734,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._stop_demo()
+        self.stop_telemetry()
         self.stop_preview()
         self.stop_output()
         self.persist_into_config()
