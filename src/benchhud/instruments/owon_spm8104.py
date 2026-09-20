@@ -10,15 +10,47 @@ The driver talks to a :class:`~benchhud.instruments.serial_port.LineInstrument`,
 so it is fully unit-testable against ``FakeSerialPort`` with no hardware. Opening
 the real port is a thin factory (:func:`open`), bench-gated.
 
-Only the verified command surface is modelled here; extending to the full DMM
-mode set (and publishing an ``owon-spm8104`` package) is a bench follow-up.
+**Reads are verified; writes are not.** The four queries above were measured on
+the bench. Every command that *changes* instrument state (#164) is modelled from
+standard SCPI and marked ``UNVERIFIED`` at its call site until a bench session
+confirms it — OWON's documentation is thin, and this box is a PSU and a DMM
+sharing one command namespace. Don't erase that distinction: a guessed command
+that silently does nothing looks identical to a working one from here.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from benchhud.instruments.serial_port import LineInstrument, SerialPort
+
+
+class InstrumentLimitError(Exception):
+    """A setpoint was refused before it reached the instrument.
+
+    Raised rather than clamped. Silently lowering 12V to 5.5V would be the worst
+    of both worlds — the operator believes one thing is on the rail and something
+    else is, which is precisely the mistake a ceiling exists to prevent.
+    """
+
+
+@dataclass(frozen=True)
+class InstrumentLimits:
+    """Hard ceilings the driver refuses to exceed.
+
+    Enforced here rather than in the UI on purpose: a UI-only guard is one
+    refactor away from being bypassed by a caller that doesn't know it exists.
+    """
+
+    max_voltage: float
+    max_current: float
+
+
+#: Deliberately conservative — enough for logic rails and phone-board work, so
+#: anything above it has to be a considered config change rather than a default
+#: nobody looked at. This is a supply wired to other people's boards.
+DEFAULT_LIMITS = InstrumentLimits(max_voltage=5.5, max_current=1.0)
 
 
 @dataclass(frozen=True)
@@ -56,8 +88,18 @@ def parse_dmm_config(response: str) -> DmmReading:
 class OwonSpm8104:
     """SCPI driver for the OWON SPM8104."""
 
-    def __init__(self, instrument: LineInstrument) -> None:
+    def __init__(
+        self,
+        instrument: LineInstrument,
+        limits: InstrumentLimits = DEFAULT_LIMITS,
+    ) -> None:
         self._inst = instrument
+        self._limits = limits
+
+    @property
+    def limits(self) -> InstrumentLimits:
+        """The ceilings this driver enforces on setpoints."""
+        return self._limits
 
     def identify(self) -> str:
         """Return the ``*IDN?`` identity string."""
@@ -75,16 +117,71 @@ class OwonSpm8104:
         """PSU output current (``MEAS:CURR?``), in amperes."""
         return float(self._inst.query("MEAS:CURR?"))
 
+    # --- control (UNVERIFIED — see the module docstring) ------------------
+
+    def _check_setpoint(self, value: float, ceiling: float, unit: str) -> None:
+        """Refuse a setpoint before it reaches the instrument."""
+        if not math.isfinite(value):
+            raise InstrumentLimitError(f"{value} is not a finite {unit} setpoint")
+        if value < 0:
+            raise InstrumentLimitError(f"{value}{unit} is negative")
+        if value > ceiling:
+            raise InstrumentLimitError(
+                f"{value}{unit} exceeds the configured {ceiling}{unit} ceiling"
+            )
+
+    def set_voltage(self, volts: float) -> None:
+        """Set the PSU output voltage. UNVERIFIED command."""
+        self._check_setpoint(volts, self._limits.max_voltage, "V")
+        self._inst.command(f"VOLT {volts:.3f}")
+
+    def set_current_limit(self, amps: float) -> None:
+        """Set the PSU current limit. UNVERIFIED command."""
+        self._check_setpoint(amps, self._limits.max_current, "A")
+        self._inst.command(f"CURR {amps:.3f}")
+
+    def output_on(self) -> None:
+        """Enable the PSU output. UNVERIFIED command."""
+        self._inst.command("OUTP ON")
+
+    def output_off(self) -> None:
+        """Disable the PSU output. UNVERIFIED command.
+
+        The safe direction. Callers may fire this without a preceding read —
+        it's what connect, disconnect and error paths fall back to.
+        """
+        self._inst.command("OUTP OFF")
+
+    def set_dmm_mode(self, mode: str) -> None:
+        """Switch the DMM measurement mode (e.g. ``VDC``, ``CONT``). UNVERIFIED.
+
+        The mode is interpolated into a command line, so a newline in it would
+        smuggle a second command onto the wire — rejected rather than stripped,
+        because a caller passing one is confused about something.
+        """
+        token = mode.strip()
+        if not token:
+            raise ValueError("DMM mode must not be empty")
+        if "\r" in token or "\n" in token:
+            raise ValueError(f"DMM mode must be a single line, got {mode!r}")
+        self._inst.command(f"CONFigure:{token}")
+
     def close(self) -> None:
         self._inst.close()
 
 
-def from_serial_port(port: SerialPort) -> OwonSpm8104:
+def from_serial_port(port: SerialPort, limits: InstrumentLimits = DEFAULT_LIMITS) -> OwonSpm8104:
     """Build a driver over an existing :class:`SerialPort` (test seam)."""
-    return OwonSpm8104(LineInstrument(port))
+    return OwonSpm8104(LineInstrument(port), limits)
 
 
-def open_device(device: str, *, baud: int = 115200, timeout: float = 1.0) -> OwonSpm8104:
+def open_device(
+    device: str,
+    *,
+    baud: int = 115200,
+    timeout: float = 1.0,
+    limits: InstrumentLimits = DEFAULT_LIMITS,
+) -> OwonSpm8104:
     """Open the real OWON on a serial ``device`` (e.g. ``/dev/ttyUSB0``).
 
     Bench-gated: requires ``pyserial`` and the device present. The parsing and
@@ -93,4 +190,4 @@ def open_device(device: str, *, baud: int = 115200, timeout: float = 1.0) -> Owo
     import serial
 
     port = serial.Serial(device, baudrate=baud, timeout=timeout)
-    return from_serial_port(port)
+    return from_serial_port(port, limits)
