@@ -154,3 +154,24 @@ def test_open_preferences_returns_dialog(qtbot) -> None:
     assert isinstance(dialog, PreferencesDialog)
     assert dialog.scope_combo.count() == 2
     dialog.close()
+
+
+def test_inventory_tab_round_trips_to_config(qtbot) -> None:
+    config = Config()
+    dialog = PreferencesDialog(config, _scanner())
+    qtbot.addWidget(dialog)
+    dialog.inventory_base_url.setText("  http://parts:8000  ")
+    dialog.inventory_token.setText("tok")
+
+    dialog.apply_to_config()
+
+    assert config.inventory.base_url == "http://parts:8000"
+    assert config.inventory.token == "tok"
+
+
+def test_inventory_token_field_is_masked(qtbot) -> None:
+    dialog = PreferencesDialog(Config(), _scanner())
+    qtbot.addWidget(dialog)
+    from PySide6.QtWidgets import QLineEdit
+
+    assert dialog.inventory_token.echoMode() == QLineEdit.EchoMode.Password
