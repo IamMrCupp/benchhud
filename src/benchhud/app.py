@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     window = MainWindow(config, on_persist=config_module.save)
     window.show()
     window.start_preview()
+    window.start_thermal()  # no-op unless a thermal camera is chosen
     window.start_telemetry()  # no-op unless [panels.telemetry] enabled and present
     window.start_output()  # no-op unless [output] enabled
     return app.exec()

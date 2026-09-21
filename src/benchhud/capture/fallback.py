@@ -20,6 +20,13 @@ treats a long run of missed frames as a lost camera, and publishes a
 fallback itself: the synthetic source never blocks, so a reader thread polling
 it unpaced spins a whole core.
 
+With ``fallback=None`` there is no test pattern: ``read`` returns ``None``
+while the camera is down. The thermal panel needs this, because a fake heatmap
+with a temperature on it could be mistaken for a real reading. A camera can
+also report a ``fatal_error``, a reason retrying won't fix (a webcam picked as
+the thermal camera). That stops the retries, so a Mac's camera light doesn't
+blink every few seconds.
+
 Everything runs on the reader's thread, so a slow ``open()`` never stalls
 the GUI. Clock and sleep are injected so tests control time.
 """
@@ -68,7 +75,7 @@ class FallbackFrameSource:
     def __init__(
         self,
         camera: Camera | None,
-        fallback: FrameSource,
+        fallback: FrameSource | None,
         *,
         name: str = "camera",
         open_hint: str = "",
@@ -106,11 +113,17 @@ class FallbackFrameSource:
 
     @property
     def size(self) -> tuple[int, int]:
-        if self._status.live and self._camera is not None:
+        if (self._status.live or self._fallback is None) and self._camera is not None:
             return self._camera.size
-        return self._fallback.size
+        return self._fallback.size if self._fallback is not None else (0, 0)
+
+    def _fatal(self) -> str | None:
+        return getattr(self._camera, "fatal_error", None)
 
     def _open_failed(self) -> str:
+        fatal = self._fatal()
+        if fatal:
+            return f"{self._name} {fatal}"
         reason = f"couldn't open {self._name}"
         return f"{reason} — {self._open_hint}" if self._open_hint else reason
 
@@ -120,7 +133,7 @@ class FallbackFrameSource:
         camera = self._camera
         if camera is not None:
             now = self._clock()
-            if not camera.is_open and now >= self._next_retry:
+            if not camera.is_open and now >= self._next_retry and not self._fatal():
                 self._next_retry = now + self._retry_interval
                 if camera.open():
                     self._last_frame_at = now
@@ -132,21 +145,27 @@ class FallbackFrameSource:
                     self._last_frame_at = now
                     self._status = SourceStatus(True)
                     return frame
-                if now - self._last_frame_at < self._stall_timeout:
+                if self._fatal():
+                    # The first frame proved it's the wrong kind of camera.
+                    camera.release()
+                    self._status = SourceStatus(False, self._open_failed())
+                elif now - self._last_frame_at < self._stall_timeout:
                     # A dropped frame or the thermal NUC shutter: hold the last
                     # good frame rather than flashing the test pattern.
                     self._sleep(self._frame_period)
                     return None
-                # OpenCV keeps an unplugged camera "open" forever; let it go
-                # and start retrying.
-                camera.release()
-                self._next_retry = now + self._retry_interval
-                self._status = SourceStatus(False, f"{self._name} stopped sending frames")
+                else:
+                    # OpenCV keeps an unplugged camera "open" forever; let it go
+                    # and start retrying.
+                    camera.release()
+                    self._next_retry = now + self._retry_interval
+                    self._status = SourceStatus(False, f"{self._name} stopped sending frames")
 
         self._sleep(self._frame_period)
-        return self._fallback.read()
+        return self._fallback.read() if self._fallback is not None else None
 
     def close(self) -> None:
         if self._camera is not None:
             self._camera.close()
-        self._fallback.close()
+        if self._fallback is not None:
+            self._fallback.close()

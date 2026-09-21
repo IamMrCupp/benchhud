@@ -346,6 +346,8 @@ class PreferencesDialog(QDialog):
         # currentData() is None when a combo is empty — keep the field a string.
         self._config.panels.scope.device = self.scope_combo.currentData() or ""
         self._config.panels.thermal.device = self.thermal_combo.currentData() or ""
+        # Picking a thermal camera is what turns thermal on; "(none)" turns it off.
+        self._config.panels.thermal.enabled = bool(self._config.panels.thermal.device)
         self._config.panels.telemetry.port = self.serial_combo.currentData() or ""
 
         self._config.output.enabled = self.output_enabled.isChecked()
@@ -385,7 +387,8 @@ class PreferencesDialog(QDialog):
 
 def _fill_camera_combo(combo: QComboBox, cameras: list[CameraDevice], current: str) -> None:
     combo.clear()
-    selected = -1
+    combo.addItem("(none)", "")
+    selected = 0 if not current else -1
     for cam in cameras:
         combo.addItem(f"{cam.label} ({cam.identifier})", cam.identifier)
         if cam.identifier == current:

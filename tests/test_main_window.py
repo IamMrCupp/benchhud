@@ -133,3 +133,103 @@ def test_preferences_accept_is_wired_to_reconfigure_preview(qtbot) -> None:
     dialog = window.open_preferences()
     dialog.accept()
     assert calls == [True]
+
+
+def _thermal_source(temps_live: bool = True):
+    """A FallbackFrameSource over a scripted thermal camera."""
+    import numpy as np
+
+    from benchhud.capture.fallback import FallbackFrameSource
+
+    class _Cam:
+        is_open = True
+        size = (4, 3)
+        fatal_error = None
+        live = temps_live
+
+        def open(self):
+            return True
+
+        def read(self):
+            return np.full((3, 4), 35.0, dtype=np.float32) if self.live else None
+
+        def release(self):
+            pass
+
+        def close(self):
+            pass
+
+    cam = _Cam()
+    source = FallbackFrameSource(cam, None, name="T256s", stall_timeout=0.2, fallback_fps=100.0)
+    return source, cam
+
+
+def test_start_thermal_is_a_noop_without_a_thermal_camera(qtbot) -> None:
+    config = Config()
+    config.panels.thermal.enabled = False
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    window.start_thermal()
+    assert window.thermal_status() is None
+    assert "thermal —" in window.statusBar().currentMessage()
+
+
+def test_live_thermal_feeds_the_panel(qtbot) -> None:
+    config = Config()
+    config.panels.thermal.enabled = True
+    config.panels.thermal.device = "/dev/video6"
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    source, _cam = _thermal_source()
+    window.start_thermal(lambda: source)
+    try:
+        qtbot.waitUntil(lambda: window.thermal_panel.last_temps is not None, timeout=2000)
+        assert window.thermal_status().live
+        assert "35.0°C" in window.thermal_panel.readout_text
+    finally:
+        window.stop_thermal()
+
+
+def test_losing_the_thermal_camera_clears_the_stale_heatmap(qtbot) -> None:
+    config = Config()
+    config.panels.thermal.enabled = True
+    config.panels.thermal.device = "/dev/video6"
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    source, cam = _thermal_source()
+    window.start_thermal(lambda: source)
+    try:
+        qtbot.waitUntil(
+            lambda: window._thermal_status is not None and window._thermal_status.live, timeout=2000
+        )
+        cam.live = False  # unplugged: OpenCV stays 'open' but frames stop
+        qtbot.waitUntil(lambda: window.thermal_panel.last_temps is None, timeout=2000)
+        assert "no signal — T256s stopped sending frames" in window.statusBar().currentMessage()
+    finally:
+        window.stop_thermal()
+
+
+def test_reconfigure_thermal_starts_and_stops_with_preferences(qtbot) -> None:
+    config = Config()
+    config.panels.thermal.enabled = False
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    started: list[str] = []
+    real_start = window.start_thermal
+    window.start_thermal = lambda: started.append(config.panels.thermal.device)  # type: ignore[method-assign]
+
+    window.reconfigure_thermal()
+    assert started == []  # still off: nothing to do
+
+    config.panels.thermal.enabled = True
+    config.panels.thermal.device = "/dev/video6"
+    window.reconfigure_thermal()
+    assert started == ["/dev/video6"]
+
+    window.start_thermal = real_start  # type: ignore[method-assign]
+    source, _cam = _thermal_source()
+    window.start_thermal(lambda: source)
+    window._thermal_device = "/dev/video6"
+    config.panels.thermal.enabled = False
+    window.reconfigure_thermal()
+    assert window.thermal_status() is None  # stopped
