@@ -5,8 +5,11 @@ v4l2loopback ([BENCH-SETUP.md](BENCH-SETUP.md)); macOS has no equivalent, so
 benchhud publishes into **OBS's own virtual camera** instead. There's nothing to
 install beyond OBS itself, and nothing of ours to sign or approve.
 
-Cameras and the OWON work the same on macOS as anywhere — pick them in
-Preferences. This doc is only about the output side.
+You pick cameras and the OWON in Preferences, same as on Linux, with one
+macOS catch: **camera access is granted per app.** Run benchhud from the `.app`
+bundle ([PACKAGING.md](PACKAGING.md)), not `uv run`. Otherwise the terminal is
+the one asking for the camera, and the scope quietly falls back to the
+synthetic feed. The rest of this doc covers the output side.
 
 ---
 

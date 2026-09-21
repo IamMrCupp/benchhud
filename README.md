@@ -97,6 +97,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, the hardware seams, design rules. |
 | [BENCH-SETUP.md](docs/BENCH-SETUP.md) | Bringing it up on the Linux bench — cameras, the OWON, v4l2loopback → OBS. |
 | [MACOS-SETUP.md](docs/MACOS-SETUP.md) | Publishing into OBS's virtual camera on a Mac. |
+| [PACKAGING.md](docs/PACKAGING.md) | Building the signed macOS `.app` (needed for camera access on a Mac). |
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |

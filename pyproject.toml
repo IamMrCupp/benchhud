@@ -41,6 +41,31 @@ path = "src/benchhud/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/benchhud"]
 
+# Native app bundles (Phase 7 §B). Name, version, description, licence and
+# dependencies all come from [project] above — Briefcase reads PEP 621 — so
+# this section only holds what a bundle needs on top of a wheel.
+[tool.briefcase]
+project_name = "benchhud"
+bundle = "com.iammrcupp"
+
+[tool.briefcase.app.benchhud]
+formal_name = "benchhud"
+# Installers truncate past ~80 chars; [project]'s full sentence stays for PyPI.
+description = "Microsoldering bench HUD: scope + thermal + telemetry, out to OBS."
+sources = ["src/benchhud"]
+icon = "packaging/icons/benchhud"
+# The reason macOS shows in its camera prompt. Without it a bundle can't ask
+# at all, and camera access from a bare `uv run` lands on the terminal app.
+permission.camera = "benchhud reads your scope and thermal cameras to build the bench HUD."
+
+[tool.briefcase.app.benchhud.macOS]
+# opencv-python ships per-arch wheels only, so a universal2 bundle can't build.
+universal_build = false
+# PySide6 6.8+ and opencv-python 5 only publish macosx_13_0 wheels; Briefcase's
+# default floor of 11.0 would make pip find nothing (or an ancient OpenCV).
+min_os_version = "13.0"
+requires = ["std-nslog~=1.0.3"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
