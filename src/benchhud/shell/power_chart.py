@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from benchhud.instruments.power_history import PowerHistory
 from benchhud.instruments.telemetry import TelemetrySnapshot
+from benchhud.palette import palette
 
 
 class PowerChart(QWidget):
@@ -44,10 +45,17 @@ class PowerChart(QWidget):
         self._axis_y = QValueAxis()
         self._chart.addAxis(self._axis_x, Qt.AlignmentFlag.AlignBottom)
         self._chart.addAxis(self._axis_y, Qt.AlignmentFlag.AlignLeft)
-        for series in (self.v_series, self.a_series, self.w_series):
+        colours = palette()
+        for series, colour in (
+            (self.v_series, colours.voltage),
+            (self.a_series, colours.current),
+            (self.w_series, colours.power),
+        ):
             self._chart.addSeries(series)
             series.attachAxis(self._axis_x)
             series.attachAxis(self._axis_y)
+            # After addSeries: the chart theme recolours series as they're added.
+            series.setPen(QPen(QColor(colour), 2))
 
         view = QChartView(self._chart)
         view.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -55,6 +63,11 @@ class PowerChart(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(view)
+
+    @property
+    def history(self) -> PowerHistory:
+        """The samples behind the chart (the on-stream graph overlay reads these too)."""
+        return self._history
 
     def add_reading(self, voltage: float, current: float, t: float) -> None:
         self._history.add(voltage, current, t)

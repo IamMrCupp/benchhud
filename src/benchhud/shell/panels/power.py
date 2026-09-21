@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from benchhud.instruments.telemetry import TelemetrySnapshot
+from benchhud.overlay.telemetry import CELL_TINT
+from benchhud.palette import palette, shade, tint
 from benchhud.shell.fonts import seven_segment_family
 from benchhud.shell.panel import Panel
 from benchhud.shell.power_chart import PowerChart
@@ -134,10 +136,20 @@ class PowerPanel(Panel):
 
         widget = QWidget()
         grid = QGridLayout(widget)
-        grid.addWidget(_cell("VOLTAGE (V)", self._v_value), 0, 0)
-        grid.addWidget(_cell("CURRENT (A)", self._a_value), 0, 1)
-        grid.addWidget(_cell("POWER (W)", self._w_value), 1, 0)
-        grid.addWidget(_cell("MAX CURRENT (A)", self._max_value, self._reset_max_button), 1, 1)
+        colours = palette()
+        grid.addWidget(_cell("VOLTAGE (V)", self._v_value, colour=colours.voltage), 0, 0)
+        grid.addWidget(_cell("CURRENT (A)", self._a_value, colour=colours.current), 0, 1)
+        grid.addWidget(_cell("POWER (W)", self._w_value, colour=colours.power), 1, 0)
+        grid.addWidget(
+            _cell(
+                "MAX CURRENT (A)",
+                self._max_value,
+                self._reset_max_button,
+                colour=colours.max_current,
+            ),
+            1,
+            1,
+        )
         return widget
 
     def add_reading(self, voltage: float, current: float, t: float = 0.0) -> None:
@@ -259,9 +271,18 @@ def _cell_value() -> QLabel:
     return label
 
 
-def _cell(caption: str, value: QLabel, extra: QWidget | None = None) -> QFrame:
+def _cell(
+    caption: str, value: QLabel, extra: QWidget | None = None, *, colour: str | None = None
+) -> QFrame:
     frame = QFrame()
     frame.setObjectName("meterCell")
+    if colour is not None:
+        # Same tint and edge as the on-stream readout (overlay.telemetry), so a
+        # quantity is one colour everywhere: cell, chart line and stream.
+        frame.setStyleSheet(
+            f"QFrame#meterCell {{ background: {tint(colour, CELL_TINT)}; "
+            f"border: 2px solid {shade(colour, 0.15)}; border-radius: 4px; }}"
+        )
     frame.setMinimumHeight(68)
     frame.setMinimumWidth(cell_min_width())
     box = QVBoxLayout(frame)
