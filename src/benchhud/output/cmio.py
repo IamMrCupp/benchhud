@@ -273,6 +273,13 @@ def find_obs_sink() -> tuple[CmioDevice, CmioStream] | None:
 # dequeued every one of 300 pushed frames (that callback firing is OBS's
 # extension consuming our frames), with stable memory. The lifetime rules below
 # come from that run, not from docs.
+#
+# Dequeued isn't delivered, though (#177). The extension runs in another
+# process, and a sample only crosses the XPC boundary as an **IOSurface**. A
+# pixel buffer created with no attributes lives in plain heap memory. It
+# enqueues and dequeues fine, then CoreMediaIO drops it with "no iosurface", so
+# OBS never sees a picture. Every buffer is therefore created with
+# ``kCVPixelBufferIOSurfacePropertiesKey: {}``.
 
 _CM_FRAMEWORK = "/System/Library/Frameworks/CoreMedia.framework/CoreMedia"
 _CV_FRAMEWORK = "/System/Library/Frameworks/CoreVideo.framework/CoreVideo"
@@ -356,6 +363,57 @@ class _DeliveryFrameworks:
         self.cmio.CMIODeviceStartStream.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
         self.cmio.CMIODeviceStartStream.restype = ctypes.c_int32
         self.cmio.CMIODeviceStopStream.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        self.cv.CVPixelBufferGetIOSurface.argtypes = [vp]
+        self.cv.CVPixelBufferGetIOSurface.restype = vp
+        self.cf.CFDictionaryCreate.argtypes = [
+            vp,
+            ctypes.POINTER(vp),
+            ctypes.POINTER(vp),
+            ctypes.c_long,
+            vp,
+            vp,
+        ]
+        self.cf.CFDictionaryCreate.restype = vp
+        self.pixel_buffer_attributes = self._iosurface_attributes()
+
+    def _iosurface_attributes(self) -> ctypes.c_void_p:
+        """``{kCVPixelBufferIOSurfacePropertiesKey: {}}``, built once and kept.
+
+        An empty properties dict means "back this buffer with an IOSurface, with
+        default properties", which is what lets it cross into the extension.
+        """
+        vp = ctypes.c_void_p
+        key_callbacks = ctypes.addressof(
+            ctypes.c_char.in_dll(self.cf, "kCFTypeDictionaryKeyCallBacks")
+        )
+        value_callbacks = ctypes.addressof(
+            ctypes.c_char.in_dll(self.cf, "kCFTypeDictionaryValueCallBacks")
+        )
+        empty = self.cf.CFDictionaryCreate(None, None, None, 0, key_callbacks, value_callbacks)
+        key = vp.in_dll(self.cv, "kCVPixelBufferIOSurfacePropertiesKey")
+        keys = (vp * 1)(key.value)
+        values = (vp * 1)(empty)
+        attributes = self.cf.CFDictionaryCreate(
+            None, keys, values, 1, key_callbacks, value_callbacks
+        )
+        self.cf.CFRelease(empty)  # the outer dict retains it
+        if not attributes:
+            raise CoreMediaIOUnavailable("could not build IOSurface pixel-buffer attributes")
+        return vp(attributes)
+
+    def new_pixel_buffer(self, width: int, height: int) -> ctypes.c_void_p | None:
+        """An IOSurface-backed UYVY pixel buffer (caller releases), or None."""
+        pixel_buffer = ctypes.c_void_p()
+        if self.cv.CVPixelBufferCreate(
+            None,
+            width,
+            height,
+            _PIXEL_FORMAT_UYVY,
+            self.pixel_buffer_attributes,
+            ctypes.byref(pixel_buffer),
+        ):
+            return None
+        return pixel_buffer
 
 
 class CmioSink:
@@ -405,10 +463,8 @@ class CmioSink:
         height, width = uyvy.shape[0], uyvy.shape[1]
         api = self._api
 
-        pixel_buffer = ctypes.c_void_p()
-        if api.cv.CVPixelBufferCreate(
-            None, width, height, _PIXEL_FORMAT_UYVY, None, ctypes.byref(pixel_buffer)
-        ):
+        pixel_buffer = api.new_pixel_buffer(width, height)
+        if pixel_buffer is None:
             return
         try:
             self._fill(pixel_buffer, uyvy, width, height)
