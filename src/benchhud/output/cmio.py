@@ -253,6 +253,71 @@ OBS_CAMERA_MISSING = (
     "extension in System Settings → General → Login Items & Extensions"
 )
 
+# Sharper reasons for when we can tell *why* the device is missing (#186). The
+# generic one above sent an operator to reinstall OBS when all it needed was a
+# restart to finish OBS's own extension update.
+OBS_NOT_INSTALLED = (
+    "OBS Virtual Camera not found — install OBS, then click Start Virtual Camera "
+    "once so it installs its camera extension (stop it again afterwards)"
+)
+OBS_NEEDS_APPROVAL = (
+    "OBS's camera extension needs approving — System Settings → General → "
+    "Login Items & Extensions → Camera Extensions → turn on OBS"
+)
+OBS_NEEDS_RESTART = (
+    "OBS's camera extension is installed but not running — restart your Mac "
+    "to finish OBS's camera update"
+)
+
+#: OBS's camera extension, as ``systemextensionsctl list`` names it.
+OBS_EXTENSION_ID = "com.obsproject.obs-studio.mac-camera-extension"
+
+
+def reason_from_extension_list(listing: str | None) -> str:
+    """Pick the missing-OBS reason from ``systemextensionsctl list`` output (pure).
+
+    ``None`` means the listing couldn't be read, and the generic reason is the
+    honest answer. Otherwise, OBS's rows say which fix applies:
+
+    - no OBS row at all: OBS (or its extension) was never installed
+    - no ``[activated enabled]`` row: it's waiting for the operator's approval
+    - an enabled row but still no device, or an old copy ``waiting to uninstall
+      on reboot``: macOS needs a restart to swap versions
+    """
+    if listing is None:
+        return OBS_CAMERA_MISSING
+    rows = [line for line in listing.splitlines() if OBS_EXTENSION_ID in line]
+    if not rows:
+        return OBS_NOT_INSTALLED
+    if not any("[activated enabled]" in row for row in rows):
+        return OBS_NEEDS_APPROVAL
+    # Enabled, yet CoreMediaIO has no device (that's why we're here). Whether an
+    # old copy is pending uninstall or the provider simply didn't start, a
+    # restart is what brings it up.
+    return OBS_NEEDS_RESTART
+
+
+def _list_system_extensions() -> str | None:
+    """``systemextensionsctl list`` output, or None if it can't be run."""
+    import subprocess
+
+    try:
+        done = subprocess.run(
+            ["/usr/bin/systemextensionsctl", "list"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout if done.returncode == 0 else None
+
+
+def diagnose_missing_obs(lister=None) -> str:
+    """Why OBS's camera device is missing, as an operator-facing reason."""
+    return reason_from_extension_list((lister or _list_system_extensions)())
+
 
 def find_obs_sink() -> tuple[CmioDevice, CmioStream] | None:
     """Locate OBS's virtual-camera device and its sink stream, if available."""
@@ -558,7 +623,7 @@ def open_cmio_sink(width: int, height: int) -> CmioSink:
     """
     found = find_obs_sink()
     if found is None:
-        raise CmioSinkUnavailable(OBS_CAMERA_MISSING)
+        raise CmioSinkUnavailable(diagnose_missing_obs())
     device, stream = found
     try:
         return CmioSink(width, height, device.device_id, stream.stream_id)

@@ -90,7 +90,10 @@ in OBS and toggle output off/on in benchhud's Preferences.
 
 | Status-bar reason | Cause / fix |
 |---|---|
-| `OBS Virtual Camera not found — install OBS, then approve its camera extension in System Settings → General → Login Items & Extensions` | Exactly that. Usually the extension is installed but unapproved (step 1). |
+| `OBS's camera extension is installed but not running — restart your Mac to finish OBS's camera update` | OBS updated its camera extension, and macOS only swaps versions on a restart. Until then there's no OBS camera at all, even though everything is installed and approved. Restart the Mac. |
+| `OBS's camera extension needs approving — …` | Installed but not approved yet (step 1). Turn OBS on under Camera Extensions. |
+| `OBS Virtual Camera not found — install OBS, then click Start Virtual Camera once …` | OBS, or its camera extension, isn't installed. Install OBS and press Start Virtual Camera once so it installs the extension, then stop it again. |
+| `OBS Virtual Camera not found — install OBS, then approve its camera extension …` | The general fallback, when benchhud couldn't check the extension's state. Work through step 1. If OBS was updated recently, restart the Mac. |
 | A reason mentioning the sink stream failing to open | OBS's extension is present but the stream wouldn't start. Most likely OBS's own Start Virtual Camera is holding it — stop it, then toggle benchhud output. |
 | Output enabled, no warning, but OBS shows a black or frozen source | Check OBS is reading **OBS Virtual Camera**, not a real camera; and that OBS's own Start Virtual Camera is off. |
 | No warning, output disabled | Nothing's wrong — deliberately-off output isn't a warning. Tick **Enable virtual camera output**. |
