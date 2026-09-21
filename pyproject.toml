@@ -66,6 +66,34 @@ universal_build = false
 min_os_version = "13.0"
 requires = ["std-nslog~=1.0.3"]
 
+[tool.briefcase.app.benchhud.linux.system.debian]
+# Native .deb for the bench (Ubuntu). benchhud needs raw /dev/video*, /dev/ttyUSB*
+# and a v4l2loopback node, which a sandboxed Flatpak fights. A system package
+# just uses the user's video/dialout groups. The Python wheels (PySide6, OpenCV)
+# bundle their own Qt and codecs; these are the system libraries Qt's xcb and
+# wayland platform plugins load at runtime. CI installs the core of this list.
+system_runtime_requires = [
+    "libegl1",
+    "libgl1",
+    "libglib2.0-0t64",
+    "libfontconfig1",
+    "libdbus-1-3",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libxcb-cursor0",
+    "libxcb-icccm4",
+    "libxcb-image0",
+    "libxcb-keysyms1",
+    "libxcb-randr0",
+    "libxcb-render-util0",
+    "libxcb-shape0",
+    "libxcb-xinerama0",
+    "libxcb-xkb1",
+    "libwayland-client0",
+    "libwayland-cursor0",
+    "libwayland-egl1",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

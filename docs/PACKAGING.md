@@ -1,12 +1,12 @@
 # Packaging
 
 benchhud ships as a native app built with [Briefcase](https://briefcase.readthedocs.io/).
-So far that means **macOS**; Linux and Windows bundles come later.
+So far that means a signed **macOS** `.app` and an **Ubuntu** `.deb`. Windows comes later.
 
 All config lives in `pyproject.toml` under `[tool.briefcase]`. Name, version,
 licence and dependencies come from `[project]`, since Briefcase reads PEP 621.
 The Briefcase section only holds what a bundle adds on top of a wheel: bundle
-ID, icon, camera permission and the macOS floor.
+ID, icon, camera permission, the macOS floor and the Ubuntu runtime libraries.
 
 ---
 
@@ -56,9 +56,60 @@ survives rebuilds.
 ### First launch
 
 The camera prompt appears the first time benchhud opens a camera, which is at
-startup. The scope falls back to the synthetic feed while the prompt is up.
-**Relaunch once after clicking Allow.** Retrying after a grant, and saying in the
-status bar why the scope is synthetic, is tracked in #171.
+startup. The scope shows the test pattern while the prompt is up, and the status
+bar says why. After you click **Allow**, the live feed takes over within a few
+seconds, with no relaunch (#175).
+
+---
+
+## Ubuntu (the bench)
+
+A native `.deb`: it installs to `/usr`, adds **benchhud** to the app menu with its
+icon, and pulls in the system libraries Qt needs through `apt`.
+
+### Install
+
+Copy the `.deb` to the bench, then:
+
+```sh
+sudo apt install ./benchhud_<version>-1~ubuntu-<codename>_amd64.deb
+```
+
+Using `apt install ./file.deb` (not `dpkg -i`) means the dependencies install too.
+Launch it from the app menu, or run `benchhud` in a terminal.
+
+**One-time bench setup** (same as [BENCH-SETUP.md](BENCH-SETUP.md), not
+something a package should do behind your back):
+
+- Put yourself in the device groups, then log out and back in:
+  `sudo usermod -aG dialout,video,plugdev "$USER"`
+- Virtual-cam output needs **v4l2loopback**. It's a kernel module, so it's a
+  documented step rather than a package dependency. See BENCH-SETUP.md →
+  v4l2loopback.
+
+Unlike macOS, Linux has no per-app camera permission. The groups are the whole
+story.
+
+### Build (from the Mac, via Docker)
+
+Briefcase builds a `.deb` inside a container matching the target Ubuntu release,
+so it links against that release's own Python and libraries. The bench is x86_64,
+so on an Apple Silicon Mac, tell Docker to build for amd64. It runs emulated and
+takes a while the first time.
+
+```sh
+export DOCKER_DEFAULT_PLATFORM=linux/amd64
+uvx briefcase create  linux system --target ubuntu:26.04
+uvx briefcase build   linux system --target ubuntu:26.04
+uvx briefcase package linux system --target ubuntu:26.04
+```
+
+The `.deb` lands in `dist/`. On the bench itself you can drop `--target` and
+`DOCKER_DEFAULT_PLATFORM` and build natively.
+
+**Why not Flatpak or AppImage:** benchhud opens raw `/dev/video*`,
+`/dev/ttyUSB*` and a v4l2loopback node. Flatpak's sandbox fights all three, and a
+system package just uses your groups.
 
 ---
 
@@ -70,8 +121,8 @@ status bar why the scope is synthetic, is tracked in #171.
 - **Briefcase doesn't read `uv.lock`.** It resolves `[project].dependencies` with
   pip, so a bundle can pick up newer versions than the dev env. Pin in
   `[tool.briefcase.app.benchhud]` `requires` if that ever bites.
-- **The icon** is `packaging/icons/benchhud.icns`, generated from
-  `src/benchhud/resources/icon.png` by `scripts/make_icns.sh`. Rerun that script
-  if the PNG changes.
-- **Not done yet:** notarization and a `.dmg` for handing to other people, CI
-  builds, and Linux/Windows bundles.
+- **The icons** are `packaging/icons/benchhud.icns` (macOS) and
+  `benchhud-<size>.png` (Linux), generated from `src/benchhud/resources/icon.png`
+  by `scripts/make_icns.sh`. Rerun that script if the PNG changes.
+- **Not done yet:** notarization and a `.dmg` for handing to other people (#173),
+  CI builds, and a Windows bundle.
