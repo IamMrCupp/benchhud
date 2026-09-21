@@ -147,6 +147,23 @@ class PreferencesDialog(QDialog):
         self.overlay_opacity = _ratio_spin(0.1, 1.0, overlay.opacity)
         self.overlay_opacity.setToolTip("Below 1.0 lets the board show through the readout")
 
+        graph = self._config.graph_overlay
+        self.graph_enabled = QCheckBox("Overlay the live power graph (V / A / W) on the output")
+        self.graph_enabled.setChecked(graph.enabled)
+        self.graph_enabled.setToolTip("Burn the meter's trend chart into the streamed frame")
+        self.graph_corner = QComboBox()
+        for label, data in _OVERLAY_CORNERS:
+            self.graph_corner.addItem(label, data)
+        graph_idx = self.graph_corner.findData(graph.corner)
+        if graph_idx >= 0:
+            self.graph_corner.setCurrentIndex(graph_idx)
+        fit_combo_popup(self.graph_corner)
+        self.graph_window = _spin(10, 600, round(graph.window_seconds))
+        self.graph_window.setSuffix(" s")
+        self.graph_window.setToolTip("How much history the on-stream graph shows")
+        self.graph_scale = _ratio_spin(0.3, 4.0, graph.scale)
+        self.graph_opacity = _ratio_spin(0.1, 1.0, graph.opacity)
+
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow(self.output_enabled)
@@ -160,6 +177,11 @@ class PreferencesDialog(QDialog):
         form.addRow("", self.overlay_show_dmm)
         form.addRow("Overlay size", self.overlay_scale)
         form.addRow("Overlay opacity", self.overlay_opacity)
+        form.addRow(self.graph_enabled)
+        form.addRow("Graph position", self.graph_corner)
+        form.addRow("Graph history", self.graph_window)
+        form.addRow("Graph size", self.graph_scale)
+        form.addRow("Graph opacity", self.graph_opacity)
         return widget
 
     # --- Tools -----------------------------------------------------------
@@ -362,6 +384,11 @@ class PreferencesDialog(QDialog):
         self._config.telemetry_overlay.show_dmm = self.overlay_show_dmm.isChecked()
         self._config.telemetry_overlay.scale = self.overlay_scale.value()
         self._config.telemetry_overlay.opacity = self.overlay_opacity.value()
+        self._config.graph_overlay.enabled = self.graph_enabled.isChecked()
+        self._config.graph_overlay.corner = self.graph_corner.currentData() or "bottom-right"
+        self._config.graph_overlay.window_seconds = float(self.graph_window.value())
+        self._config.graph_overlay.scale = self.graph_scale.value()
+        self._config.graph_overlay.opacity = self.graph_opacity.value()
 
         self._config.faults.auto_log = self.fault_auto_log.isChecked()
         self._config.faults.current_threshold_a = self.fault_threshold.value()
