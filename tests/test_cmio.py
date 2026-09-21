@@ -207,6 +207,20 @@ def test_real_enumeration_returns_devices_with_uids() -> None:
             assert stream.direction in (0, 1, None)
 
 
+@pytest.mark.skipif(not sys.platform.startswith("darwin"), reason="CoreVideo is macOS-only")
+def test_real_pixel_buffers_are_iosurface_backed() -> None:
+    """#177: a heap-backed buffer enqueues fine but never reaches OBS's process."""
+    from benchhud.output.cmio import _DeliveryFrameworks
+
+    api = _DeliveryFrameworks()
+    pixel_buffer = api.new_pixel_buffer(320, 240)
+    assert pixel_buffer is not None
+    try:
+        assert api.cv.CVPixelBufferGetIOSurface(pixel_buffer), "buffer has no IOSurface"
+    finally:
+        api.cv.CVPixelBufferRelease(pixel_buffer)
+
+
 # --- real delivery into OBS (dev Mac with the extension approved) ---------
 
 _obs = None
