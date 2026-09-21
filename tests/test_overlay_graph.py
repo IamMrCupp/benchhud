@@ -74,9 +74,32 @@ def test_draw_changes_the_frame_in_the_configured_corner(qtbot):
     assert changed[:, 0].min() > frame.shape[0] // 2  # bottom half
 
 
-def test_no_history_leaves_the_frame_alone(qtbot):
+def test_enabled_graph_with_no_readings_still_draws_its_panel(qtbot):
+    """#187: no PSU on the bench must not make an enabled overlay invisible."""
     frame = _frame()
-    assert draw_graph_overlay(frame, [], GraphOverlayConfig()) is frame
+    out = draw_graph_overlay(frame, [], GraphOverlayConfig(corner="bottom-right"))
+    assert out is not frame
+    assert out.any()
+
+
+def test_empty_model_has_no_values_yet():
+    model = build_graph_model([], 60)
+    assert model.is_empty
+    assert model.latest is None
+
+
+def test_placeholder_matches_the_meter_overlay():
+    from benchhud.overlay.graph import _format
+
+    assert _format(None, "V") == "—"
+    assert _format(5.0, "V") == "5.00 V"
+    assert _format(0.1234, "A") == "0.123 A"
+
+
+def test_empty_panel_renders(qtbot):
+    image = render_graph_image(build_graph_model([], 60))
+    assert not image.isNull()
+    assert image.width() > image.height() > 0
 
 
 def test_stack_moves_an_overlay_off_its_corner_edge():

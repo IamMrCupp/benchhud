@@ -50,7 +50,7 @@ class GraphModel:
     """
 
     lines: tuple[tuple[tuple[float, float], ...], ...]
-    latest: tuple[float, float, float]  # V, A, W
+    latest: tuple[float, float, float] | None  # V, A, W; None before the first reading
     window_seconds: float
 
     @property
@@ -71,7 +71,7 @@ def build_graph_model(samples: Sequence[PowerSample], window_seconds: float) -> 
     """Turn the most recent ``window_seconds`` of history into polylines (pure)."""
     window = max(1.0, window_seconds)
     if not samples:
-        return GraphModel(lines=((), (), ()), latest=(0.0, 0.0, 0.0), window_seconds=window)
+        return GraphModel(lines=((), (), ()), latest=None, window_seconds=window)
     t_latest = samples[-1].t
     recent = [s for s in samples if s.t >= t_latest - window]
     last = samples[-1]
@@ -108,16 +108,22 @@ _PAD = 8
 _RADIUS = 5
 
 
-def _format(value: float, unit: str) -> str:
+def _format(value: float | None, unit: str) -> str:
+    if value is None:
+        return "—"  # the meter overlay's placeholder, so the two read the same
     return f"{value:.3f} {unit}" if unit == "A" else f"{value:.2f} {unit}"
+
+
+#: Shown in the plot until there's enough history to draw a line. An enabled
+#: overlay always draws its panel, like the meter's "—" cells, so the operator
+#: can see it's on (#187).
+WAITING = "waiting for readings"
 
 
 def render_graph_image(
     model: GraphModel, scale: float = 1.0, colours: SeriesPalette | None = None
 ) -> QImage:
-    """Paint the trend panel to an ARGB image (null image when there's nothing to draw)."""
-    if model.is_empty:
-        return QImage()
+    """Paint the trend panel to an ARGB image. With no history it's an empty, labelled panel."""
     line_colours = _series_colours(colours or palette())
     factor = max(0.3, scale)
     pad = max(3, round(_PAD * factor))
@@ -144,7 +150,8 @@ def render_graph_image(
         painter.setFont(legend_font)
         metrics = QFontMetrics(legend_font)
         x = float(pad)
-        for (label, unit), colour, value in zip(SERIES, line_colours, model.latest, strict=True):
+        latest = model.latest or (None, None, None)
+        for (label, unit), colour, value in zip(SERIES, line_colours, latest, strict=True):
             text = f"{label} {_format(value, unit)}"
             painter.setPen(QColor(colour))
             painter.drawText(
@@ -157,6 +164,10 @@ def render_graph_image(
         for i in range(1, 4):  # quarter lines, enough to read a trend by
             y = plot.top() + plot.height() * i / 4
             painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+
+        if model.is_empty:
+            painter.setPen(QColor(_LABEL_FG))
+            painter.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), WAITING)
 
         line_w = max(1.0, 2.0 * factor)
         for colour, line in zip(line_colours, model.lines, strict=True):
@@ -183,15 +194,16 @@ def draw_graph_overlay(
     stack: int = 0,
     colours: SeriesPalette | None = None,
 ) -> np.ndarray:
-    """Render the trend and composite it onto ``frame`` (unchanged when there's no data).
+    """Render the trend and composite it onto ``frame``.
+
+    Always draws when called (the caller checks ``enabled``). With no readings
+    it's an empty panel with "—" values, so an enabled overlay is never invisible.
 
     ``stack`` pushes the panel that many pixels away from its corner's
     horizontal edge, so it can sit above or below the meter readout in the same
     corner instead of covering it.
     """
     model = build_graph_model(samples, config.window_seconds)
-    if model.is_empty:
-        return frame
     scale = auto_scale(frame.shape[1]) * max(0.1, config.scale)
     image = render_graph_image(model, scale, colours)
     if image.isNull():
