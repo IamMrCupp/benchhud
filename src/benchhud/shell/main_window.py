@@ -5,14 +5,16 @@ on close. Hosts panels via :class:`~benchhud.shell.panel_manager.PanelManager`.
 
 Capture is explicit, not automatic: :meth:`start_preview` builds a frame source →
 :class:`LatestFrameReader` → :class:`FramePump` and drives it from a QTimer, so
-constructing the window (as tests do repeatedly) spawns no threads. Until the
-bench-gated ``CameraFrameSource`` lands, the default source is synthetic — so the
+constructing the window (as tests do repeatedly) spawns no threads. The scope
+source is a :class:`FallbackFrameSource`: the configured camera when it opens, the
+synthetic pattern (with the reason in the status bar) when it doesn't — so the
 shell animates end to end with no camera.
 """
 
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable, Sequence
 
 import cv2
@@ -25,6 +27,7 @@ from benchhud.boards.library import BoardLibrary
 from benchhud.boards.opener import open_board, open_schematic
 from benchhud.boards.worklist import boards_to_source
 from benchhud.capture.camera import CameraFrameSource
+from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
@@ -84,25 +87,42 @@ InstrumentSessionFactory = Callable[[], "InstrumentSession | None"]
 log = logging.getLogger(__name__)
 
 
-def _default_scope_source() -> FrameSource:
-    """Dev fallback when no scope device is configured: a synthetic feed."""
-    return SyntheticFrameSource(960, 540)
+def camera_open_hint(platform: str = sys.platform) -> str:
+    """What to check when a camera won't open, in this OS's terms."""
+    if platform == "darwin":
+        return "allow benchhud under System Settings → Privacy & Security → Camera"
+    if platform.startswith("linux"):
+        return "check the /dev/videoN path, that nothing else has it open, and the video group"
+    return "check it's plugged in and no other app is using it"
 
 
-def scope_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> FrameSource:
-    """Open the configured scope camera, falling back to the synthetic feed.
+def camera_label(device: str, cameras: Sequence[CameraDevice] = ()) -> str:
+    """A human name for a configured camera: its scanned label, else the raw id."""
+    text = device.strip()
+    for camera in cameras:
+        if camera.identifier == text:
+            return camera.label
+    return text
 
-    A camera that is unplugged, busy (UVC allows one reader), or simply wrong in
-    the config must leave the shell usable — so we fall back rather than fail.
+
+def scope_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> FallbackFrameSource:
+    """The scope feed: the configured camera, or the synthetic pattern until it opens.
+
+    A camera that is unplugged, busy (UVC allows one reader), not yet allowed by
+    macOS, or simply wrong in the config must leave the shell usable — so we
+    fall back rather than fail, keep retrying, and report why in ``status``.
     ``cameras`` is the current scan, used to resolve a Qt device id to an index.
     """
+    fallback = SyntheticFrameSource(960, 540)
     if not device.strip():
-        return _default_scope_source()
+        return FallbackFrameSource(None, fallback)
     camera = CameraFrameSource(resolve_capture_device(device, cameras))
-    if camera.is_open:
-        return camera
-    camera.close()
-    return _default_scope_source()
+    return FallbackFrameSource(
+        camera,
+        fallback,
+        name=camera_label(device, cameras),
+        open_hint=camera_open_hint(),
+    )
 
 
 class MainWindow(QMainWindow):
@@ -124,6 +144,10 @@ class MainWindow(QMainWindow):
         self._job_store = job_store or JobStore(default_db_path())
         self._pump: FramePump | None = None
         self._timer: QTimer | None = None
+        self._scope_source: FrameSource | None = None
+        self._scope_status: SourceStatus | None = None
+        self._preview_device: str | None = None
+        self._cameras: list[CameraDevice] = []
         self._sink: OutputSink | None = None
         self._demo: DemoSignal | None = None
         self._demo_timer: QTimer | None = None
@@ -450,6 +474,7 @@ class MainWindow(QMainWindow):
             self._config, self._scanner, on_save=self._on_persist, parent=self
         )
         dialog.accepted.connect(self.restart_output)
+        dialog.accepted.connect(self.reconfigure_preview)
         dialog.accepted.connect(self.reconfigure_faults)
         dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.accepted.connect(self.reconfigure_inventory_source)
@@ -549,6 +574,18 @@ class MainWindow(QMainWindow):
         reason = getattr(self._sink, "reason", "")
         return reason or None
 
+    def scope_status(self) -> SourceStatus | None:
+        """Is the scope preview showing the camera, and if not, why (None: no preview)."""
+        return getattr(self._scope_source, "status", None)
+
+    def _scope_status_text(self) -> str:
+        device = self._config.panels.scope.device
+        label = camera_label(device, self._cameras) if device.strip() else "—"
+        status = self.scope_status()
+        if status is None or status.live:
+            return label
+        return f"{label} (⚠ test pattern — {status.reason})"
+
     def _refresh_status(self) -> None:
         panels = self._config.panels
         prefix = "◉ DEMO MODE   ·   " if self.demo_active else ""
@@ -556,7 +593,7 @@ class MainWindow(QMainWindow):
         suffix = f"   ·   ⚠ virtual cam inactive — {warning}" if warning else ""
         self.statusBar().showMessage(
             f"{prefix}benchhud {__version__}   ·   "
-            f"scope {panels.scope.device or '—'}   ·   "
+            f"scope {self._scope_status_text()}   ·   "
             f"thermal {panels.thermal.device or '—'}   ·   "
             f"psu/dmm {panels.telemetry.port or '—'}"
             f"{suffix}"
@@ -571,19 +608,41 @@ class MainWindow(QMainWindow):
         """
         if self._pump is not None:
             return
+        device = self._config.panels.scope.device
         if source_factory is None:
-            device = self._config.panels.scope.device
             cameras = self._scan_cameras()
+            self._cameras = cameras
 
             def source_factory() -> FrameSource:
                 return scope_source_for(device, cameras)
 
-        reader = LatestFrameReader(source_factory())
+        self._preview_device = device
+        self._scope_source = source_factory()
+        reader = LatestFrameReader(self._scope_source)
         self._pump = FramePump(reader, consumers=[self._on_scope_frame])
         self._pump.start()
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._pump.tick)
+        self._timer.timeout.connect(self._preview_tick)
         self._timer.start(1000 // _PREVIEW_FPS)
+        self._refresh_status()
+
+    def _preview_tick(self) -> None:
+        if self._pump is None:
+            return
+        self._pump.tick()
+        # The source changes state on the reader thread (camera allowed, lost,
+        # back); repaint the status bar only when it actually changed.
+        status = self.scope_status()
+        if status != self._scope_status:
+            self._scope_status = status
+            self._refresh_status()
+
+    def reconfigure_preview(self) -> None:
+        """Reopen the scope after Preferences, if the chosen camera changed."""
+        if self._pump is None or self._config.panels.scope.device == self._preview_device:
+            return
+        self.stop_preview()
+        self.start_preview()
 
     # --- live instrument telemetry ---------------------------------------
 
@@ -669,6 +728,9 @@ class MainWindow(QMainWindow):
         if self._pump is not None:
             self._pump.stop()
             self._pump = None
+        self._scope_source = None
+        self._scope_status = None
+        self._preview_device = None
 
     # --- virtual-camera output -------------------------------------------
 
