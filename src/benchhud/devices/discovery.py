@@ -30,7 +30,28 @@ class SerialDevice:
 class CameraDevice:
     identifier: str  # /dev/videoN on Linux, else a Qt device id
     label: str  # human label
-    index: int  # enumeration position (cv2 index fallback)
+    index: int  # the index cv2.VideoCapture opens this camera by (see list_cameras_qt)
+
+
+#: OBS's virtual camera (the device benchhud *publishes* to on macOS). Reading it
+#: back as a capture camera is a feedback loop, so it's never offered as one.
+#: Same UID as ``output.cmio.OBS_DEVICE_UID``, kept here so discovery stays
+#: free of the ctypes output module.
+OBS_VIRTUAL_CAMERA_UID = "7626645E-4425-469E-9D8B-97E0FA59AC75"
+
+
+def opencv_indices(identifiers: Sequence[str], platform: str = sys.platform) -> list[int]:
+    """The index OpenCV opens each camera by, in the order ``identifiers`` were given.
+
+    macOS: OpenCV's AVFoundation backend takes ``devicesWithMediaType:`` and
+    **sorts it by uniqueID**, and Qt's camera id *is* that uniqueID. So the
+    index is the id's rank in sorted order, not its position in Qt's list (#184).
+    Elsewhere, enumeration order is what we have.
+    """
+    if platform == "darwin":
+        ranked = sorted(identifiers)
+        return [ranked.index(identifier) for identifier in identifiers]
+    return list(range(len(identifiers)))
 
 
 @runtime_checkable
@@ -93,21 +114,38 @@ def list_cameras_qt(app_instance: Callable[[], object | None] | None = None) -> 
 
     from PySide6.QtMultimedia import QMediaDevices
 
-    cameras = []
-    for index, cam in enumerate(QMediaDevices.videoInputs()):
-        identifier = cam.id().data().decode(errors="replace")
-        cameras.append(CameraDevice(identifier=identifier, label=cam.description(), index=index))
-    return cameras
+    inputs = [
+        (cam.id().data().decode(errors="replace"), cam.description())
+        for cam in QMediaDevices.videoInputs()
+    ]
+    return cameras_from_qt(inputs)
+
+
+def cameras_from_qt(
+    inputs: Sequence[tuple[str, str]], platform: str = sys.platform
+) -> list[CameraDevice]:
+    """Build the camera list from Qt's ``(id, description)`` pairs (pure, testable).
+
+    Indices are computed over *every* device, including OBS's virtual camera,
+    because OpenCV counts it too. Only then is that camera dropped from the list.
+    """
+    identifiers = [identifier for identifier, _label in inputs]
+    indices = opencv_indices(identifiers, platform)
+    return [
+        CameraDevice(identifier=identifier, label=label, index=index)
+        for (identifier, label), index in zip(inputs, indices, strict=True)
+        if not (platform == "darwin" and identifier.upper() == OBS_VIRTUAL_CAMERA_UID)
+    ]
 
 
 def resolve_capture_device(identifier: str, cameras: Sequence[CameraDevice]) -> int | str:
     """Map a configured camera identifier to something OpenCV can actually open.
 
     Linux identifiers are already device paths, which ``cv2.VideoCapture`` takes
-    directly. Qt's ids (macOS/Windows) are opaque strings it cannot open at all,
-    so we fall back to the camera's enumeration position — which is exactly the
-    index OpenCV wants. Without this, choosing a camera in Preferences on macOS
-    silently yields no feed.
+    directly. Qt's ids (macOS/Windows) are strings it cannot open at all, so we
+    use the index discovery computed for OpenCV (on macOS, the id's rank in
+    uniqueID order; see :func:`opencv_indices`). Without this, choosing a camera
+    in Preferences on macOS silently yields no feed, or the wrong one.
     """
     text = identifier.strip()
     if text.lstrip("-").isdigit():

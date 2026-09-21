@@ -29,11 +29,13 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from benchhud.devices.discovery import OBS_VIRTUAL_CAMERA_UID
+
 log = logging.getLogger(__name__)
 
 # OBS's camera-extension device, from its Info.plist (OBSCameraDeviceUUID).
 # Stable since the extension shipped; verified against OBS 32.1.2.
-OBS_DEVICE_UID = "7626645E-4425-469E-9D8B-97E0FA59AC75"
+OBS_DEVICE_UID = OBS_VIRTUAL_CAMERA_UID
 
 _CMIO_FRAMEWORK = "/System/Library/Frameworks/CoreMediaIO.framework/CoreMediaIO"
 _CF_FRAMEWORK = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
