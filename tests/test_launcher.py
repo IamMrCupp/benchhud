@@ -74,3 +74,40 @@ def test_shell_hosts_launcher_panel(qtbot) -> None:
     window = MainWindow(config)
     qtbot.addWidget(window)
     assert "launcher" in window.panels.panel_ids()
+
+
+def test_set_tools_rebuilds_the_buttons(qtbot) -> None:
+    """#181: tools added in Preferences must appear without a relaunch."""
+    panel = LauncherPanel([], launcher=_RecordingLauncher())
+    qtbot.addWidget(panel)
+    assert panel.buttons == {}
+    panel.set_tools(
+        [ToolConfig("OpenBoardView", "openboardview"), ToolConfig("picocom", "picocom")]
+    )
+    assert list(panel.buttons) == ["OpenBoardView", "picocom"]
+    panel.set_tools([ToolConfig("minicom", "minicom")])
+    assert list(panel.buttons) == ["minicom"]
+
+
+def test_empty_hint_points_at_preferences_not_the_config_file(qtbot) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    panel = LauncherPanel([], launcher=_RecordingLauncher())
+    qtbot.addWidget(panel)
+    texts = [label.text() for label in panel.findChildren(QLabel)]
+    assert any("Preferences" in t for t in texts)
+    assert not any("[[tools]]" in t for t in texts)
+
+
+def test_preferences_accept_refreshes_the_tools_pane(qtbot) -> None:
+    from benchhud.config import Config
+    from benchhud.shell.main_window import MainWindow
+
+    config = Config()
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    assert window.launcher_panel.buttons == {}
+    dialog = window.open_preferences()
+    dialog._append_tool_row("picocom", "picocom")
+    dialog.accept()
+    assert list(window.launcher_panel.buttons) == ["picocom"]

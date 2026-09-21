@@ -505,12 +505,17 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.accepted.connect(self.reconfigure_inventory_source)
         dialog.accepted.connect(self.reconfigure_boards)
+        dialog.accepted.connect(self.reconfigure_tools)
         dialog.accepted.connect(self.reconfigure_instrument_session)
         # Last: the status line reports sink state, so it must run after the
         # sink has been rebuilt or it shows the previous one.
         dialog.accepted.connect(self._refresh_status)
         dialog.open()
         return dialog
+
+    def reconfigure_tools(self) -> None:
+        """Rebuild the Tools pane from config (after Preferences edits it)."""
+        self.launcher_panel.set_tools(self._config.tools)
 
     def open_about(self) -> QMessageBox:
         """Show the About dialog (non-blocking; returned for tests)."""
