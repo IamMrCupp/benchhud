@@ -121,18 +121,22 @@ def test_reopen_after_close():
 
 
 def test_scope_source_falls_back_when_no_device_configured():
-    from benchhud.capture.frame_source import SyntheticFrameSource
     from benchhud.shell.main_window import scope_source_for
 
-    assert isinstance(scope_source_for("  "), SyntheticFrameSource)
+    source = scope_source_for("  ")
+    assert source.read() is not None
+    assert source.status.reason == "no camera selected"
 
 
 def test_scope_source_falls_back_when_the_camera_will_not_open():
-    """Unplugged or busy scope must not leave the shell without a preview."""
-    from benchhud.capture.frame_source import SyntheticFrameSource
+    """Unplugged or busy scope must not leave the shell without a preview — or hide it."""
     from benchhud.shell.main_window import scope_source_for
 
-    assert isinstance(scope_source_for("/dev/video-nope"), SyntheticFrameSource)
+    source = scope_source_for("/dev/video-nope")
+    assert source.read() is not None
+    assert not source.status.live
+    assert source.status.reason.startswith("couldn't open /dev/video-nope")
+    source.close()
 
 
 def _cameras():
@@ -171,13 +175,25 @@ def test_unknown_identifier_is_left_alone():
 
 
 def test_scope_source_opens_the_camera_at_the_resolved_index():
-    from benchhud.capture.camera import CameraFrameSource
     from benchhud.shell.main_window import scope_source_for
 
     source = scope_source_for("0x1a11000005ac1112", _cameras())
     # No second camera on CI, so this falls back — the point is that resolution
-    # happened: a real attempt was made rather than the id being opened verbatim.
-    assert source is not None
-    if isinstance(source, CameraFrameSource):
-        assert source.device == 1
-        source.close()
+    # happened: index 1 was tried rather than the id being opened verbatim.
+    assert source._camera.device == 1
+    source.close()
+
+
+def test_status_names_the_camera_not_its_opaque_id():
+    from benchhud.shell.main_window import camera_label
+
+    assert camera_label("0x1a11000005ac1112", _cameras()) == "Studio Display"
+    assert camera_label("/dev/video4", _cameras()) == "/dev/video4"
+
+
+def test_open_hint_speaks_each_platform():
+    from benchhud.shell.main_window import camera_open_hint
+
+    assert "Privacy & Security" in camera_open_hint("darwin")
+    assert "/dev/video" in camera_open_hint("linux")
+    assert camera_open_hint("win32")
