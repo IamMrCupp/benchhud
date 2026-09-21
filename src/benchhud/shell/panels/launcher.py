@@ -18,6 +18,10 @@ from benchhud.shell.panel import Panel
 
 _log = logging.getLogger(__name__)
 
+#: Shown with no tools. It points at the app, not the config file, because
+#: most people using this will never open a TOML file.
+EMPTY_HINT = "No tools yet.\nAdd some in Preferences → Tools."
+
 
 class LauncherPanel(Panel):
     panel_id = "launcher"
@@ -31,18 +35,28 @@ class LauncherPanel(Panel):
     ) -> None:
         super().__init__(parent)
         self._launcher = launcher or ToolLauncher()
-        self._tools = list(tools or [])
+        self._tools: list[ToolConfig] = []
         self.buttons: dict[str, QPushButton] = {}
+        self._layout = QVBoxLayout(self)
+        self.set_tools(tools or [])
 
-        layout = QVBoxLayout(self)
+    def set_tools(self, tools: Sequence[ToolConfig]) -> None:
+        """Rebuild the buttons from ``tools`` (called again when Preferences change them)."""
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._tools = list(tools)
+        self.buttons = {}
         if not self._tools:
-            layout.addWidget(QLabel("No tools configured.\nAdd [[tools]] entries to your config."))
+            self._layout.addWidget(QLabel(EMPTY_HINT))
         for tool in self._tools:
             button = QPushButton(tool.name)
             button.clicked.connect(lambda _=False, t=tool: self._launch(t))
-            layout.addWidget(button)
+            self._layout.addWidget(button)
             self.buttons[tool.name] = button
-        layout.addStretch(1)
+        self._layout.addStretch(1)
 
     def _launch(self, tool: ToolConfig) -> None:
         try:
