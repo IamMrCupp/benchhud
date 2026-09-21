@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Regenerate packaging/icons/benchhud.icns from the app's 1024px icon.png.
+# Regenerate the app icons from the 1024px icon.png: benchhud.icns (macOS)
+# and benchhud-<size>.png (Linux).
 #
 # Briefcase wants a real .icns for the macOS bundle; rerun this whenever
 # src/benchhud/resources/icon.png changes. macOS-only (sips + iconutil).
@@ -20,3 +21,9 @@ done
 iconutil -c icns "$iconset" -o "$out"
 rm -rf "$(dirname "$iconset")"
 echo "wrote $out"
+
+# Linux (Briefcase's .deb) wants plain PNGs at fixed sizes: benchhud-<size>.png.
+for size in 16 32 64 128 256 512; do
+    sips -z "$size" "$size" "$src" --out "$root/packaging/icons/benchhud-$size.png" >/dev/null
+done
+echo "wrote packaging/icons/benchhud-{16..512}.png"

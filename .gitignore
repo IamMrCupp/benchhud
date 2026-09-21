@@ -26,6 +26,9 @@ config.local.json
 # Python build artifacts
 dist/
 build/
+# Briefcase's local state and per-run logs (packaging, see docs/PACKAGING.md)
+.briefcase/
+logs/
 *.egg-info/
 
 # Output of scripts/check_camera.py — a real camera frame, never commit it
