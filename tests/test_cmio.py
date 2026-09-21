@@ -148,9 +148,85 @@ def test_reason_is_actionable_when_obs_is_absent(monkeypatch) -> None:
     from benchhud.output import cmio
 
     monkeypatch.setattr(cmio, "find_obs_sink", lambda: None)
+    monkeypatch.setattr(cmio, "_list_system_extensions", lambda: None)
     with pytest.raises(cmio.CmioSinkUnavailable) as info:
         cmio.open_cmio_sink(1280, 720)
     assert "approve its camera extension" in info.value.reason
+
+
+# --- #186: say *why* OBS's camera is missing -----------------------------
+
+_HEADER = (
+    "3 extension(s)\n--- com.apple.system_extension.cmio (Go to 'System Settings > General > "
+    "Login Items & Extensions > Camera Extensions' to modify these system extension(s))\n"
+    "enabled\tactive\tteamID\tbundleID (version)\tname\t[state]\n"
+)
+# Captured on the maintainer's Mac mid-update: the old copy pending uninstall.
+_PENDING_REBOOT = _HEADER + (
+    "\t\t2MMRE5MTB8\tcom.obsproject.obs-studio.mac-camera-extension (32.1.2/24742303888)"
+    "\tOBS Virtual Camera\t[terminated waiting to uninstall on reboot]\n"
+    "*\t*\t2MMRE5MTB8\tcom.obsproject.obs-studio.mac-camera-extension (32.2.2/31845296735)"
+    "\tOBS Virtual Camera\t[activated enabled]\n"
+)
+_AWAITING_APPROVAL = _HEADER + (
+    "\t\t2MMRE5MTB8\tcom.obsproject.obs-studio.mac-camera-extension (32.2.2/31845296735)"
+    "\tOBS Virtual Camera\t[activated waiting for user]\n"
+)
+_OTHER_ONLY = _HEADER + (
+    "*\t*\tABCDE12345\tcom.example.somecam (1.0/1)\tSome Cam\t[activated enabled]\n"
+)
+
+
+def test_pending_reboot_says_restart_not_reinstall() -> None:
+    """The case that shipped the wrong advice: OBS installed, approved, update pending."""
+    from benchhud.output import cmio
+
+    reason = cmio.reason_from_extension_list(_PENDING_REBOOT)
+    assert reason == cmio.OBS_NEEDS_RESTART
+    assert "restart your Mac" in reason
+    assert "install OBS" not in reason
+
+
+def test_unapproved_extension_says_approve() -> None:
+    from benchhud.output import cmio
+
+    assert cmio.reason_from_extension_list(_AWAITING_APPROVAL) == cmio.OBS_NEEDS_APPROVAL
+
+
+def test_no_obs_extension_says_install() -> None:
+    from benchhud.output import cmio
+
+    assert cmio.reason_from_extension_list(_OTHER_ONLY) == cmio.OBS_NOT_INSTALLED
+    assert cmio.reason_from_extension_list("") == cmio.OBS_NOT_INSTALLED
+
+
+def test_unreadable_listing_falls_back_to_the_generic_reason() -> None:
+    from benchhud.output import cmio
+
+    assert cmio.reason_from_extension_list(None) == cmio.OBS_CAMERA_MISSING
+
+
+def test_open_reports_the_diagnosed_reason(monkeypatch) -> None:
+    from benchhud.output import cmio
+
+    monkeypatch.setattr(cmio, "find_obs_sink", lambda: None)
+    monkeypatch.setattr(cmio, "_list_system_extensions", lambda: _PENDING_REBOOT)
+    with pytest.raises(cmio.CmioSinkUnavailable) as info:
+        cmio.open_cmio_sink(1280, 720)
+    assert info.value.reason == cmio.OBS_NEEDS_RESTART
+
+
+@pytest.mark.skipif(not sys.platform.startswith("darwin"), reason="macOS-only")
+def test_real_systemextensionsctl_is_readable() -> None:
+    """The real listing parses without raising (content depends on the machine)."""
+    from benchhud.output import cmio
+
+    assert cmio.diagnose_missing_obs() in {
+        cmio.OBS_CAMERA_MISSING,
+        cmio.OBS_NOT_INSTALLED,
+        cmio.OBS_NEEDS_APPROVAL,
+        cmio.OBS_NEEDS_RESTART,
+    }
 
 
 def test_reason_names_the_real_cause_when_stream_wont_open(monkeypatch) -> None:
