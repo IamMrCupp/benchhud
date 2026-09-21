@@ -31,6 +31,7 @@ from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
+from benchhud.capture.thermal import Y16Camera
 from benchhud.config import Config, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import (
@@ -125,6 +126,23 @@ def scope_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> Fallb
     )
 
 
+def thermal_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> FallbackFrameSource:
+    """The thermal feed as °C arrays, with no test pattern when it's down.
+
+    Unlike the scope, the thermal panel never shows a stand-in: a fake heatmap
+    with a temperature on it could be taken for a real reading.
+    """
+    if not device.strip():
+        return FallbackFrameSource(None, None)
+    camera = Y16Camera(resolve_capture_device(device, cameras))
+    return FallbackFrameSource(
+        camera,
+        None,
+        name=camera_label(device, cameras),
+        open_hint=camera_open_hint(),
+    )
+
+
 class MainWindow(QMainWindow):
     """Top-level HUD window."""
 
@@ -147,6 +165,12 @@ class MainWindow(QMainWindow):
         self._scope_source: FrameSource | None = None
         self._scope_status: SourceStatus | None = None
         self._preview_device: str | None = None
+        self._thermal_pump: FramePump | None = None
+        self._thermal_timer: QTimer | None = None
+        self._thermal_source: FrameSource | None = None
+        self._thermal_status: SourceStatus | None = None
+        self._thermal_device: str | None = None
+        self._last_temps = None
         self._cameras: list[CameraDevice] = []
         self._sink: OutputSink | None = None
         self._demo: DemoSignal | None = None
@@ -343,7 +367,8 @@ class MainWindow(QMainWindow):
         # composite (scope + thermal) rather than thermal on its own.
         if self._pump is None:
             self.scope_panel.update_frame(self._demo_scope.read())
-        self.thermal_panel.update_temps(self._demo.thermal())
+        if not self._thermal_live():
+            self.thermal_panel.update_temps(self._demo.thermal())
         self.on_telemetry(snapshot, self._demo_t)
         self.render_composite()
 
@@ -475,6 +500,7 @@ class MainWindow(QMainWindow):
         )
         dialog.accepted.connect(self.restart_output)
         dialog.accepted.connect(self.reconfigure_preview)
+        dialog.accepted.connect(self.reconfigure_thermal)
         dialog.accepted.connect(self.reconfigure_faults)
         dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.accepted.connect(self.reconfigure_inventory_source)
@@ -586,6 +612,24 @@ class MainWindow(QMainWindow):
             return label
         return f"{label} (⚠ test pattern — {status.reason})"
 
+    def thermal_status(self) -> SourceStatus | None:
+        """Is the thermal panel showing the camera, and if not, why (None: thermal off)."""
+        return getattr(self._thermal_source, "status", None)
+
+    def _thermal_live(self) -> bool:
+        status = self.thermal_status()
+        return status is not None and status.live
+
+    def _thermal_status_text(self) -> str:
+        thermal = self._config.panels.thermal
+        if not (thermal.enabled and thermal.device.strip()):
+            return "—"
+        label = camera_label(thermal.device, self._cameras)
+        status = self.thermal_status()
+        if status is None or status.live:
+            return label
+        return f"{label} (⚠ no signal — {status.reason})"
+
     def _refresh_status(self) -> None:
         panels = self._config.panels
         prefix = "◉ DEMO MODE   ·   " if self.demo_active else ""
@@ -594,7 +638,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"{prefix}benchhud {__version__}   ·   "
             f"scope {self._scope_status_text()}   ·   "
-            f"thermal {panels.thermal.device or '—'}   ·   "
+            f"thermal {self._thermal_status_text()}   ·   "
             f"psu/dmm {panels.telemetry.port or '—'}"
             f"{suffix}"
         )
@@ -643,6 +687,84 @@ class MainWindow(QMainWindow):
             return
         self.stop_preview()
         self.start_preview()
+
+    # --- thermal capture -------------------------------------------------
+
+    def start_thermal(self, source_factory: SourceFactory | None = None) -> None:
+        """Start reading the thermal camera (idempotent).
+
+        Without a factory this is a no-op unless a thermal camera is chosen in
+        Preferences, so a scope-only bench never touches a second device.
+        """
+        if self._thermal_pump is not None:
+            return
+        thermal = self._config.panels.thermal
+        if source_factory is None:
+            if not (thermal.enabled and thermal.device.strip()):
+                return
+            cameras = self._cameras or self._scan_cameras()
+            self._cameras = cameras
+            device = thermal.device
+
+            def source_factory() -> FrameSource:
+                return thermal_source_for(device, cameras)
+
+        self._thermal_device = thermal.device
+        self._thermal_source = source_factory()
+        reader = LatestFrameReader(self._thermal_source)
+        self._thermal_pump = FramePump(reader, consumers=[self._on_thermal_frame])
+        self._thermal_pump.start()
+        self._thermal_timer = QTimer(self)
+        self._thermal_timer.timeout.connect(self._thermal_tick)
+        self._thermal_timer.start(1000 // _PREVIEW_FPS)
+        self._refresh_status()
+
+    def _on_thermal_frame(self, temps) -> None:
+        if temps is self._last_temps:
+            return  # the pump re-offers the latest frame every tick
+        self._last_temps = temps
+        self.thermal_panel.update_temps(temps)
+        if self._pump is None:
+            self.render_composite()  # otherwise the scope tick renders it
+
+    def _thermal_tick(self) -> None:
+        if self._thermal_pump is None:
+            return
+        self._thermal_pump.tick()
+        status = self.thermal_status()
+        if status != self._thermal_status:
+            was_live = self._thermal_status is not None and self._thermal_status.live
+            self._thermal_status = status
+            if was_live and not self.demo_active:
+                self.thermal_panel.clear()
+                self.render_composite()
+            self._refresh_status()
+
+    def stop_thermal(self) -> None:
+        """Stop reading the thermal camera (idempotent)."""
+        if self._thermal_timer is not None:
+            self._thermal_timer.stop()
+            self._thermal_timer = None
+        if self._thermal_pump is not None:
+            self._thermal_pump.stop()
+            self._thermal_pump = None
+        self._thermal_source = None
+        self._thermal_status = None
+        self._thermal_device = None
+        self._last_temps = None
+
+    def reconfigure_thermal(self) -> None:
+        """Apply a thermal camera change from Preferences (start, stop or switch)."""
+        thermal = self._config.panels.thermal
+        wanted = thermal.device if (thermal.enabled and thermal.device.strip()) else None
+        if wanted == self._thermal_device:
+            return
+        if self._thermal_pump is not None:
+            self.stop_thermal()
+            if not self.demo_active:
+                self.thermal_panel.clear()
+                self.render_composite()
+        self.start_thermal()
 
     # --- live instrument telemetry ---------------------------------------
 
@@ -798,6 +920,7 @@ class MainWindow(QMainWindow):
         self._stop_demo()
         self.stop_telemetry()
         self.stop_preview()
+        self.stop_thermal()
         self.stop_output()
         self.persist_into_config()
         if self._on_persist is not None:

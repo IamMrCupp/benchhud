@@ -33,10 +33,11 @@ def _scanner() -> _FakeScanner:
 def test_populates_device_dropdowns(qtbot) -> None:
     dialog = PreferencesDialog(Config(), _scanner())
     qtbot.addWidget(dialog)
-    assert dialog.scope_combo.count() == 2
+    assert dialog.scope_combo.count() == 3  # "(none)" + two cameras
     assert dialog.serial_combo.count() == 1
-    # userData carries the identifier the capture layer opens.
-    assert dialog.scope_combo.itemData(0) == "/dev/video4"
+    # userData carries the identifier the capture layer opens; "(none)" is empty.
+    assert dialog.scope_combo.itemData(0) == ""
+    assert dialog.scope_combo.itemData(1) == "/dev/video4"
 
 
 def test_preselects_configured_device(qtbot) -> None:
@@ -67,10 +68,10 @@ def test_rescan_repopulates(qtbot) -> None:
     scanner = _FakeScanner(cameras=[], ports=[])
     dialog = PreferencesDialog(config, scanner)
     qtbot.addWidget(dialog)
-    assert dialog.scope_combo.count() == 0
+    assert dialog.scope_combo.count() == 1  # just "(none)"
     scanner._cameras = [CameraDevice("/dev/video0", "cam", 0)]
     dialog.rescan_devices()
-    assert dialog.scope_combo.count() == 1
+    assert dialog.scope_combo.count() == 2
 
 
 def test_tools_table_reflects_config(qtbot) -> None:
@@ -86,8 +87,8 @@ def test_apply_writes_selections_to_config(qtbot) -> None:
     config = Config()
     dialog = PreferencesDialog(config, _scanner())
     qtbot.addWidget(dialog)
-    dialog.scope_combo.setCurrentIndex(0)  # /dev/video4
-    dialog.thermal_combo.setCurrentIndex(1)  # /dev/video6
+    dialog.scope_combo.setCurrentIndex(1)  # /dev/video4
+    dialog.thermal_combo.setCurrentIndex(2)  # /dev/video6
     dialog.serial_combo.setCurrentIndex(0)  # /dev/ttyUSB0
     dialog.output_fps.setValue(24)
     dialog.logging_combo.setCurrentText("DEBUG")
@@ -97,6 +98,7 @@ def test_apply_writes_selections_to_config(qtbot) -> None:
 
     assert config.panels.scope.device == "/dev/video4"
     assert config.panels.thermal.device == "/dev/video6"
+    assert config.panels.thermal.enabled  # picking a thermal camera turns it on
     assert config.panels.telemetry.port == "/dev/ttyUSB0"
     assert config.output.fps == 24
     assert config.shell.logging.level == "DEBUG"
@@ -152,7 +154,7 @@ def test_open_preferences_returns_dialog(qtbot) -> None:
     qtbot.addWidget(window)
     dialog = window.open_preferences()
     assert isinstance(dialog, PreferencesDialog)
-    assert dialog.scope_combo.count() == 2
+    assert dialog.scope_combo.count() == 3
     dialog.close()
 
 
@@ -175,3 +177,23 @@ def test_inventory_token_field_is_masked(qtbot) -> None:
     from PySide6.QtWidgets import QLineEdit
 
     assert dialog.inventory_token.echoMode() == QLineEdit.EchoMode.Password
+
+
+def test_none_deselects_a_camera_and_turns_thermal_off(qtbot) -> None:
+    config = Config()
+    config.panels.thermal.enabled = True
+    config.panels.thermal.device = "/dev/video6"
+    dialog = PreferencesDialog(config, _scanner())
+    qtbot.addWidget(dialog)
+    dialog.thermal_combo.setCurrentIndex(0)  # "(none)"
+    dialog.apply_to_config()
+    assert config.panels.thermal.device == ""
+    assert not config.panels.thermal.enabled
+
+
+def test_empty_config_preselects_none(qtbot) -> None:
+    config = Config()
+    config.panels.thermal.device = ""
+    dialog = PreferencesDialog(config, _scanner())
+    qtbot.addWidget(dialog)
+    assert dialog.thermal_combo.currentText() == "(none)"

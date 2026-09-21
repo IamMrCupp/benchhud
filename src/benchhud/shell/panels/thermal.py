@@ -75,6 +75,18 @@ class ThermalPanel(Panel):
         spot = hottest(temps)
         self._readout.setText(f"max: {spot.value:.1f}°C @ ({spot.x}, {spot.y})")
 
+    def clear(self) -> None:
+        """Drop the last reading and go back to 'No signal'.
+
+        Called when the thermal camera is lost, so a frozen heatmap can't pass
+        for a live one on the panel or in the composite.
+        """
+        self._last_temps = None
+        self._source_pixmap = None
+        self._view.clear()
+        self._view.setText("No signal")
+        self._readout.setText("max: —")
+
     def _render(self) -> None:
         if self._source_pixmap is None:
             return
