@@ -78,6 +78,17 @@ show_dmm = true        # the DMM header line
 scale = 1.0            # size multiplier on top of the automatic scaling
 opacity = 1.0          # below 1.0 lets the board show through the readout
 
+[graph_overlay]
+# Burn the live V/A/W power trend (the meter dock's chart) into the streamed
+# frame. Each line gets its own vertical range, so a small current trace isn't
+# flattened by the voltage. The legend shows live values. Off by default. In
+# the same corner as the meter readout it stacks beside it, not over it.
+enabled = false
+corner = "bottom-right" # bottom-left | bottom-right | top-left | top-right
+window_seconds = 60.0   # how much history the graph shows
+scale = 1.0             # size multiplier on top of the automatic scaling
+opacity = 0.9           # below 1.0 lets the board show through
+
 [intake]
 # benchhud-intake ticket API (LAN-only, read-only). Leave base_url empty to run
 # standalone with no ticket queue. token is intake's INTAKE_API_TOKEN (sent as a

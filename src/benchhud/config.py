@@ -136,6 +136,20 @@ class TelemetryOverlayConfig:
 
 
 @dataclass
+class GraphOverlayConfig:
+    """Burn the live V/A/W power trend into the composited (streamed) frame.
+
+    Off by default, like the meter overlay. PII-free (electrical readings only).
+    In the same corner as the meter readout it stacks beside it, never over it."""
+
+    enabled: bool = False
+    corner: str = "bottom-right"  # bottom-left | bottom-right | top-left | top-right
+    window_seconds: float = 60.0  # how much history the trend shows
+    scale: float = 1.0  # size multiplier on top of the automatic frame scaling
+    opacity: float = 0.9  # below 1.0 lets the board show through
+
+
+@dataclass
 class IntakeConfig:
     """Connection to a benchhud-intake ticket API (empty base URL → disabled)."""
 
@@ -195,6 +209,7 @@ class Config:
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     faults: FaultConfig = field(default_factory=FaultConfig)
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
+    graph_overlay: GraphOverlayConfig = field(default_factory=GraphOverlayConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
@@ -248,6 +263,11 @@ class Config:
             cfg.telemetry_overlay,
             data.get("telemetry_overlay", {}),
             ("enabled", "corner", "show_psu", "show_dmm", "scale", "opacity"),
+        )
+        _apply(
+            cfg.graph_overlay,
+            data.get("graph_overlay", {}),
+            ("enabled", "corner", "window_seconds", "scale", "opacity"),
         )
         _apply(
             cfg.intake,

@@ -197,3 +197,18 @@ def test_empty_config_preselects_none(qtbot) -> None:
     dialog = PreferencesDialog(config, _scanner())
     qtbot.addWidget(dialog)
     assert dialog.thermal_combo.currentText() == "(none)"
+
+
+def test_graph_overlay_settings_round_trip(qtbot) -> None:
+    config = Config()
+    dialog = PreferencesDialog(config, _scanner())
+    qtbot.addWidget(dialog)
+    dialog.graph_enabled.setChecked(True)
+    dialog.graph_corner.setCurrentIndex(dialog.graph_corner.findData("top-left"))
+    dialog.graph_window.setValue(90)
+    dialog.graph_opacity.setValue(0.7)
+    dialog.apply_to_config()
+    assert config.graph_overlay.enabled
+    assert config.graph_overlay.corner == "top-left"
+    assert config.graph_overlay.window_seconds == 90.0
+    assert config.graph_overlay.opacity == 0.7

@@ -28,6 +28,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPen
 
 from benchhud.config import TelemetryOverlayConfig
+from benchhud.palette import SeriesPalette, palette, shade, tint
 from benchhud.shell.fonts import seven_segment_family
 
 _PLACEHOLDER = "—"
@@ -54,6 +55,7 @@ class MeterReadout:
 class _Cell:
     caption: str
     value: str
+    colour: str | None = None  # the quantity's palette colour; None = classic cyan
 
 
 @dataclass(frozen=True)
@@ -68,16 +70,21 @@ class OverlayModel:
         return self.dmm is None and not self.cells
 
 
-def build_model(readout: MeterReadout, config: TelemetryOverlayConfig) -> OverlayModel:
+def build_model(
+    readout: MeterReadout,
+    config: TelemetryOverlayConfig,
+    colours: SeriesPalette | None = None,
+) -> OverlayModel:
     """Decide what to show from the readout + which sections are enabled (pure)."""
+    colours = colours or palette()
     dmm = (readout.dmm_mode, readout.dmm_value, readout.dmm_unit) if config.show_dmm else None
     cells: tuple[_Cell, ...] = ()
     if config.show_psu:
         cells = (
-            _Cell("VOLTAGE (V)", readout.voltage),
-            _Cell("CURRENT (A)", readout.current),
-            _Cell("POWER (W)", readout.power),
-            _Cell("MAX CURRENT (A)", readout.max_current),
+            _Cell("VOLTAGE (V)", readout.voltage, colours.voltage),
+            _Cell("CURRENT (A)", readout.current, colours.current),
+            _Cell("POWER (W)", readout.power, colours.power),
+            _Cell("MAX CURRENT (A)", readout.max_current, colours.max_current),
         )
     return OverlayModel(dmm=dmm, cells=cells)
 
@@ -210,7 +217,8 @@ def render_overlay_image(model: OverlayModel, scale: float = 1.0) -> QImage:
             col, row = i % 2, i // 2
             x = col * (cell_w + gap)
             cy = y + row * (cell_h + gap)
-            _panel(painter, QRectF(x, cy, cell_w, cell_h), _CELL_BG, _CELL_BORDER, radius)
+            fill, border = _cell_colours(cell.colour)
+            _panel(painter, QRectF(x, cy, cell_w, cell_h), fill, border, radius, width=2)
             painter.setFont(caption_font)
             painter.setPen(QColor(_CAPTION_FG))
             painter.drawText(
@@ -230,8 +238,22 @@ def render_overlay_image(model: OverlayModel, scale: float = 1.0) -> QImage:
     return image
 
 
-def _panel(painter: QPainter, rect: QRectF, fill: str, border: str, radius: int) -> None:
-    painter.setPen(QPen(QColor(border), 1))
+def _cell_colours(colour: str | None) -> tuple[str, str]:
+    """A cell's (fill, border): a pale tint of its quantity's colour, edged in it."""
+    if colour is None:
+        return _CELL_BG, _CELL_BORDER
+    return tint(colour, CELL_TINT), shade(colour, 0.15)
+
+
+#: How far toward white a cell's fill is mixed. Pale enough that the dark LCD
+#: digits keep their contrast, strong enough that the four cells read apart.
+CELL_TINT = 0.6
+
+
+def _panel(
+    painter: QPainter, rect: QRectF, fill: str, border: str, radius: int, *, width: int = 1
+) -> None:
+    painter.setPen(QPen(QColor(border), width))
     painter.setBrush(QColor(fill))
     painter.drawRoundedRect(rect, radius, radius)
 
@@ -262,8 +284,14 @@ def blit_rgba(
     corner: str = "bottom-left",
     margin: int = 16,
     opacity: float = 1.0,
+    *,
+    stack: int = 0,
 ) -> np.ndarray:
     """Alpha-composite a BGRA ``overlay`` onto a BGR ``frame`` at ``corner``.
+
+    ``stack`` moves the overlay that many pixels further from the corner's
+    top or bottom edge, so two overlays can share a corner without covering
+    each other.
 
     ``opacity`` scales the overlay's own alpha, so the readout can sit lightly
     over the board instead of hiding it. Returns a new frame; the input is left
@@ -277,6 +305,9 @@ def blit_rgba(
         return frame
     overlay = overlay[:oh, :ow]
     x, y = _corner_origin(corner, fw, fh, ow, oh, margin)
+    if stack:
+        y = y - stack if "bottom" in corner else y + stack
+        y = max(0, min(y, fh - oh))
 
     out = frame.copy()
     roi = out[y : y + oh, x : x + ow].astype(np.float32)
@@ -297,12 +328,27 @@ def draw_telemetry_overlay(
     The readout is sized relative to the frame (see :func:`auto_scale`) and then
     by the operator's own ``scale``, so it stays legible whatever the feed is.
     """
-    model = build_model(readout, config)
+    return draw_telemetry_overlay_sized(frame, readout, config)[0]
+
+
+def draw_telemetry_overlay_sized(
+    frame: np.ndarray,
+    readout: MeterReadout,
+    config: TelemetryOverlayConfig,
+    colours: SeriesPalette | None = None,
+) -> tuple[np.ndarray, int]:
+    """:func:`draw_telemetry_overlay`, plus the vertical space the readout took up.
+
+    The height (readout plus its margin, 0 when nothing was drawn) is what
+    another overlay in the same corner stacks past.
+    """
+    model = build_model(readout, config, colours)
     if model.is_empty:
-        return frame
+        return frame, 0
     scale = auto_scale(frame.shape[1]) * max(0.1, config.scale)
     image = render_overlay_image(model, scale)
     if image.isNull() or image.width() == 0 or image.height() == 0:
-        return frame
+        return frame, 0
     margin = max(4, round(16 * scale))
-    return blit_rgba(frame, _qimage_to_bgra(image), config.corner, margin, opacity=config.opacity)
+    out = blit_rgba(frame, _qimage_to_bgra(image), config.corner, margin, opacity=config.opacity)
+    return out, min(image.height(), frame.shape[0]) + margin

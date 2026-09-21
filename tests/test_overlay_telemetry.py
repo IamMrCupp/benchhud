@@ -148,7 +148,7 @@ def test_overlay_off_by_default_leaves_frame_untouched(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
     frame = _frame(200, 320)
-    assert window._apply_telemetry_overlay(frame) is frame
+    assert window._apply_overlays(frame) is frame
 
 
 def test_overlay_on_burns_readout_into_frame(qtbot) -> None:
@@ -163,7 +163,7 @@ def test_overlay_on_burns_readout_into_frame(qtbot) -> None:
         )
     )
     frame = _frame(300, 480)
-    out = window._apply_telemetry_overlay(frame)
+    out = window._apply_overlays(frame)
     assert not np.array_equal(out, frame)
 
 
