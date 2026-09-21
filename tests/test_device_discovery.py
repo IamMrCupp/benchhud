@@ -71,3 +71,59 @@ def test_qt_enumeration_without_an_application_is_safe():
     from benchhud.devices.discovery import list_cameras_qt
 
     assert list_cameras_qt(app_instance=lambda: None) == []
+
+
+# --- #184: the index OpenCV opens a camera by ---------------------------
+
+# Qt's order on the maintainer's Mac once OBS's camera extension was running.
+_QT_ORDER_WITH_OBS = [
+    ("7626645E-4425-469E-9D8B-97E0FA59AC75", "OBS Virtual Camera"),
+    ("6C707041-05AC-0010-0007-000000000001", "MacBook Pro Camera"),
+    ("A1D22F22-D8CB-4BE2-98E0-A2B000000001", "Eris Camera"),
+]
+
+
+def test_macos_index_is_the_uniqueid_rank_opencv_uses():
+    """OpenCV sorts AVFoundation devices by uniqueID; Qt's position is not its index."""
+    from benchhud.devices.discovery import cameras_from_qt
+
+    cameras = {c.label: c.index for c in cameras_from_qt(_QT_ORDER_WITH_OBS, "darwin")}
+    assert cameras == {"MacBook Pro Camera": 0, "Eris Camera": 2}  # OBS holds index 1
+
+
+def test_macos_never_offers_benchhuds_own_output_as_a_camera():
+    """Reading the OBS Virtual Camera back is a feedback loop."""
+    from benchhud.devices.discovery import cameras_from_qt
+
+    labels = [c.label for c in cameras_from_qt(_QT_ORDER_WITH_OBS, "darwin")]
+    assert "OBS Virtual Camera" not in labels
+
+
+def test_resolving_the_macbook_no_longer_opens_obs():
+    from benchhud.devices.discovery import cameras_from_qt, resolve_capture_device
+
+    cameras = cameras_from_qt(_QT_ORDER_WITH_OBS, "darwin")
+    assert resolve_capture_device("6C707041-05AC-0010-0007-000000000001", cameras) == 0
+    assert resolve_capture_device("A1D22F22-D8CB-4BE2-98E0-A2B000000001", cameras) == 2
+
+
+def test_other_platforms_keep_enumeration_order_and_all_devices():
+    from benchhud.devices.discovery import cameras_from_qt
+
+    cameras = cameras_from_qt(_QT_ORDER_WITH_OBS, "win32")
+    assert [(c.label, c.index) for c in cameras] == [
+        ("OBS Virtual Camera", 0),
+        ("MacBook Pro Camera", 1),
+        ("Eris Camera", 2),
+    ]
+
+
+def test_opencv_indices_without_obs_match_either_order():
+    """Why this hid until the reboot: with no OBS device the two orders agree."""
+    from benchhud.devices.discovery import opencv_indices
+
+    ids = [
+        "6C707041-05AC-0010-0007-000000000001",
+        "A1D22F22-D8CB-4BE2-98E0-A2B000000001",
+    ]
+    assert opencv_indices(ids, "darwin") == [0, 1]
