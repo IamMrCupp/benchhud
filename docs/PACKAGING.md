@@ -98,14 +98,21 @@ so on an Apple Silicon Mac, tell Docker to build for amd64. It runs emulated and
 takes a while the first time.
 
 ```sh
-export DOCKER_DEFAULT_PLATFORM=linux/amd64
-uvx briefcase create  linux system --target ubuntu:26.04
-uvx briefcase build   linux system --target ubuntu:26.04
-uvx briefcase package linux system --target ubuntu:26.04
+scripts/build_deb.sh          # Ubuntu 26.04 by default; pass another tag if needed
 ```
 
-The `.deb` lands in `dist/`. On the bench itself you can drop `--target` and
-`DOCKER_DEFAULT_PLATFORM` and build natively.
+The `.deb` lands in `dist/`. The script runs Briefcase's `create`, `build` and
+`package` for `linux system` against the Ubuntu image. **On an Apple Silicon Mac
+the last step fails under emulation**: `tar: Cannot stat: Function not
+implemented`, because QEMU lacks a stat syscall that newer `tar` uses. So the
+script packs the staged files with `dpkg-deb` in a native arm64 container
+instead. `dpkg-deb` only archives files, so the result is still a correct amd64
+package. Turning on Docker Desktop's *Use Rosetta for x86_64/amd64 emulation*
+may let Briefcase's own step work.
+
+The first build is slow: pulling the image and installing PySide6 and OpenCV,
+all emulated, can take 10+ minutes. On the bench itself, build natively with
+`uvx briefcase package linux system` (no Docker, no `--target`).
 
 **Why not Flatpak or AppImage:** benchhud opens raw `/dev/video*`,
 `/dev/ttyUSB*` and a v4l2loopback node. Flatpak's sandbox fights all three, and a

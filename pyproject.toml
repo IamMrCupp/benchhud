@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "PolyForm-Small-Business-1.0.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Aaron Cupp" }]
+authors = [{ name = "Aaron Cupp", email = "mrcupp@mrcupp.com" }]
 keywords = ["microsoldering", "board-repair", "thermal", "hud", "obs", "opencv"]
 
 dependencies = [
@@ -52,6 +52,11 @@ bundle = "com.iammrcupp"
 formal_name = "benchhud"
 # Installers truncate past ~80 chars; [project]'s full sentence stays for PyPI.
 description = "Microsoldering bench HUD: scope + thermal + telemetry, out to OBS."
+# Debian packages require one; shown by apt show and software centres.
+long_description = """benchhud is the command centre for a board-repair bench. It fuses a
+microscope feed with a thermal camera, so a hot component's bloom lands on that
+component. It shows live power-supply and DMM readings, keeps a repair log, and
+sends the composite to OBS as a virtual camera for streaming."""
 sources = ["src/benchhud"]
 icon = "packaging/icons/benchhud"
 # The reason macOS shows in its camera prompt. Without it a bundle can't ask
