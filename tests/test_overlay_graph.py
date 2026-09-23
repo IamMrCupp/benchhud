@@ -7,7 +7,7 @@ import numpy as np
 from benchhud.config import Config, GraphOverlayConfig, TelemetryOverlayConfig
 from benchhud.instruments.power_history import PowerSample
 from benchhud.overlay.graph import build_graph_model, draw_graph_overlay, render_graph_image
-from benchhud.overlay.telemetry import blit_rgba
+from benchhud.overlay.telemetry import blit_rgba, draw_telemetry_overlay_sized
 
 
 def _samples(n: int = 20, dt: float = 1.0) -> list[PowerSample]:
@@ -137,6 +137,65 @@ def test_window_stacks_the_graph_beside_the_meter_in_a_shared_corner(qtbot):
     assert both_top < meter_top  # the graph added rows above the meter
     # The meter's own pixels are untouched by the graph.
     assert np.array_equal(both[meter_top:], meter[meter_top:])
+
+
+def test_a_fixed_width_sets_the_panel_width():
+    model = build_graph_model(_samples(), 60)
+    assert render_graph_image(model, width=272).width() == 272
+    assert render_graph_image(model, width=500).width() == 500
+    assert render_graph_image(model).width() == 336  # unstacked: its own natural size
+
+
+def test_the_legend_shrinks_to_fit_a_narrow_panel():
+    """Shrunk to a small meter's width, the legend's text shrinks rather than overflowing."""
+    from PySide6.QtGui import QFontMetrics
+
+    from benchhud.overlay.graph import _fit_legend_font, _legend_texts
+
+    texts = _legend_texts((12.34, 0.567, 6.99))
+    roomy = _fit_legend_font(texts, 13, 16, 400)
+    tight = _fit_legend_font(texts, 13, 16, 200)
+    assert roomy.pixelSize() == 13  # untouched when it fits
+    assert tight.pixelSize() < 13
+    metrics = QFontMetrics(tight)
+    assert sum(metrics.horizontalAdvance(t) for t in texts) + 2 * 16 <= 200
+
+
+def _columns(frame: np.ndarray, rows: slice) -> tuple[int, int]:
+    """First and last painted column within ``rows``."""
+    cols = np.argwhere(frame[rows].any(axis=2))[:, 1]
+    return int(cols.min()), int(cols.max())
+
+
+def test_stacked_graph_lines_up_with_the_meter(qtbot):
+    """#196: in the same corner, the graph matches the meter's width and inset,
+    even when the two are sized differently in Preferences."""
+    from benchhud.shell.main_window import MainWindow
+
+    for corner in ("top-right", "bottom-left"):
+        for graph_scale in (1.0, 1.4, 0.6):
+            config = Config()
+            config.telemetry_overlay = TelemetryOverlayConfig(enabled=True, corner=corner)
+            config.graph_overlay = GraphOverlayConfig(
+                enabled=True, corner=corner, opacity=1.0, scale=graph_scale
+            )
+            window = MainWindow(config)
+            qtbot.addWidget(window)
+            for s in _samples():
+                window.power_panel.chart.add_reading(s.voltage, s.current, s.t)
+
+            _, footprint = draw_telemetry_overlay_sized(
+                _frame(), window._meter_readout(), config.telemetry_overlay
+            )
+            out = window._apply_overlays(_frame())
+            h = out.shape[0]
+            if corner.startswith("top"):
+                meter_rows = slice(0, footprint.height)
+                graph_rows = slice(footprint.height, h)
+            else:
+                meter_rows = slice(h - footprint.height, h)
+                graph_rows = slice(0, h - footprint.height)
+            assert _columns(out, graph_rows) == _columns(out, meter_rows), (corner, graph_scale)
 
 
 def test_graph_overlay_config_round_trips():

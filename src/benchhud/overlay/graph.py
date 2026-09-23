@@ -120,18 +120,53 @@ def _format(value: float | None, unit: str) -> str:
 WAITING = "waiting for readings"
 
 
+def _legend_texts(latest: tuple[float, float, float] | None) -> list[str]:
+    values = latest or (None, None, None)
+    return [
+        f"{label} {_format(value, unit)}"
+        for (label, unit), value in zip(SERIES, values, strict=True)
+    ]
+
+
+def _legend_font(px: int) -> QFont:
+    font = QFont()
+    font.setPixelSize(px)
+    font.setBold(True)
+    return font
+
+
+def _fit_legend_font(texts: list[str], px: int, gap: int, available: int) -> QFont:
+    """The legend font at ``px``, shrunk until the whole legend fits ``available``."""
+    while True:
+        font = _legend_font(px)
+        metrics = QFontMetrics(font)
+        needed = sum(metrics.horizontalAdvance(t) for t in texts) + gap * (len(texts) - 1)
+        if needed <= available or px <= 7:
+            return font
+        px -= 1
+
+
 def render_graph_image(
-    model: GraphModel, scale: float = 1.0, colours: SeriesPalette | None = None
+    model: GraphModel,
+    scale: float = 1.0,
+    colours: SeriesPalette | None = None,
+    *,
+    width: int | None = None,
 ) -> QImage:
-    """Paint the trend panel to an ARGB image. With no history it's an empty, labelled panel."""
+    """Paint the trend panel to an ARGB image. With no history it's an empty, labelled panel.
+
+    ``width`` fixes the panel's outer width, so it can line up with the meter
+    readout it's stacked against (#196). The plot stretches to fill it and the
+    legend shrinks if it would overflow. Height always follows ``scale``.
+    """
     line_colours = _series_colours(colours or palette())
     factor = max(0.3, scale)
     pad = max(3, round(_PAD * factor))
-    plot_w = max(60, round(_PLOT_W * factor))
+    natural_w = round(_PLOT_W * factor)
+    plot_w = max(60, (width - 2 * pad) if width is not None else natural_w)
     plot_h = max(24, round(_PLOT_H * factor))
-    legend_font = QFont()
-    legend_font.setPixelSize(max(7, round(_LEGEND_PX * factor)))
-    legend_font.setBold(True)
+    texts = _legend_texts(model.latest)
+    legend_font = _fit_legend_font(texts, max(7, round(_LEGEND_PX * factor)), 2 * pad, plot_w)
     legend_h = QFontMetrics(legend_font).height()
     radius = max(2, round(_RADIUS * factor))
 
@@ -150,9 +185,7 @@ def render_graph_image(
         painter.setFont(legend_font)
         metrics = QFontMetrics(legend_font)
         x = float(pad)
-        latest = model.latest or (None, None, None)
-        for (label, unit), colour, value in zip(SERIES, line_colours, latest, strict=True):
-            text = f"{label} {_format(value, unit)}"
+        for colour, text in zip(line_colours, texts, strict=True):
             painter.setPen(QColor(colour))
             painter.drawText(
                 QRectF(x, pad, plot_w, legend_h), int(Qt.AlignmentFlag.AlignLeft), text
@@ -192,6 +225,8 @@ def draw_graph_overlay(
     config: GraphOverlayConfig,
     *,
     stack: int = 0,
+    width: int | None = None,
+    margin: int | None = None,
     colours: SeriesPalette | None = None,
 ) -> np.ndarray:
     """Render the trend and composite it onto ``frame``.
@@ -201,14 +236,17 @@ def draw_graph_overlay(
 
     ``stack`` pushes the panel that many pixels away from its corner's
     horizontal edge, so it can sit above or below the meter readout in the same
-    corner instead of covering it.
+    corner instead of covering it. ``width`` and ``margin``, when stacked, are
+    the readout's, so the two panels share both edges instead of the graph
+    sticking out (#196).
     """
     model = build_graph_model(samples, config.window_seconds)
     scale = auto_scale(frame.shape[1]) * max(0.1, config.scale)
-    image = render_graph_image(model, scale, colours)
+    image = render_graph_image(model, scale, colours, width=width)
     if image.isNull():
         return frame
-    margin = max(4, round(16 * scale))
+    if margin is None:
+        margin = max(4, round(16 * scale))
     return blit_rgba(
         frame, _qimage_to_bgra(image), config.corner, margin, opacity=config.opacity, stack=stack
     )

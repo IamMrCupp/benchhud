@@ -55,7 +55,7 @@ from benchhud.jobs.store import JobStore, default_db_path
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.composite import colorize, compose
 from benchhud.overlay.graph import draw_graph_overlay
-from benchhud.overlay.telemetry import MeterReadout, draw_telemetry_overlay_sized
+from benchhud.overlay.telemetry import Footprint, MeterReadout, draw_telemetry_overlay_sized
 from benchhud.shell.about import about_html
 from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
@@ -572,17 +572,22 @@ class MainWindow(QMainWindow):
         """Burn the on-stream overlays onto the frame: meter readout, then power graph.
 
         When both share a corner, the graph stacks past the readout rather than
-        covering it.
+        covering it, at the readout's width so their edges line up (#196).
         """
         meter = self._config.telemetry_overlay
         graph = self._config.graph_overlay
-        meter_height = 0
+        footprint = Footprint(0, 0)
         if meter.enabled:
-            frame, meter_height = draw_telemetry_overlay_sized(frame, self._meter_readout(), meter)
+            frame, footprint = draw_telemetry_overlay_sized(frame, self._meter_readout(), meter)
         if graph.enabled:
-            stack = meter_height if meter.enabled and meter.corner == graph.corner else 0
+            stacked = meter.enabled and meter.corner == graph.corner and footprint.width > 0
             frame = draw_graph_overlay(
-                frame, self.power_panel.chart.history.samples(), graph, stack=stack
+                frame,
+                self.power_panel.chart.history.samples(),
+                graph,
+                stack=footprint.height if stacked else 0,
+                width=footprint.width if stacked else None,
+                margin=footprint.margin if stacked else None,
             )
         return frame
 
