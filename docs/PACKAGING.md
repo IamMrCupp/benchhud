@@ -90,7 +90,23 @@ something a package should do behind your back):
 Unlike macOS, Linux has no per-app camera permission. The groups are the whole
 story.
 
-### Build (from the Mac, via Docker)
+### Get one from CI (the normal way)
+
+Every PR and every push to `main` builds the `.deb` and uploads it as a workflow
+artifact named **benchhud-deb**. CI also installs it in a clean `ubuntu:26.04`
+container and checks that it starts, so a green run means an installable
+package. Download it from the run's **Artifacts** section, or:
+
+```sh
+gh run download --name benchhud-deb --dir dist
+```
+
+CI builds *inside* a `ubuntu:26.04` container, not on the runner image, because
+Briefcase links the package against the build host's Python. A package built on
+the runner's 24.04 would demand `libpython3.12` and refuse to install on the
+bench.
+
+### Build it yourself (from the Mac, via Docker)
 
 Briefcase builds a `.deb` inside a container matching the target Ubuntu release,
 so it links against that release's own Python and libraries. The bench is x86_64,
@@ -132,4 +148,5 @@ system package just uses your groups.
   `benchhud-<size>.png` (Linux), generated from `src/benchhud/resources/icon.png`
   by `scripts/make_icns.sh`. Rerun that script if the PNG changes.
 - **Not done yet:** notarization and a `.dmg` for handing to other people (#173),
-  CI builds, and a Windows bundle.
+  a CI build of the macOS app, and a Windows bundle. The Ubuntu `.deb` is built
+  by CI on every PR (#192).

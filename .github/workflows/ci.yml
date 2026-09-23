@@ -49,3 +49,78 @@ jobs:
 
       - name: Pytest
         run: uv run pytest
+
+  # The bench installs what CI builds, so the .deb is built here rather than on
+  # a laptop (#192). It runs *inside* ubuntu:26.04 rather than on the runner
+  # image: Briefcase links the package against the build host's Python, so a
+  # package built on 24.04 (Python 3.12) would demand libpython3.12 and refuse
+  # to install on the bench's 26.04 (Python 3.14). The container also keeps this
+  # independent of the ubuntu-latest migration (#158).
+  deb:
+    runs-on: ubuntu-24.04
+    container: ubuntu:26.04
+    steps:
+      - name: Install build tooling
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl dpkg-dev git \
+            python3 python3-dev python3-pip python3-venv
+
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # --no-docker: we are already in the target container, so build in place.
+      - name: Build the .deb
+        run: |
+          uvx briefcase create  linux system --no-docker --no-input
+          uvx briefcase build   linux system --no-docker --no-input
+          uvx briefcase package linux system --no-docker --adhoc-sign --no-input
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchhud-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # Install the artifact the way the bench does, in a clean container: proves
+  # apt can resolve every dependency and that the app actually starts.
+  deb-verify:
+    needs: deb
+    runs-on: ubuntu-24.04
+    container: ubuntu:26.04
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchhud-deb
+          path: dist
+
+      - name: apt install the package
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ./dist/*.deb
+
+      - name: It installed what an operator needs
+        run: |
+          dpkg -s benchhud | grep -E "^Status|^Version"
+          test -x /usr/bin/benchhud
+          test -f /usr/share/applications/com.iammrcupp.benchhud.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/com.iammrcupp.benchhud.png
+          benchhud --version
+
+      - name: It starts (headless)
+        run: |
+          # Still running when the timeout fires (124) is the pass: Qt, OpenCV
+          # and the job DB all loaded. Anything else is a startup crash.
+          timeout 60 benchhud > run.log 2>&1 || code=$?
+          if [ "${code:-0}" != "124" ]; then
+            echo "benchhud exited with ${code:-0}; expected to still be running"
+            cat run.log
+            exit 1
+          fi
