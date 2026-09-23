@@ -74,12 +74,13 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # --no-docker: we are already in the target container, so build in place.
+      # No --target: Briefcase only reaches for Docker when given a target image,
+      # and we are already inside the target container, so it builds in place.
       - name: Build the .deb
         run: |
-          uvx briefcase create  linux system --no-docker --no-input
-          uvx briefcase build   linux system --no-docker --no-input
-          uvx briefcase package linux system --no-docker --adhoc-sign --no-input
+          uvx briefcase create  linux system --no-input
+          uvx briefcase build   linux system --no-input
+          uvx briefcase package linux system --adhoc-sign --no-input
 
       - uses: actions/upload-artifact@v4
         with:
