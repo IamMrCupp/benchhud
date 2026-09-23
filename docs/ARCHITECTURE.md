@@ -34,6 +34,13 @@ ticket system is a protocol with a fake, not a dependency.
   compiled extension) on macOS, and `SoftcamSink` (`softcam.py`: sends BGR24
   straight into softcam's DirectShow filter DLL via `ctypes` — the one backend
   that converts nothing) on Windows.
+- **`browser_sources/`** — the data panels as OBS Browser sources: `hub`
+  (`TopicHub`, the latest payload per panel, handed from the GUI thread to the
+  server's), `payloads` (meter / graph / job-card dicts built from the same
+  objects the docks draw; the job card is a field whitelist), and `server`
+  (`BrowserSourceServer`, stdlib `ThreadingHTTPServer` on `127.0.0.1`, one page
+  per panel plus a Server-Sent Events feed). The pages live in
+  `resources/web/`. See [BROWSER-SOURCES.md](BROWSER-SOURCES.md).
 - **`instruments/`** — `SerialPort` / `LineInstrument` seam, `OwonSpm8104` driver,
   `read_snapshot` (resilient telemetry), `PowerHistory` (rolling V/A/W buffer for
   the trend chart).

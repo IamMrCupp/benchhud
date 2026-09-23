@@ -1,0 +1,156 @@
+/* Shared browser-source styling: the meter dock's LCD look on a transparent page.
+   The page background stays transparent so OBS layers it over any scene. */
+
+@font-face {
+  font-family: "DSEG7";
+  src: url("/static/dseg7.ttf") format("truetype");
+  font-weight: bold;
+}
+
+:root {
+  --cell-bg: #86cddf;
+  --cell-border: #4f97a8;
+  --value-fg: #062028;
+  --caption-fg: #0a3a45;
+  --header-bg: #f4fbfc;
+  --label-fg: #2f6472;
+  --panel-bg: rgba(24, 28, 38, 0.88);
+  --panel-fg: #d7e3ea;
+  --lcd: "DSEG7", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  font-family: "Helvetica Neue", "Segoe UI", "DejaVu Sans", sans-serif;
+  overflow: hidden;
+}
+
+body {
+  padding: 8px;
+}
+
+body.offline .live {
+  opacity: 0.45;
+}
+
+/* --- meter --- */
+
+.meter {
+  display: inline-grid;
+  gap: 6px;
+}
+
+.dmm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--header-bg);
+  border: 1px solid var(--cell-border);
+  border-radius: 5px;
+}
+
+.dmm .mode,
+.dmm .unit {
+  color: var(--label-fg);
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.dmm .value {
+  flex: 1;
+  text-align: center;
+  color: var(--value-fg);
+  font: bold 30px var(--lcd);
+}
+
+.cells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(10.5em, auto));
+  gap: 6px;
+}
+
+.cell {
+  padding: 6px 10px;
+  background: var(--cell-bg);
+  border: 2px solid var(--cell-border);
+  border-radius: 5px;
+}
+
+.cell .caption {
+  color: var(--caption-fg);
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.cell .value {
+  color: var(--value-fg);
+  font: bold 24px var(--lcd);
+  text-align: right;
+}
+
+/* --- graph --- */
+
+.graph {
+  display: inline-block;
+  padding: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--cell-border);
+  border-radius: 5px;
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  color: var(--panel-fg);
+  font-size: 13px;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.graph canvas {
+  display: block;
+  width: 320px;
+  height: 110px;
+}
+
+/* --- job card --- */
+
+.job {
+  display: inline-block;
+  min-width: 16em;
+  padding: 8px 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--cell-border);
+  border-radius: 5px;
+  color: var(--panel-fg);
+}
+
+.job .title {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.job .detail {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--cell-bg);
+}
+
+.job .status {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--cell-border);
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.hidden {
+  display: none;
+}

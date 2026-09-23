@@ -164,6 +164,15 @@ class PreferencesDialog(QDialog):
         self.graph_scale = _ratio_spin(0.3, 4.0, graph.scale)
         self.graph_opacity = _ratio_spin(0.1, 1.0, graph.opacity)
 
+        sources = self._config.browser_sources
+        self.browser_sources_enabled = QCheckBox("Serve panels to OBS as Browser sources")
+        self.browser_sources_enabled.setChecked(sources.enabled)
+        self.browser_sources_enabled.setToolTip(
+            "One URL per panel (meter, graph, job) on 127.0.0.1 — "
+            "add each to OBS as a Browser source"
+        )
+        self.browser_sources_port = _spin(1024, 65535, sources.port)
+
         widget = QWidget()
         form = QFormLayout(widget)
         form.addRow(self.output_enabled)
@@ -182,6 +191,8 @@ class PreferencesDialog(QDialog):
         form.addRow("Graph history", self.graph_window)
         form.addRow("Graph size", self.graph_scale)
         form.addRow("Graph opacity", self.graph_opacity)
+        form.addRow(self.browser_sources_enabled)
+        form.addRow("Browser source port", self.browser_sources_port)
         return widget
 
     # --- Tools -----------------------------------------------------------
@@ -389,6 +400,8 @@ class PreferencesDialog(QDialog):
         self._config.graph_overlay.window_seconds = float(self.graph_window.value())
         self._config.graph_overlay.scale = self.graph_scale.value()
         self._config.graph_overlay.opacity = self.graph_opacity.value()
+        self._config.browser_sources.enabled = self.browser_sources_enabled.isChecked()
+        self._config.browser_sources.port = self.browser_sources_port.value()
 
         self._config.faults.auto_log = self.fault_auto_log.isChecked()
         self._config.faults.current_threshold_a = self.fault_threshold.value()

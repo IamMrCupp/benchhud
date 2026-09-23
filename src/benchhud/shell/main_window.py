@@ -26,6 +26,8 @@ from benchhud import __version__
 from benchhud.boards.library import BoardLibrary
 from benchhud.boards.opener import open_board, open_schematic
 from benchhud.boards.worklist import boards_to_source
+from benchhud.browser_sources import BrowserSourceServer, TopicHub
+from benchhud.browser_sources.payloads import graph_payload, job_payload, meter_payload
 from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
@@ -174,6 +176,11 @@ class MainWindow(QMainWindow):
         self._last_temps = None
         self._cameras: list[CameraDevice] = []
         self._sink: OutputSink | None = None
+        # The hub outlives server restarts, so a page reconnecting after a
+        # Preferences change gets the current readings straight away.
+        self._browser_hub = TopicHub()
+        self._browser_server: BrowserSourceServer | None = None
+        self._browser_warning: str | None = None
         self._demo: DemoSignal | None = None
         self._demo_timer: QTimer | None = None
         self._demo_t = 0.0
@@ -225,6 +232,7 @@ class MainWindow(QMainWindow):
             open_board=self.open_board_file,
             open_schematic=self.open_schematic_file,
         )
+        self.jobs_panel.job_changed.connect(self._publish_job)
         jobs_dock = self.panels.add_panel(self.jobs_panel, left)
         self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
         self.inventory_panel = InventoryPanel(
@@ -380,6 +388,7 @@ class MainWindow(QMainWindow):
         board logs itself to the active job.
         """
         self.power_panel.update_from_snapshot(snapshot, t)
+        self._publish_telemetry()
         if snapshot.current is not None:
             self._check_fault(snapshot.current)
 
@@ -508,6 +517,7 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.reconfigure_boards)
         dialog.accepted.connect(self.reconfigure_tools)
         dialog.accepted.connect(self.reconfigure_instrument_session)
+        dialog.accepted.connect(self.restart_browser_sources)
         # Last: the status line reports sink state, so it must run after the
         # sink has been rebuilt or it shows the previous one.
         dialog.accepted.connect(self._refresh_status)
@@ -658,6 +668,8 @@ class MainWindow(QMainWindow):
         prefix = "◉ DEMO MODE   ·   " if self.demo_active else ""
         warning = self.output_warning()
         suffix = f"   ·   ⚠ virtual cam inactive — {warning}" if warning else ""
+        if self.browser_sources_warning():
+            suffix += f"   ·   ⚠ browser sources off — {self._browser_warning}"
         self.statusBar().showMessage(
             f"{prefix}benchhud {__version__}   ·   "
             f"scope {self._scope_status_text()}   ·   "
@@ -929,6 +941,76 @@ class MainWindow(QMainWindow):
             log.exception("virtual-camera output failed; closing the sink")
             self.stop_output()
 
+    # --- OBS browser sources (#180) -----------------------------------------
+
+    @property
+    def browser_sources(self) -> BrowserSourceServer | None:
+        """The running browser-source server, or None when it's off."""
+        return self._browser_server
+
+    def browser_sources_warning(self) -> str | None:
+        """Why enabled browser sources aren't serving (the port is taken), if so."""
+        if not self._config.browser_sources.enabled:
+            return None
+        return self._browser_warning
+
+    def start_browser_sources(self) -> None:
+        """Serve the data panels on loopback, if enabled (idempotent).
+
+        A taken port isn't fatal: it's said in the status bar, the same way a
+        virtual camera that won't open is, and the HUD carries on.
+        """
+        cfg = self._config.browser_sources
+        if self._browser_server is not None or not cfg.enabled:
+            return
+        server = BrowserSourceServer(self._browser_hub, cfg.port)
+        try:
+            server.start()
+        except OSError as exc:
+            log.warning("browser sources could not listen on port %d: %s", cfg.port, exc)
+            self._browser_warning = f"port {cfg.port} is in use ({exc.strerror or exc})"
+            self._refresh_status()
+            return
+        self._browser_server = server
+        self._browser_warning = None
+        self._publish_telemetry()
+        self._publish_job()
+        self._refresh_status()
+
+    def stop_browser_sources(self) -> None:
+        """Stop serving and drop every connected page (idempotent)."""
+        self._browser_warning = None
+        if self._browser_server is None:
+            return
+        self._browser_server.stop()
+        self._browser_server = None
+
+    def restart_browser_sources(self) -> None:
+        """Apply a Preferences change (enable, port) without a relaunch."""
+        self.stop_browser_sources()
+        self.start_browser_sources()
+
+    def _publish_telemetry(self) -> None:
+        """Hand the meter and graph pages the readings the docks just drew."""
+        if self._browser_server is None:
+            return
+        self._browser_hub.publish("meter", meter_payload(self._meter_readout()))
+        self._browser_hub.publish(
+            "graph",
+            graph_payload(
+                self.power_panel.chart.history.samples(),
+                self._config.graph_overlay.window_seconds,
+            ),
+        )
+
+    def _publish_job(self) -> None:
+        """Hand the job-card page the selected job (its whitelisted fields only)."""
+        if self._browser_server is None:
+            return
+        job_id = self.jobs_panel.selected_job_id()
+        job = self._job_store.get_job(job_id) if job_id is not None else None
+        self._browser_hub.publish("job", job_payload(job))
+
     # --- persistence -----------------------------------------------------
 
     def persist_into_config(self) -> None:
@@ -945,6 +1027,7 @@ class MainWindow(QMainWindow):
         self.stop_preview()
         self.stop_thermal()
         self.stop_output()
+        self.stop_browser_sources()
         self.persist_into_config()
         if self._on_persist is not None:
             self._on_persist(self._config)
