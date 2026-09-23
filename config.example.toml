@@ -89,6 +89,16 @@ window_seconds = 60.0   # how much history the graph shows
 scale = 1.0             # size multiplier on top of the automatic scaling
 opacity = 0.9           # below 1.0 lets the board show through
 
+[browser_sources]
+# Serve data panels to OBS as Browser sources, one URL per panel, each with a
+# transparent background so you can place it anywhere in a scene:
+#   http://127.0.0.1:8780/panel/meter   V / A / W / DMM readout
+#   http://127.0.0.1:8780/panel/graph   live power trend
+#   http://127.0.0.1:8780/panel/job     selected job card (never the customer)
+# Works the same on macOS, Linux and Windows. Loopback only; off by default.
+enabled = false
+port = 8780
+
 [intake]
 # benchhud-intake ticket API (LAN-only, read-only). Leave base_url empty to run
 # standalone with no ticket queue. token is intake's INTAKE_API_TOKEN (sent as a

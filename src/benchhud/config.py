@@ -150,6 +150,17 @@ class GraphOverlayConfig:
 
 
 @dataclass
+class BrowserSourcesConfig:
+    """Serve data panels to OBS as Browser sources on loopback (#180).
+
+    Off by default: nothing listens on a port unless asked to. The server only
+    ever binds ``127.0.0.1``, so there's no host to configure."""
+
+    enabled: bool = False
+    port: int = 8780
+
+
+@dataclass
 class IntakeConfig:
     """Connection to a benchhud-intake ticket API (empty base URL → disabled)."""
 
@@ -210,6 +221,7 @@ class Config:
     faults: FaultConfig = field(default_factory=FaultConfig)
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
     graph_overlay: GraphOverlayConfig = field(default_factory=GraphOverlayConfig)
+    browser_sources: BrowserSourcesConfig = field(default_factory=BrowserSourcesConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
@@ -269,6 +281,7 @@ class Config:
             data.get("graph_overlay", {}),
             ("enabled", "corner", "window_seconds", "scale", "opacity"),
         )
+        _apply(cfg.browser_sources, data.get("browser_sources", {}), ("enabled", "port"))
         _apply(
             cfg.intake,
             data.get("intake", {}),

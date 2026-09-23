@@ -38,6 +38,10 @@ the scope" and turned into the bench's command center.
   minipro-gui, whatever's in your config) straight from the HUD.
 - **Virtual camera out** — the composite is written to a v4l2loopback device, so
   OBS treats it as a normal camera source.
+- **OBS browser sources** — the meter, the power graph and the job card, each
+  served as its own transparent page on localhost, so every panel is a separate
+  OBS source you can place anywhere. Never shows the customer.
+  [More →](docs/BROWSER-SOURCES.md)
 
 Everything lives in dockable panels — arrange the bench the way you work, and the
 layout sticks across restarts.
@@ -98,6 +102,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [BENCH-SETUP.md](docs/BENCH-SETUP.md) | Bringing it up on the Linux bench — cameras, the OWON, v4l2loopback → OBS. |
 | [MACOS-SETUP.md](docs/MACOS-SETUP.md) | Publishing into OBS's virtual camera on a Mac. |
 | [PACKAGING.md](docs/PACKAGING.md) | Building the signed macOS `.app` (needed for camera access on a Mac). |
+| [BROWSER-SOURCES.md](docs/BROWSER-SOURCES.md) | The data panels as OBS Browser sources: URLs, what goes on air. |
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |

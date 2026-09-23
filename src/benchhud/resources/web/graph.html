@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>benchhud · power graph</title>
+<link rel="stylesheet" href="/static/panel.css">
+<script src="/static/panel.js"></script>
+</head>
+<body>
+<div class="graph live">
+  <div class="legend" id="legend"></div>
+  <canvas id="plot"></canvas>
+</div>
+<script>
+"use strict";
+// benchhud sends each series already normalised (x, y in 0..1, each line on its
+// own vertical range, as the on-stream graph draws it), so this only plots.
+const canvas = document.getElementById("plot");
+const legend = document.getElementById("legend");
+const WAITING = "waiting for readings";
+
+function format(value, unit) {
+  if (value === null || value === undefined) return "—";
+  return `${value.toFixed(unit === "A" ? 3 : 2)} ${unit}`;
+}
+
+function draw(data) {
+  const ratio = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = Math.round(w * ratio);
+  canvas.height = Math.round(h * ratio);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const y = Math.round((h * i) / 4) + 0.5;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  const series = data ? data.series : [];
+  legend.replaceChildren(...series.map((s, i) => {
+    const span = document.createElement("span");
+    span.style.color = s.colour;
+    span.textContent = `${s.label} ${format(data.latest ? data.latest[i] : null, s.unit)}`;
+    return span;
+  }));
+
+  const drawable = series.filter((s) => s.points.length >= 2);
+  if (!drawable.length) {
+    ctx.fillStyle = "#d7e3ea";
+    ctx.font = "13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(WAITING, w / 2, h / 2);
+    return;
+  }
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+  for (const s of drawable) {
+    ctx.strokeStyle = s.colour;
+    ctx.beginPath();
+    s.points.forEach(([x, y], i) => {
+      const px = x * w, py = (1 - y) * (h - 4) + 2;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+  }
+}
+
+subscribe("graph", draw);
+</script>
+</body>
+</html>

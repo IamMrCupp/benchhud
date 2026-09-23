@@ -14,7 +14,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -74,6 +74,10 @@ def _slug(text: str) -> str:
 class JobsPanel(Panel):
     panel_id = "jobs"
     panel_title = "Jobs"
+
+    #: The selected job changed, or its fields were saved. Carries nothing:
+    #: listeners read what they need (the browser-source job card, #180).
+    job_changed = Signal()
 
     def __init__(
         self,
@@ -353,6 +357,7 @@ class JobsPanel(Panel):
             self.notes_list.clear()
             self._update_history(None)
             self._update_board(None)
+            self.job_changed.emit()
             return
         self.device_edit.setText(job.device)
         self.serial_edit.setText(job.serial)
@@ -362,6 +367,7 @@ class JobsPanel(Panel):
         self.refresh_notes()
         self._update_history(job)
         self._update_board(job)
+        self.job_changed.emit()
 
     def _update_board(self, job: Job | None) -> None:
         """Show the job's board, its formats, and whether a schematic is filed."""

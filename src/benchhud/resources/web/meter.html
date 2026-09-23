@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>benchhud · meter</title>
+<link rel="stylesheet" href="/static/panel.css">
+<script src="/static/panel.js"></script>
+</head>
+<body>
+<div class="meter live">
+  <div class="dmm">
+    <span class="mode" id="dmm-mode">DMM</span>
+    <span class="value" id="dmm-value">—</span>
+    <span class="unit" id="dmm-unit"></span>
+  </div>
+  <div class="cells">
+    <div class="cell" id="cell-voltage"><div class="caption">VOLTAGE (V)</div><div class="value" id="voltage">—</div></div>
+    <div class="cell" id="cell-current"><div class="caption">CURRENT (A)</div><div class="value" id="current">—</div></div>
+    <div class="cell" id="cell-power"><div class="caption">POWER (W)</div><div class="value" id="power">—</div></div>
+    <div class="cell" id="cell-max_current"><div class="caption">MAX CURRENT (A)</div><div class="value" id="max_current">—</div></div>
+  </div>
+</div>
+<script>
+"use strict";
+const QUANTITIES = ["voltage", "current", "power", "max_current"];
+const text = (id, value) => { document.getElementById(id).textContent = value; };
+
+subscribe("meter", (data) => {
+  const r = data ? data.readout : null;
+  text("dmm-mode", r ? r.dmm_mode : "DMM");
+  text("dmm-value", r ? r.dmm_value : "—");
+  text("dmm-unit", r ? r.dmm_unit : "");
+  for (const q of QUANTITIES) {
+    text(q, r ? r[q] : "—");
+    if (data) {
+      const cell = document.getElementById(`cell-${q}`);
+      cell.style.background = data.colours[q].fill;
+      cell.style.borderColor = data.colours[q].border;
+    }
+  }
+});
+</script>
+</body>
+</html>
