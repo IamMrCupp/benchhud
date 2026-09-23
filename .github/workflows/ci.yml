@@ -74,6 +74,16 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Building natively, Briefcase checks that the package's own
+      # system_runtime_requires are installed on the build host (the Docker path
+      # would do this inside its container). Read the list from pyproject rather
+      # than repeating it, so the two can't drift.
+      - name: Install the package's runtime libraries
+        run: |
+          deps=$(python3 -c "import tomllib;print(' '.join(tomllib.load(open('pyproject.toml','rb'))['tool']['briefcase']['app']['benchhud']['linux']['system']['debian']['system_runtime_requires']))")
+          echo "installing: $deps"
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $deps
+
       # No --target: Briefcase only reaches for Docker when given a target image,
       # and we are already inside the target container, so it builds in place.
       - name: Build the .deb
