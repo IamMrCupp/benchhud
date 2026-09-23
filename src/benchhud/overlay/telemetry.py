@@ -22,6 +22,7 @@ frame untouched.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 from PySide6.QtCore import QRectF, Qt
@@ -331,24 +332,36 @@ def draw_telemetry_overlay(
     return draw_telemetry_overlay_sized(frame, readout, config)[0]
 
 
+class Footprint(NamedTuple):
+    """The space a drawn overlay takes up: its width, its height plus margin, and
+    that margin (its inset from the frame edges). All 0 when nothing was drawn.
+    """
+
+    width: int
+    height: int
+    margin: int = 0
+
+
 def draw_telemetry_overlay_sized(
     frame: np.ndarray,
     readout: MeterReadout,
     config: TelemetryOverlayConfig,
     colours: SeriesPalette | None = None,
-) -> tuple[np.ndarray, int]:
-    """:func:`draw_telemetry_overlay`, plus the vertical space the readout took up.
+) -> tuple[np.ndarray, Footprint]:
+    """:func:`draw_telemetry_overlay`, plus the space the readout took up.
 
-    The height (readout plus its margin, 0 when nothing was drawn) is what
-    another overlay in the same corner stacks past.
+    Another overlay in the same corner stacks past the height and matches the
+    width, so the two line up as one instrument (#196).
     """
     model = build_model(readout, config, colours)
     if model.is_empty:
-        return frame, 0
+        return frame, Footprint(0, 0)
     scale = auto_scale(frame.shape[1]) * max(0.1, config.scale)
     image = render_overlay_image(model, scale)
     if image.isNull() or image.width() == 0 or image.height() == 0:
-        return frame, 0
+        return frame, Footprint(0, 0)
     margin = max(4, round(16 * scale))
     out = blit_rgba(frame, _qimage_to_bgra(image), config.corner, margin, opacity=config.opacity)
-    return out, min(image.height(), frame.shape[0]) + margin
+    return out, Footprint(
+        min(image.width(), frame.shape[1]), min(image.height(), frame.shape[0]) + margin, margin
+    )
