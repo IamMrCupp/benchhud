@@ -14,6 +14,7 @@ shell animates end to end with no camera.
 from __future__ import annotations
 
 import logging
+import secrets
 import sys
 from collections.abc import Callable, Sequence
 
@@ -69,8 +70,11 @@ from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
 from benchhud.shell.panels.scope import ScopePanel
+from benchhud.shell.panels.terminal import TerminalPanel, ViewFactory
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
+from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
+from benchhud.terminal import TerminalHost, login_shell
 from benchhud.tickets import HttpTicketSource, NullTicketSource, TicketSource
 
 # Preview refresh rate for the on-screen scope panel (the virtual-cam output has
@@ -156,10 +160,14 @@ class MainWindow(QMainWindow):
         on_persist: PersistCallback | None = None,
         scanner: DeviceScanner | None = None,
         job_store: JobStore | None = None,
+        terminal_view_factory: ViewFactory | None = None,
+        terminal_session_factory=None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._config = config or Config()
+        self._terminal: TerminalHost | None = None
+        self._terminal_session_factory = terminal_session_factory
         self._on_persist = on_persist
         self._scanner = scanner or SystemDeviceScanner()
         self._job_store = job_store or JobStore(default_db_path())
@@ -242,9 +250,16 @@ class MainWindow(QMainWindow):
         )
         inventory_dock = self.panels.add_panel(self.inventory_panel, left)
         self.tabifyDockWidget(jobs_dock, inventory_dock)  # …and inventory
+        self.terminal_panel = TerminalPanel(terminal_view_factory)
+        self.terminal_panel.restart_requested.connect(self.restart_terminal)
+        self.terminal_panel.pause_toggled.connect(self.set_terminal_paused)
+        terminal_dock = self.panels.add_panel(self.terminal_panel, left)
+        self.tabifyDockWidget(inventory_dock, terminal_dock)  # …and the terminal
 
         scope_dock.raise_()
         controls_dock.raise_()
+
+        self._update_terminal_panel()
 
         self._build_boards_menu()
         self._build_view_menu()
@@ -318,6 +333,8 @@ class MainWindow(QMainWindow):
             "controls",
             "launcher",
             "jobs",
+            "inventory",
+            "terminal",
         ):
             dock = self.panels.dock(panel_id)
             if dock is not None:
@@ -669,7 +686,7 @@ class MainWindow(QMainWindow):
         warning = self.output_warning()
         suffix = f"   ·   ⚠ virtual cam inactive — {warning}" if warning else ""
         if self.browser_sources_warning():
-            suffix += f"   ·   ⚠ browser sources off — {self._browser_warning}"
+            suffix += f"   ·   ⚠ local server off — {self._browser_warning}"
         self.statusBar().showMessage(
             f"{prefix}benchhud {__version__}   ·   "
             f"scope {self._scope_status_text()}   ·   "
@@ -948,37 +965,44 @@ class MainWindow(QMainWindow):
         """The running browser-source server, or None when it's off."""
         return self._browser_server
 
+    def _server_wanted(self) -> bool:
+        """The local server runs for the browser sources, the terminal, or both."""
+        return self._config.browser_sources.enabled or self._terminal is not None
+
     def browser_sources_warning(self) -> str | None:
-        """Why enabled browser sources aren't serving (the port is taken), if so."""
-        if not self._config.browser_sources.enabled:
+        """Why the local server isn't serving when it should be (the port is taken)."""
+        if not self._server_wanted():
             return None
         return self._browser_warning
 
     def start_browser_sources(self) -> None:
-        """Serve the data panels on loopback, if enabled (idempotent).
+        """Start the loopback server for the browser sources and/or the terminal
+        (idempotent; a no-op when neither is on).
 
         A taken port isn't fatal: it's said in the status bar, the same way a
         virtual camera that won't open is, and the HUD carries on.
         """
-        cfg = self._config.browser_sources
-        if self._browser_server is not None or not cfg.enabled:
-            return
-        server = BrowserSourceServer(self._browser_hub, cfg.port)
-        try:
-            server.start()
-        except OSError as exc:
-            log.warning("browser sources could not listen on port %d: %s", cfg.port, exc)
-            self._browser_warning = f"port {cfg.port} is in use ({exc.strerror or exc})"
-            self._refresh_status()
-            return
-        self._browser_server = server
-        self._browser_warning = None
-        self._publish_telemetry()
-        self._publish_job()
+        self._sync_terminal()
+        if self._browser_server is None and self._server_wanted():
+            cfg = self._config.browser_sources
+            server = BrowserSourceServer(
+                self._browser_hub, cfg.port, panels=cfg.enabled, terminal=self._terminal
+            )
+            try:
+                server.start()
+            except OSError as exc:
+                log.warning("local server could not listen on port %d: %s", cfg.port, exc)
+                self._browser_warning = f"port {cfg.port} is in use ({exc.strerror or exc})"
+            else:
+                self._browser_server = server
+                self._browser_warning = None
+                self._publish_telemetry()
+                self._publish_job()
+        self._update_terminal_panel()
         self._refresh_status()
 
     def stop_browser_sources(self) -> None:
-        """Stop serving and drop every connected page (idempotent)."""
+        """Stop serving and drop every connected page (idempotent). The shell keeps running."""
         self._browser_warning = None
         if self._browser_server is None:
             return
@@ -986,9 +1010,77 @@ class MainWindow(QMainWindow):
         self._browser_server = None
 
     def restart_browser_sources(self) -> None:
-        """Apply a Preferences change (enable, port) without a relaunch."""
+        """Apply a Preferences change (enable, port, terminal) without a relaunch."""
         self.stop_browser_sources()
         self.start_browser_sources()
+
+    # --- terminal (#194) -------------------------------------------------------
+
+    @property
+    def terminal(self) -> TerminalHost | None:
+        """The running terminal, or None when it's off."""
+        return self._terminal
+
+    def _sync_terminal(self) -> None:
+        """Bring the shell in line with config.
+
+        Only turning the terminal off, or changing its shell, ends the running
+        shell: pressing OK in Preferences for anything else must not.
+        """
+        cfg = self._config.terminal
+        if not (cfg.enabled and TERMINAL_SUPPORTED):
+            self.stop_terminal()
+            return
+        if not cfg.share_token:
+            cfg.share_token = secrets.token_urlsafe(18)
+        argv = login_shell(cfg.shell)
+        if self._terminal is not None and self._terminal.argv != argv:
+            self.stop_terminal()
+        if self._terminal is None:
+            kwargs = {}
+            if self._terminal_session_factory is not None:
+                kwargs["session_factory"] = self._terminal_session_factory
+            self._terminal = TerminalHost(argv, share_token=cfg.share_token, **kwargs)
+            self._terminal.start()
+        self._terminal.share_token = cfg.share_token
+        self._terminal.set_sharing(cfg.share)
+
+    def stop_terminal(self) -> None:
+        """End the shell (idempotent)."""
+        if self._terminal is None:
+            return
+        self._terminal.close()
+        self._terminal = None
+
+    def restart_terminal(self) -> None:
+        """The panel's Restart button: a fresh shell, same page."""
+        if self._terminal is not None:
+            self._terminal.restart()
+
+    def set_terminal_paused(self, paused: bool) -> None:
+        """The panel's Pause button: hide the terminal from the stream, or bring it back."""
+        if self._terminal is not None:
+            self._terminal.set_paused(paused)
+        self._update_terminal_panel()
+
+    def _update_terminal_panel(self) -> None:
+        panel = self.terminal_panel
+        cfg = self._config.terminal
+        terminal = self._terminal
+        if not TERMINAL_SUPPORTED:
+            panel.show_message("The terminal isn't available on Windows yet.")
+        elif not cfg.enabled:
+            panel.show_message("The terminal is off. Turn it on in Preferences → Terminal.")
+        elif self._browser_warning:
+            panel.show_message(f"The terminal can't start: {self._browser_warning}.")
+        elif terminal is None or self._browser_server is None:
+            panel.show_message("Starting the terminal…")
+        else:
+            panel.show_terminal(self._browser_server.terminal_url(terminal.write_token))
+        state = terminal.state() if terminal is not None else None
+        panel.set_share_state(
+            sharing=bool(state and state.sharing), paused=bool(state and state.paused)
+        )
 
     def _publish_telemetry(self) -> None:
         """Hand the meter and graph pages the readings the docks just drew."""
@@ -1028,6 +1120,7 @@ class MainWindow(QMainWindow):
         self.stop_thermal()
         self.stop_output()
         self.stop_browser_sources()
+        self.stop_terminal()
         self.persist_into_config()
         if self._on_persist is not None:
             self._on_persist(self._config)

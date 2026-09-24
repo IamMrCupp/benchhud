@@ -99,6 +99,17 @@ opacity = 0.9           # below 1.0 lets the board show through
 enabled = false
 port = 8780
 
+[terminal]
+# A terminal panel inside the app (your login shell, macOS and Linux). It runs on
+# the browser-source port above, loopback only. Off by default.
+enabled = false
+shell = ""             # empty = your login shell; or e.g. "/bin/zsh"
+# Also serve a read-only copy to OBS as a Browser source. The panel's Pause
+# button hides it mid-stream (it resumes from that moment, never replaying what
+# you typed while paused). The link carries a token, shown in Preferences.
+share = false
+share_token = ""       # generated on first use; regenerate in Preferences
+
 [intake]
 # benchhud-intake ticket API (LAN-only, read-only). Leave base_url empty to run
 # standalone with no ticket queue. token is intake's INTAKE_API_TOKEN (sent as a

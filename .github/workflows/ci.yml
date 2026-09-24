@@ -125,6 +125,18 @@ jobs:
           test -f /usr/share/icons/hicolor/256x256/apps/com.iammrcupp.benchhud.png
           benchhud --version
 
+      - name: The terminal panel's QtWebEngine has every library it links
+        run: |
+          # QtWebEngine loads only when the terminal is turned on, so a missing
+          # system library wouldn't show in the startup check below.
+          missing=0
+          for f in $(find / -xdev \( -name 'libQt6WebEngineCore.so*' -o -name QtWebEngineProcess \) -path '*benchhud*' -type f 2>/dev/null); do
+            echo "== $f"
+            if ldd "$f" | grep "not found"; then missing=1; fi
+          done
+          [ -n "$(find / -xdev -name QtWebEngineProcess -path '*benchhud*' 2>/dev/null)" ] || { echo "QtWebEngineProcess not in the package"; exit 1; }
+          exit $missing
+
       - name: It starts (headless)
         run: |
           # Still running when the timeout fires (124) is the pass: Qt, OpenCV

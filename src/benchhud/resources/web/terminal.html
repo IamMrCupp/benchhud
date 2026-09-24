@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>benchhud · terminal</title>
+<link rel="stylesheet" href="/static/xterm.css">
+<script src="/static/xterm.js"></script>
+<script src="/static/addon-fit.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  #term { position: absolute; inset: 0; }
+  body.write #term { padding: 4px; box-sizing: border-box; background: #10141c; }
+  /* The stream view renders at the shell's own size, then scales to the source. */
+  body.share #term { transform-origin: 0 0; }
+  body.share #term .xterm { border-radius: 5px; padding: 6px; }
+  body.hidden-output #term { visibility: hidden; }
+  #banner {
+    position: absolute; left: 8px; bottom: 8px; padding: 3px 10px;
+    border-radius: 999px; background: rgba(16, 20, 28, 0.88);
+    border: 1px solid #4f97a8; color: #d7e3ea;
+    font: bold 12px "Helvetica Neue", "Segoe UI", sans-serif;
+  }
+  #banner:empty { display: none; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<div id="banner"></div>
+<script>
+"use strict";
+// One page, two surfaces (#194). The in-app view's token may type; the stream
+// view's token only watches. The server says which in its first event.
+const token = new URLSearchParams(location.search).get("token") || "";
+const query = `?token=${encodeURIComponent(token)}`;
+const el = document.getElementById("term");
+const banner = document.getElementById("banner");
+let mode = null;
+
+const term = new Terminal({
+  fontFamily: 'Menlo, "SF Mono", "DejaVu Sans Mono", Consolas, monospace',
+  fontSize: 13,
+  scrollback: 5000,
+  allowTransparency: true,
+  disableStdin: true,
+  cursorBlink: false,
+  theme: { background: "#10141c" },
+});
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(el);
+
+// Keystrokes go out one request at a time, batched while one is in flight, so
+// they can never arrive at the shell out of order.
+let pending = "";
+let inFlight = false;
+function flushInput() {
+  if (inFlight || !pending) return;
+  const body = pending;
+  pending = "";
+  inFlight = true;
+  fetch(`/terminal/input${query}`, { method: "POST", body })
+    .catch(() => {})
+    .finally(() => { inFlight = false; flushInput(); });
+}
+term.onData((data) => {
+  if (mode !== "write") return;
+  pending += data;
+  flushInput();
+});
+
+function syncSize() {
+  if (mode !== "write") return;
+  fit.fit();
+  fetch(`/terminal/resize${query}`, {
+    method: "POST",
+    body: JSON.stringify({ cols: term.cols, rows: term.rows }),
+  }).catch(() => {});
+}
+
+function scaleToFit() {
+  if (mode !== "share") return;
+  const inner = el.querySelector(".xterm");
+  if (!inner) return;
+  el.style.transform = "none";
+  const scale = Math.min(
+    window.innerWidth / inner.offsetWidth,
+    window.innerHeight / inner.offsetHeight,
+  );
+  el.style.transform = `scale(${Math.min(scale, 4)})`;
+}
+
+new ResizeObserver(() => (mode === "write" ? syncSize() : scaleToFit())).observe(document.body);
+
+const handlers = {
+  hello(e) {
+    mode = e.mode;
+    document.body.classList.add(mode);
+    banner.textContent = "";
+    if (mode === "write") {
+      term.options.disableStdin = false;
+      term.options.cursorBlink = true;
+      term.focus();
+      syncSize();
+    } else {
+      term.options.theme = { background: "rgba(16, 20, 28, 0.9)" };
+    }
+  },
+  reset() { term.reset(); },
+  size(e) {
+    if (mode === "share") {
+      term.resize(e.cols, e.rows);
+      scaleToFit();
+    }
+  },
+  data(e) { term.write(e.d); },
+  exit(e) { term.write(`\r\n\x1b[2m[shell exited with code ${e.code}]\x1b[0m\r\n`); },
+  error(e) { term.write(`\r\n\x1b[31m${e.message}\x1b[0m\r\n`); },
+  // Stream view only. Off shows nothing; paused says so; live shows output.
+  off() { document.body.classList.add("hidden-output"); banner.textContent = ""; },
+  paused() { document.body.classList.add("hidden-output"); banner.textContent = "terminal paused"; },
+  live() { document.body.classList.remove("hidden-output"); banner.textContent = ""; },
+};
+
+const events = new EventSource(`/terminal/events${query}`);
+events.onmessage = (message) => {
+  const event = JSON.parse(message.data);
+  const handler = handlers[event.t];
+  if (handler) handler(event);
+};
+events.onerror = () => {
+  // EventSource retries by itself; hide stale output meanwhile.
+  if (mode === "share") handlers.off();
+};
+</script>
+</body>
+</html>

@@ -46,6 +46,22 @@ uvx briefcase package macOS app -p zip --no-notarize \
 This signs `build/benchhud/macos/app/benchhud.app` in place, with hardened runtime
 and the camera entitlement, and writes `dist/benchhud-<version>.app.zip`.
 
+### The JIT entitlement (terminal panel)
+
+The terminal panel draws in QtWebEngine, and Chromium's JavaScript engine needs
+JIT memory under the hardened runtime. `pyproject.toml` grants
+`com.apple.security.cs.allow-jit`, and Briefcase signs every binary in the
+bundle with it, the `QtWebEngineProcess` helper included. Without it the
+renderer logs `V8 process OOM (Failed to reserve virtual memory for CodeRange)`
+and the panel stays blank.
+
+Briefcase writes `Entitlements.plist` when it **creates** the bundle, so after
+changing entitlements, `update` isn't enough. Recreate it:
+
+```sh
+rm -rf build/benchhud/macos && uvx briefcase create macOS app
+```
+
 ### Sign it, even locally
 
 macOS ties a camera grant to the app's **code signature**. An ad-hoc signature

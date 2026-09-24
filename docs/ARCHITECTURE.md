@@ -21,7 +21,9 @@ ticket system is a protocol with a fake, not a dependency.
   `qt_image` (BGR→QImage), `theme` / `fonts` / `icon` / `about`, the dialogs
   `ticket_picker` and `board_dialogs` (Find board / Boards to source), and the
   panels: `scope`, `thermal`, `power` (the styled meter), `controls`,
-  `launcher`, `jobs`, plus `telemetry` (superseded by `power`, class retained).
+  `launcher`, `jobs`, `inventory`, `terminal` (hosts the xterm.js page in
+  QtWebEngine, created only when the terminal is on), plus `telemetry`
+  (superseded by `power`, class retained).
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`,
   `CameraFrameSource` (cv2), threaded `LatestFrameReader` (latest-frame buffer),
   `FramePump` (Qt-free dispatch).
@@ -41,6 +43,15 @@ ticket system is a protocol with a fake, not a dependency.
   (`BrowserSourceServer`, stdlib `ThreadingHTTPServer` on `127.0.0.1`, one page
   per panel plus a Server-Sent Events feed). The pages live in
   `resources/web/`. See [BROWSER-SOURCES.md](BROWSER-SOURCES.md).
+- **`terminal/`** — the in-app terminal (#194): `pty_session` (`PtySession`, a
+  shell in a POSIX pseudo-terminal, read on its own thread), `host`
+  (`TerminalHost`: bounded scrollback by absolute position, size/exit/share
+  state, the per-run write token and the persisted share token, the pause
+  floor), and `events` (`terminal_events`, the rules for what a page, and
+  especially the stream view, receives). The page is
+  `resources/web/terminal.html` on vendored xterm.js, served by
+  `browser_sources/server` and shown in-app by `shell/panels/terminal`. See
+  [TERMINAL.md](TERMINAL.md).
 - **`instruments/`** — `SerialPort` / `LineInstrument` seam, `OwonSpm8104` driver,
   `read_snapshot` (resilient telemetry), `PowerHistory` (rolling V/A/W buffer for
   the trend chart).

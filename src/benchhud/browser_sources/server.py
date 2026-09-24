@@ -9,8 +9,16 @@ never touches the GUI thread. Routes:
 * ``/events/<name>`` — that panel's live feed as Server-Sent Events. SSE is
   one-directional, which is all a display needs, and ``EventSource``
   reconnects on its own when benchhud restarts.
-* ``/static/<file>`` — the shared script, stylesheet and the DSEG font. Nothing
-  loads from a CDN, so a page works with the bench offline.
+* ``/static/<file>`` — the shared script, stylesheet, the DSEG font and the
+  vendored xterm.js. Nothing loads from a CDN, so a page works with the bench
+  offline.
+* ``/terminal?token=…`` and ``/terminal/events?token=…`` — the terminal page and
+  its feed (#194), when a :class:`~benchhud.terminal.TerminalHost` is attached.
+  The in-app token may also ``POST /terminal/input`` and ``/terminal/resize``;
+  the share token only watches. Posts must come from this origin.
+
+The data panels (:data:`PANELS`) and the terminal are switched separately: the
+server can run for the terminal alone, and then the panels 404.
 
 **Loopback only, and the Host header must say so.** Binding to ``127.0.0.1``
 keeps other machines out; checking ``Host`` keeps out a web page in a local
@@ -25,8 +33,13 @@ import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
+from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, urlsplit
 
 from benchhud.browser_sources.hub import TopicHub
+
+if TYPE_CHECKING:
+    from benchhud.terminal.host import TerminalHost
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +60,13 @@ _STATIC = {
     "panel.css": ("web/panel.css", "text/css; charset=utf-8"),
     "panel.js": ("web/panel.js", "text/javascript; charset=utf-8"),
     "dseg7.ttf": ("fonts/DSEG7Classic-Bold.ttf", "font/ttf"),
+    "xterm.js": ("web/vendor/xterm.js", "text/javascript; charset=utf-8"),
+    "xterm.css": ("web/vendor/xterm.css", "text/css; charset=utf-8"),
+    "addon-fit.js": ("web/vendor/addon-fit.js", "text/javascript; charset=utf-8"),
 }
+
+#: Largest keystroke batch or resize body accepted, in bytes. A paste is fine.
+MAX_POST_BYTES = 256 * 1024
 
 
 def _resource(path: str) -> bytes:
@@ -62,8 +81,17 @@ class BrowserSourceServer:
     say so instead of streaming nothing.
     """
 
-    def __init__(self, hub: TopicHub, port: int) -> None:
+    def __init__(
+        self,
+        hub: TopicHub,
+        port: int,
+        *,
+        panels: bool = True,
+        terminal: TerminalHost | None = None,
+    ) -> None:
         self._hub = hub
+        self.panels_enabled = panels
+        self.terminal = terminal
         self._requested_port = port
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -83,9 +111,15 @@ class BrowserSourceServer:
     def running(self) -> bool:
         return self._httpd is not None
 
+    @property
+    def origin(self) -> str:
+        return f"http://{HOST}:{self.port}"
+
     def url(self, panel: str = "") -> str:
-        base = f"http://{HOST}:{self.port}"
-        return f"{base}/panel/{panel}" if panel else f"{base}/"
+        return f"{self.origin}/panel/{panel}" if panel else f"{self.origin}/"
+
+    def terminal_url(self, token: str) -> str:
+        return f"{self.origin}/terminal?token={token}"
 
     def start(self) -> None:
         if self._httpd is not None:
@@ -106,6 +140,8 @@ class BrowserSourceServer:
             return
         self._stopping.set()
         self._hub.wake_all()  # so the SSE threads see it and return
+        if self.terminal is not None:
+            self.terminal.wake_all()
         self._httpd.shutdown()
         self._httpd.server_close()
         if self._thread is not None:
@@ -135,19 +171,73 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             self.send_error(HTTPStatus.FORBIDDEN, "loopback only")
             return
-        path = self.path.split("?", 1)[0]
-        if path == "/":
+        path = urlsplit(self.path).path
+        panels = self.owner.panels_enabled
+        if path == "/" and panels:
             self._send(HTTPStatus.OK, "text/html; charset=utf-8", self._index().encode())
-        elif path.startswith("/panel/") and path[7:] in PANELS:
+        elif path.startswith("/panel/") and path[7:] in PANELS and panels:
             page = _resource(f"web/{path[7:]}.html")
             self._send(HTTPStatus.OK, "text/html; charset=utf-8", page)
-        elif path.startswith("/events/") and path[8:] in PANELS:
+        elif path.startswith("/events/") and path[8:] in PANELS and panels:
             self._stream(path[8:])
+        elif path in ("/terminal", "/terminal/events"):
+            mode = self._terminal_mode()
+            if mode is None:
+                self.send_error(HTTPStatus.FORBIDDEN, "bad or missing token")
+            elif path == "/terminal":
+                page = _resource("web/terminal.html")
+                self._send(HTTPStatus.OK, "text/html; charset=utf-8", page)
+            else:
+                self._terminal_stream(mode)
         elif path.startswith("/static/") and path[8:] in _STATIC:
             resource, content_type = _STATIC[path[8:]]
             self._send(HTTPStatus.OK, content_type, _resource(resource))
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:
+        path = urlsplit(self.path).path
+        if not self._host_ok() or not self._origin_ok():
+            self.send_error(HTTPStatus.FORBIDDEN, "loopback only")
+            return
+        if path not in ("/terminal/input", "/terminal/resize"):
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if self._terminal_mode() != "write":
+            self.send_error(HTTPStatus.FORBIDDEN, "read-only")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_POST_BYTES:
+            self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return
+        body = self.rfile.read(length).decode("utf-8", errors="replace")
+        terminal = self.owner.terminal
+        assert terminal is not None  # a write token implies a terminal
+        if path == "/terminal/input":
+            terminal.write(body)
+        else:
+            try:
+                size = json.loads(body)
+                terminal.resize(int(size["cols"]), int(size["rows"]))
+            except (ValueError, KeyError, TypeError):
+                self.send_error(HTTPStatus.BAD_REQUEST)
+                return
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.end_headers()
+
+    def _terminal_mode(self) -> str | None:
+        """What this request's token may do with the terminal, if anything."""
+        terminal = self.owner.terminal
+        if terminal is None:
+            return None
+        token = parse_qs(urlsplit(self.path).query).get("token", [""])[0]
+        return terminal.token_mode(token)
+
+    def _origin_ok(self) -> bool:
+        """A browser always sends Origin on a POST; it must be this server."""
+        origin = self.headers.get("Origin")
+        port = self.owner.port
+        return origin is None or origin in {f"http://{HOST}:{port}", f"http://localhost:{port}"}
 
     def _host_ok(self) -> bool:
         port = self.owner.port
@@ -172,14 +262,37 @@ class _Handler(BaseHTTPRequestHandler):
             f"<p>Add each URL to OBS as a Browser source.</p><ul>{rows}</ul>"
         )
 
-    def _stream(self, topic: str) -> None:
-        """Send ``topic``'s latest payload now, then each newer one as it lands."""
+    def _start_stream(self) -> None:
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         self.close_connection = True
+
+    def _terminal_stream(self, mode: str) -> None:
+        """Feed a terminal page until it goes away or the server stops."""
+        from benchhud.terminal.events import terminal_events
+
+        terminal = self.owner.terminal
+        assert terminal is not None
+        self._start_stream()
+        stopping = lambda: self.owner.stopping  # noqa: E731
+        try:
+            for event in terminal_events(terminal, mode, stopping, HEARTBEAT_SECONDS):
+                if self.owner.stopping:
+                    break
+                if event is None:
+                    self.wfile.write(b": ping\n\n")
+                else:
+                    self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _stream(self, topic: str) -> None:
+        """Send ``topic``'s latest payload now, then each newer one as it lands."""
+        self._start_stream()
         version = 0
         try:
             while not self.owner.stopping:

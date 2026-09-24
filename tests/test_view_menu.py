@@ -35,4 +35,6 @@ def test_view_menu_has_a_toggle_per_panel(qtbot) -> None:
     assert "View" in menus
     labels = [a.text() for a in menus["View"].actions() if a.text()]
     assert "Reset layout" in labels
-    assert len(labels) >= 6  # 5 panel toggles + reset
+    # Every docked panel can be shown from the menu, including the newer ones.
+    for title in ("Scope", "Meter", "Jobs", "Inventory", "Terminal"):
+        assert title in labels

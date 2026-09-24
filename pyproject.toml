@@ -70,6 +70,11 @@ universal_build = false
 # default floor of 11.0 would make pip find nothing (or an ancient OpenCV).
 min_os_version = "13.0"
 requires = ["std-nslog~=1.0.3"]
+# The terminal panel (#194) draws in QtWebEngine, and Chromium's V8 needs JIT
+# pages under the hardened runtime. Without this its renderer can't reserve
+# its code range ("V8 process OOM") and the page stays blank. Briefcase signs
+# every binary, the QtWebEngineProcess helper included, with these entitlements.
+entitlement."com.apple.security.cs.allow-jit" = true
 
 [tool.briefcase.app.benchhud.linux.system.debian]
 # Native .deb for the bench (Ubuntu). benchhud needs raw /dev/video*, /dev/ttyUSB*
@@ -97,6 +102,19 @@ system_runtime_requires = [
     "libwayland-client0",
     "libwayland-cursor0",
     "libwayland-egl1",
+    # QtWebEngine (Chromium), for the terminal panel (#194). Loaded only when the
+    # terminal is on, so CI checks them with ldd rather than by starting it.
+    "libnss3",
+    "libnspr4",
+    "libxcomposite1",
+    "libxdamage1",
+    "libxrandr2",
+    "libxtst6",
+    "libxkbfile1",
+    "libxshmfence1",
+    "libgbm1",
+    "libdrm2",
+    "libasound2t64",
 ]
 
 [tool.ruff]

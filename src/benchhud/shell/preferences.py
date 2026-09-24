@@ -9,6 +9,7 @@ so the whole dialog is testable offscreen with no hardware.
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -36,6 +38,8 @@ from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
 from benchhud.shell.qt_util import fit_combo_popup
 from benchhud.shell.tool_picker import ToolPickerDialog
+from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
+from benchhud.terminal import login_shell
 
 SaveCallback = Callable[[Config], None]
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -72,6 +76,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_output_tab(), "Output")
         tabs.addTab(self._build_tools_tab(), "Tools")
         tabs.addTab(self._build_faults_tab(), "Faults")
+        tabs.addTab(self._build_terminal_tab(), "Terminal")
         tabs.addTab(self._build_tickets_tab(), "Tickets")
         tabs.addTab(self._build_inventory_tab(), "Inventory")
         tabs.addTab(self._build_boards_tab(), "Boards")
@@ -289,6 +294,61 @@ class PreferencesDialog(QDialog):
         form.addRow("Current threshold", self.fault_threshold)
         return widget
 
+    def _build_terminal_tab(self) -> QWidget:
+        term = self._config.terminal
+        # Shown and applied on OK; generated now so the link can be copied into
+        # OBS before the first launch with sharing on.
+        self._share_token = term.share_token or secrets.token_urlsafe(18)
+        self.terminal_enabled = QCheckBox("Show a terminal panel (your shell, inside benchhud)")
+        self.terminal_enabled.setChecked(term.enabled)
+        self.terminal_shell = QLineEdit(term.shell)
+        self.terminal_shell.setPlaceholderText(f"{login_shell()[0]} (your login shell)")
+        self.terminal_share = QCheckBox("Also show it on stream, read-only (OBS Browser source)")
+        self.terminal_share.setChecked(term.share)
+        self.terminal_share.setToolTip(
+            "Everything that scrolls past goes on air. Use the panel's Pause stream "
+            "button before showing anything private."
+        )
+        self.terminal_share_url = QLineEdit()
+        self.terminal_share_url.setReadOnly(True)
+        self.terminal_share_url.setToolTip("Add this to OBS as a Browser source")
+        self.browser_sources_port.valueChanged.connect(self._refresh_share_url)
+        new_link = QPushButton("New link")
+        new_link.setToolTip("Make a new stream link; the old one stops working")
+        new_link.clicked.connect(self.regenerate_share_token)
+        link_row = QHBoxLayout()
+        link_row.addWidget(self.terminal_share_url, stretch=1)
+        link_row.addWidget(new_link)
+        self._refresh_share_url()
+
+        widget = QWidget()
+        form = QFormLayout(widget)
+        if not TERMINAL_SUPPORTED:
+            form.addRow(QLabel("The terminal isn't available on Windows yet."))
+            self.terminal_enabled.setEnabled(False)
+        form.addRow(self.terminal_enabled)
+        form.addRow("Shell", self.terminal_shell)
+        form.addRow(self.terminal_share)
+        form.addRow("Stream link", link_row)
+        note = QLabel(
+            "The stream view only shows output: nobody can type through it. It runs "
+            "on the browser-source port, loopback only."
+        )
+        note.setWordWrap(True)
+        form.addRow(note)
+        return widget
+
+    def regenerate_share_token(self) -> None:
+        """New stream link; the old one stops working once OK is pressed."""
+        self._share_token = secrets.token_urlsafe(18)
+        self._refresh_share_url()
+
+    def _refresh_share_url(self) -> None:
+        port = self.browser_sources_port.value()
+        self.terminal_share_url.setText(
+            f"http://127.0.0.1:{port}/terminal?token={self._share_token}"
+        )
+
     def _build_tickets_tab(self) -> QWidget:
         intake = self._config.intake
         self.intake_base_url = QLineEdit(intake.base_url)
@@ -402,6 +462,10 @@ class PreferencesDialog(QDialog):
         self._config.graph_overlay.opacity = self.graph_opacity.value()
         self._config.browser_sources.enabled = self.browser_sources_enabled.isChecked()
         self._config.browser_sources.port = self.browser_sources_port.value()
+        self._config.terminal.enabled = self.terminal_enabled.isChecked()
+        self._config.terminal.shell = self.terminal_shell.text().strip()
+        self._config.terminal.share = self.terminal_share.isChecked()
+        self._config.terminal.share_token = self._share_token
 
         self._config.faults.auto_log = self.fault_auto_log.isChecked()
         self._config.faults.current_threshold_a = self.fault_threshold.value()
