@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/IamMrCupp/benchhud/compare/v0.1.0...v0.1.1) (2026-09-24)
+
+
+### CI
+
+* **release:** automate versioning and releases with release-please ([18874e1](https://github.com/IamMrCupp/benchhud/commit/18874e1def88ee1a894ab0d605bd96ea306f7667))
+* **release:** automate versioning and releases with release-please ([ed526b8](https://github.com/IamMrCupp/benchhud/commit/ed526b8c4c16d865609529b54f68868a7e01eb02))
+
 ## 0.1.0 (2026-09-23)
 
 First packaged build. Releases after this one are cut by release-please from
