@@ -136,6 +136,20 @@ system package just uses your groups.
 
 ---
 
+## Versions
+
+The app and the `.deb` both take their version from `__version__` in
+`src/benchhud/__init__.py`. Don't edit it by hand. **release-please** owns it:
+every push to `main` opens or updates a release PR that bumps it and
+`CHANGELOG.md` from the conventional commits since the last release (`feat:` →
+minor, `fix:` → patch). Merging that PR tags `vX.Y.Z` and publishes the GitHub
+Release. Build packages after that merge, so they carry the new number.
+
+`v0.1.0` is the baseline: everything up to and including the OBS browser
+sources.
+
+---
+
 ## Notes
 
 - **macOS 13+.** PySide6 6.8+ and opencv-python 5 only publish `macosx_13_0` wheels.
