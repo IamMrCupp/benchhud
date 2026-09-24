@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-09-23)
 
-First packaged build.
+First packaged build. Releases after this one are cut by release-please from
+conventional commits.
 
 - HUD shell with dockable panels: scope, thermal, meter and power graph,
   controls, tools, jobs and inventory.
@@ -15,6 +16,8 @@ First packaged build.
   on macOS.
 - On-stream meter readout and power graph, with voltage, current and power in
   scope-channel colours.
+- OBS browser sources: the meter, power graph and job card each served as a
+  transparent page on localhost.
 - Repair jobs with captures, fault logging and reports; ticket import from an
   intake system; parts use from bench-parts inventory.
 - Board-view library that opens boards and matching schematics in OpenBoardView
