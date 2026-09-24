@@ -110,6 +110,8 @@ system_runtime_requires = [
     "libxdamage1",
     "libxrandr2",
     "libxtst6",
+    "libxfixes3",
+    "libgssapi-krb5-2",
     "libxkbfile1",
     "libxshmfence1",
     "libgbm1",
