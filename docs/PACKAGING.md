@@ -1,7 +1,8 @@
 # Packaging
 
 benchhud ships as a native app built with [Briefcase](https://briefcase.readthedocs.io/).
-So far that means a signed **macOS** `.app` and an **Ubuntu** `.deb`. Windows comes later.
+That means a signed **macOS** `.app`, an **Ubuntu** `.deb`, and a **Windows** MSI
+built by CI.
 
 All config lives in `pyproject.toml` under `[tool.briefcase]`. Name, version,
 licence and dependencies come from `[project]`, since Briefcase reads PEP 621.
@@ -152,6 +153,39 @@ system package just uses your groups.
 
 ---
 
+## Windows (built by CI)
+
+There's no Windows bench yet, so CI is the Windows build machine. Every PR and
+every push to `main` builds an MSI on a `windows-latest` runner (Briefcase fetches
+WiX itself) and uploads it as the **benchhud-msi** artifact:
+
+```sh
+gh run download --name benchhud-msi --dir dist
+```
+
+`msi-verify` then installs it silently on a clean runner and checks benchhud is
+still running 45 seconds later, the same bar as `deb-verify`. It installs per
+user, into `%LOCALAPPDATA%\Programs\Aaron Cupp\benchhud`, so it needs no admin
+rights.
+
+**What that proves, and what it doesn't.** A green run means the MSI builds,
+installs, and the app starts: Qt, OpenCV and the job database all load. It
+doesn't prove anything that needs Windows hardware:
+
+- **Virtual-camera output** (softcam) is wired but fake-backed until the DLL is
+  built and registered (#124 B.2). The HUD falls back and says so in the
+  status bar.
+- **The terminal panel** needs ConPTY (#203). On Windows the panel says it isn't
+  available yet.
+
+The MSI is ad-hoc signed, so Windows SmartScreen warns on first run. Signing it
+properly needs a code-signing certificate in CI.
+
+The Windows icon, `packaging/icons/benchhud.ico`, is packed from the Linux PNGs
+by `scripts/make_icns.sh`, like the other icons.
+
+---
+
 ## Versions
 
 The app and the `.deb` both take their version from `__version__` in
@@ -191,5 +225,5 @@ sources.
   `benchhud-<size>.png` (Linux), generated from `src/benchhud/resources/icon.png`
   by `scripts/make_icns.sh`. Rerun that script if the PNG changes.
 - **Not done yet:** notarization and a `.dmg` for handing to other people (#173),
-  a CI build of the macOS app, and a Windows bundle. The Ubuntu `.deb` is built
-  by CI on every PR (#192).
+  and a CI build of the macOS app (#206). The Ubuntu `.deb` (#192) and the
+  Windows MSI (#207) are built and install-verified by CI on every PR.

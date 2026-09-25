@@ -147,3 +147,85 @@ jobs:
             cat run.log
             exit 1
           fi
+
+  # The Windows build (#207). There's no Windows bench yet, so this is the only
+  # proof the app packages and starts there. Briefcase fetches WiX itself.
+  msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Briefcase bundles the build host's Python version, so pin it here
+      # rather than taking whatever the runner image defaults to.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Briefcase
+        run: python -m pip install briefcase
+
+      - name: Build the MSI
+        run: |
+          briefcase create  windows app --no-input
+          briefcase build   windows app --no-input
+          briefcase package windows app --adhoc-sign --no-input
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchhud-msi
+          path: dist/*.msi
+          if-no-files-found: error
+
+  # Install it silently on a clean runner and check it starts, like deb-verify.
+  msi-verify:
+    needs: msi
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchhud-msi
+          path: dist
+
+      - name: msiexec install (silent)
+        run: |
+          $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
+          $p = Start-Process msiexec.exe -Wait -PassThru `
+            -ArgumentList '/i', "`"$msi`"", '/qn', '/l*v', 'msi.log'
+          if ($p.ExitCode -ne 0) {
+            Get-Content msi.log -Tail 80
+            throw "msiexec exited with $($p.ExitCode)"
+          }
+
+      # Don't guess the install scope: look where a per-machine and a per-user
+      # install would land, and use whichever holds benchhud.exe.
+      - name: Find the install
+        run: |
+          $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs", $env:LOCALAPPDATA)
+          $exe = Get-ChildItem -Path $roots -Recurse -Filter benchhud.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\Temp\\' } | Select-Object -First 1
+          if (-not $exe) { throw "benchhud.exe not found under: $($roots -join ', ')" }
+          Write-Host "installed at: $($exe.DirectoryName)"
+          Get-ChildItem $exe.DirectoryName | Format-Table Name, Length
+          "BENCHHUD_EXE=$($exe.FullName)" | Out-File -Append $env:GITHUB_ENV
+
+      - name: It reports a version
+        run: |
+          # The GUI stub has no console, so its stdout may go nowhere. Print
+          # what comes back; a missing line isn't a failure.
+          $out = & $env:BENCHHUD_EXE --version 2>&1 | Out-String
+          if ($out.Trim()) { Write-Host $out } else { Write-Host "no console output from the GUI stub; skipped" }
+
+      - name: It starts (headless)
+        run: |
+          # Still running after the wait is the pass: Qt, OpenCV and the job DB
+          # all loaded. An exit before then is a startup crash.
+          $p = Start-Process $env:BENCHHUD_EXE -PassThru
+          Start-Sleep -Seconds 45
+          if ($p.HasExited) { throw "benchhud exited with $($p.ExitCode); expected to still be running" }
+          Write-Host "still running after 45s (pid $($p.Id))"
+          Stop-Process -Id $p.Id -Force
