@@ -22,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Import Qt + shell lazily so ``--version`` stays display-free.
+    from PySide6.QtCore import QCoreApplication, Qt
     from PySide6.QtWidgets import QApplication
 
     from benchhud import config as config_module
@@ -34,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     from benchhud.shell.icon import app_icon
     from benchhud.shell.theme import apply_theme
 
+    # QtWebEngine (the terminal panel) needs this set before the QApplication
+    # exists, even though the web view itself is only created on demand.
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("benchhud")
     app.setApplicationDisplayName("benchhud")
@@ -46,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     window.start_thermal()  # no-op unless a thermal camera is chosen
     window.start_telemetry()  # no-op unless [panels.telemetry] enabled and present
     window.start_output()  # no-op unless [output] enabled
-    window.start_browser_sources()  # no-op unless [browser_sources] enabled
+    window.start_browser_sources()  # no-op unless [browser_sources] or [terminal] enabled
     return app.exec()
 
 

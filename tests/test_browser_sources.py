@@ -321,7 +321,7 @@ def test_a_taken_port_is_said_in_the_status_bar(qtbot, store) -> None:
         window.start_browser_sources()
         assert window.browser_sources is None
         assert f"port {port}" in window.browser_sources_warning()
-        assert "browser sources off" in window.statusBar().currentMessage()
+        assert "local server off" in window.statusBar().currentMessage()
 
 
 def test_preferences_turn_it_on_and_off_without_a_relaunch(qtbot, store) -> None:

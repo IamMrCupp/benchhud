@@ -161,6 +161,23 @@ class BrowserSourcesConfig:
 
 
 @dataclass
+class TerminalConfig:
+    """The in-app terminal and its read-only stream view (#194).
+
+    Off by default, and sharing is a second, separate switch: a live shell
+    shows whatever scrolls past (tokens, keys, customer paths), so it only goes
+    on air when asked, and the panel's Pause hides it mid-stream. It runs on the
+    browser-source server's port, bound to ``127.0.0.1``."""
+
+    enabled: bool = False
+    shell: str = ""  # empty = your login shell
+    share: bool = False  # serve the read-only view to OBS
+    # The stream view's link token. Generated on first use and kept, so an OBS
+    # source URL survives a relaunch. Regenerate it from Preferences.
+    share_token: str = ""
+
+
+@dataclass
 class IntakeConfig:
     """Connection to a benchhud-intake ticket API (empty base URL → disabled)."""
 
@@ -222,6 +239,7 @@ class Config:
     telemetry_overlay: TelemetryOverlayConfig = field(default_factory=TelemetryOverlayConfig)
     graph_overlay: GraphOverlayConfig = field(default_factory=GraphOverlayConfig)
     browser_sources: BrowserSourcesConfig = field(default_factory=BrowserSourcesConfig)
+    terminal: TerminalConfig = field(default_factory=TerminalConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
@@ -282,6 +300,11 @@ class Config:
             ("enabled", "corner", "window_seconds", "scale", "opacity"),
         )
         _apply(cfg.browser_sources, data.get("browser_sources", {}), ("enabled", "port"))
+        _apply(
+            cfg.terminal,
+            data.get("terminal", {}),
+            ("enabled", "shell", "share", "share_token"),
+        )
         _apply(
             cfg.intake,
             data.get("intake", {}),

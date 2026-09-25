@@ -42,6 +42,9 @@ the scope" and turned into the bench's command center.
   served as its own transparent page on localhost, so every panel is a separate
   OBS source you can place anywhere. Never shows the customer.
   [More →](docs/BROWSER-SOURCES.md)
+- **Terminal** — your shell in a panel, and optionally on stream as a read-only
+  OBS source with a pause button for anything private. macOS and Linux.
+  [More →](docs/TERMINAL.md)
 
 Everything lives in dockable panels — arrange the bench the way you work, and the
 layout sticks across restarts.
@@ -103,6 +106,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [MACOS-SETUP.md](docs/MACOS-SETUP.md) | Publishing into OBS's virtual camera on a Mac. |
 | [PACKAGING.md](docs/PACKAGING.md) | Building the signed macOS `.app` (needed for camera access on a Mac). |
 | [BROWSER-SOURCES.md](docs/BROWSER-SOURCES.md) | The data panels as OBS Browser sources: URLs, what goes on air. |
+| [TERMINAL.md](docs/TERMINAL.md) | The terminal panel and its read-only stream view. |
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |

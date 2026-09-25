@@ -35,6 +35,9 @@ In OBS: **+** → **Browser** → paste a URL. Width 400 × height 200 fits the 
 and the graph at 1×. Every page has a transparent background, so there's no
 chroma key to set up — it layers straight over the scope.
 
+The terminal can go on stream the same way, from the same server, with its own
+link and a pause button. See [TERMINAL.md](TERMINAL.md).
+
 Video stays on the virtual camera. Separate scope and thermal sources are a
 different problem (Syphon on macOS, Spout on Windows) and not part of this.
 
