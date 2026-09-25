@@ -224,6 +224,9 @@ sources.
 - **The icons** are `packaging/icons/benchhud.icns` (macOS) and
   `benchhud-<size>.png` (Linux), generated from `src/benchhud/resources/icon.png`
   by `scripts/make_icns.sh`. Rerun that script if the PNG changes.
-- **Not done yet:** notarization and a `.dmg` for handing to other people (#173),
-  and a CI build of the macOS app (#206). The Ubuntu `.deb` (#192) and the
-  Windows MSI (#207) are built and install-verified by CI on every PR.
+- **CI builds every package on every PR:** the Ubuntu `.deb` (#192) and the
+  Windows MSI (#207) are built and install-verified; the macOS app (#206) is
+  built, checked to start, and uploaded as **benchhud-macos**. That one is
+  ad-hoc signed, so it isn't the build to install: the camera grant follows the
+  signature. Sign locally with the Developer ID for that (above).
+- **Not done yet:** notarization and a `.dmg` for handing to other people (#173).
