@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/IamMrCupp/benchhud/compare/v0.1.0...v0.2.0) (2026-09-25)
+
+
+### Features
+
+* **terminal:** in-app terminal panel, shareable to OBS read-only ([f8276dc](https://github.com/IamMrCupp/benchhud/commit/f8276dc4f6c1e860130a0c7e470249d400a36515))
+
+
+### Bug Fixes
+
+* **packaging:** add the two libraries QtWebEngine still lacked in the .deb ([e0313d3](https://github.com/IamMrCupp/benchhud/commit/e0313d3c3b40e3b17e37beaac1a3f4d24541ee36))
+
 ## 0.1.0 (2026-09-23)
 
 First packaged build. Releases after this one are cut by release-please from
