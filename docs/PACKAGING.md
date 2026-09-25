@@ -161,6 +161,19 @@ every push to `main` opens or updates a release PR that bumps it and
 minor, `fix:` → patch). Merging that PR tags `vX.Y.Z` and publishes the GitHub
 Release. Build packages after that merge, so they carry the new number.
 
+**On a Mac, recreate the bundle for a release build.** Briefcase writes the
+version into `Info.plist` only at `create`, like the entitlements above, so
+`update` + `build` after a version bump still produce an app that says the old
+number. Found building 0.2.0:
+
+```sh
+rm -rf build/benchhud/macos && uvx briefcase create macOS app
+uvx briefcase build macOS app
+uvx briefcase package macOS app -p zip --no-notarize --identity "…"
+```
+
+Check it with `defaults read "$PWD/build/benchhud/macos/app/benchhud.app/Contents/Info.plist" CFBundleShortVersionString`.
+
 `v0.1.0` is the baseline: everything up to and including the OBS browser
 sources.
 
