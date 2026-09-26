@@ -176,6 +176,56 @@ jobs:
           path: dist/*.msi
           if-no-files-found: error
 
+  # The macOS app (#206): build it on every PR and check the built bundle
+  # starts, like deb-verify and msi-verify. Ad-hoc signed: a Developer ID
+  # signature needs the certificate in CI (#173), so the release build is still
+  # signed on the maintainer's Mac (docs/PACKAGING.md).
+  macos-app:
+    runs-on: macos-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Briefcase
+        run: python -m pip install briefcase
+
+      - name: Build the app
+        run: |
+          briefcase create macOS app --no-input
+          briefcase build  macOS app --no-input
+
+      - name: It starts (headless)
+        run: |
+          # No camera chosen, so a runner can never sit on a camera prompt.
+          cfg="$RUNNER_TEMP/benchhud.toml"
+          printf '[panels.scope]\nenabled = false\ndevice = ""\n' > "$cfg"
+          export BENCHHUD_CONFIG="$cfg"
+          # Still running after 45 s is the pass: Qt, OpenCV and the job DB all
+          # loaded. An exit before then is a startup crash. macOS has no
+          # `timeout`, so this polls.
+          build/benchhud/macos/app/benchhud.app/Contents/MacOS/benchhud &
+          pid=$!
+          for _ in $(seq 45); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"; echo "benchhud exited with $?; expected it to still be running"; exit 1
+          fi
+          echo "still running after 45s"
+          kill "$pid"
+
+      - name: Package (ad-hoc signed)
+        run: briefcase package macOS app --adhoc-sign -p zip --no-input
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchhud-macos
+          path: dist/*.zip
+          if-no-files-found: error
+
   # Install it silently on a clean runner and check it starts, like deb-verify.
   msi-verify:
     needs: msi
