@@ -175,6 +175,15 @@ class TerminalConfig:
     # The stream view's link token. Generated on first use and kept, so an OBS
     # source URL survives a relaunch. Regenerate it from Preferences.
     share_token: str = ""
+    # What the terminal is attached to (#174): "shell", "owon" (the SCPI query
+    # console, through the instrument session), or a serial port's device path.
+    # The OWON's own port always means "owon": it's never opened a second time.
+    target: str = "shell"
+    # For a raw serial port: speed, what Enter sends (cr | lf | crlf), and
+    # whether to echo typing locally (many devices don't echo).
+    baud: int = 115200
+    line_ending: str = "crlf"
+    local_echo: bool = False
 
 
 @dataclass
@@ -303,7 +312,16 @@ class Config:
         _apply(
             cfg.terminal,
             data.get("terminal", {}),
-            ("enabled", "shell", "share", "share_token"),
+            (
+                "enabled",
+                "shell",
+                "share",
+                "share_token",
+                "target",
+                "baud",
+                "line_ending",
+                "local_echo",
+            ),
         )
         _apply(
             cfg.intake,

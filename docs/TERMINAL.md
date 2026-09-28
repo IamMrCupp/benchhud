@@ -15,6 +15,29 @@ To run something else, set *Shell* (for example `/bin/zsh`).
 
 **Restart shell** starts a fresh one if you `exit` or something hangs.
 
+## Serial consoles
+
+The same panel is also a serial console. **Connect to**, under the toolbar, picks
+what it's attached to: your shell, a serial port, or the OWON.
+
+- **A serial port** (anything but the OWON): a raw console, like PuTTY or
+  `screen`. Set the speed, what **Enter** sends (CR LF, CR or LF; devices
+  disagree) and **Local echo**, for devices that don't echo what you type. A
+  bare LF from the device shows as a new line. Unplugging it ends the session
+  with a message; **Reconnect** opens it again.
+- **The OWON** appears as *OWON SCPI console (queries only)* while telemetry is
+  on, and never as a raw port. The meter is already polling it, and a second
+  handle on the same port would interleave with those polls, so every line goes
+  through the running instrument session instead. It's **queries only**: a line
+  must end in `?` with no `;` (SCPI's command separator), so `*IDN?`,
+  `MEAS:VOLT?` and `CONFigure:ALL?` work, and `VOLT 24` is refused before it
+  reaches the port, **even with instrument control on**. A typed setpoint would
+  skip the driver's voltage and current ceilings; setpoints and output go
+  through the Meter panel's controls, where the limits apply.
+
+Everything under *On stream* applies to a serial console too: the read-only
+view, Pause stream, and nothing typed while paused ever reaching OBS.
+
 ## On stream
 
 Turn on *Also show it on stream*, then copy the *Stream link* into OBS as a Browser

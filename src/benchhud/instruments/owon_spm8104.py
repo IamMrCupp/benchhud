@@ -35,6 +35,16 @@ class InstrumentLimitError(Exception):
     """
 
 
+class NotAQueryError(Exception):
+    """A console line that isn't a single SCPI query was refused (#174).
+
+    The serial console reaches the OWON through :meth:`OwonSpm8104.raw_query`,
+    which only sends queries, whatever ``[instruments] control`` says. A typed
+    ``VOLT 24`` would bypass the ceilings this driver enforces on setpoints.
+    Setpoints and output go through the driver's own methods instead.
+    """
+
+
 class ControlDisabledError(Exception):
     """A state-changing command was attempted with control turned off.
 
@@ -122,6 +132,21 @@ class OwonSpm8104:
             raise ControlDisabledError(
                 f"{what} refused — instrument control is off ([instruments] control)"
             )
+
+    def raw_query(self, line: str) -> str:
+        """Send one operator-typed SCPI **query** and return the reply (#174).
+
+        Only a single query goes out: it must end in ``?`` and contain no ``;``,
+        which is how SCPI chains commands (``OUTP ON;*IDN?`` ends in ``?`` too).
+        Refused, never trimmed, with :class:`NotAQueryError`.
+        """
+        command = line.strip()
+        if not command.endswith("?") or ";" in command or "\n" in command or "\r" in command:
+            raise NotAQueryError(
+                f"not sent: {command!r} isn't a single query (it must end in ? with "
+                "no ;). Setpoints and output go through the Meter panel's controls."
+            )
+        return self._inst.query(command)
 
     def identify(self) -> str:
         """Return the ``*IDN?`` identity string."""
