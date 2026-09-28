@@ -117,6 +117,13 @@ share_token = ""       # generated on first use; regenerate in Preferences
 base_url = "" # e.g. "http://intake.repair-bench:8000"
 token = ""
 
+[inventory]
+# bench-parts inventory API (LAN-only). Leave base_url empty to run standalone
+# with no inventory panel data. token is bench-parts' BENCH_PARTS_API_TOKEN
+# (sent as a bearer token). Parts data carries no PII — safe to composite.
+base_url = "" # e.g. "http://192.168.7.204:8000"
+token = ""
+
 [instruments]
 # Control policy for the bench instrument (#164). The serial device itself lives
 # on [panels.telemetry] — it is not repeated here.
