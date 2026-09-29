@@ -4,12 +4,22 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A release builds its installers with exactly these jobs and checks, at the
+  # release tag (release-assets.yml). Empty ref = the event's own commit.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # The workflow name keeps a release build (called from release-please) and the
+  # normal build of the same push to main from cancelling each other.
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,6 +36,8 @@ jobs:
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         run: |
@@ -68,6 +80,8 @@ jobs:
             python3 python3-dev python3-pip python3-venv
 
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install uv
         run: |
@@ -154,6 +168,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       # Briefcase bundles the build host's Python version, so pin it here
       # rather than taking whatever the runner image defaults to.
@@ -186,6 +202,8 @@ jobs:
       QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-python@v5
         with:
