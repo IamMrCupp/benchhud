@@ -205,6 +205,23 @@ by `scripts/make_icns.sh`, like the other icons.
 
 ---
 
+## What CI builds when
+
+macOS and Windows runners bill at 10× and 2× Linux minutes, so not every run
+builds every package:
+
+- **Every PR and merge to `main`:** tests, lint, and the Ubuntu `.deb` with its
+  clean-container install check. Docs-only changes skip CI.
+- **Every release, a manual run, or a PR labelled `full-ci`:** also the Windows
+  MSI (installed and start-checked) and the macOS app. Add the label to a PR that
+  touches packaging, so a macOS- or Windows-only break shows up there rather than
+  at the next release.
+
+A release always builds and checks everything before its installers are
+attached, so a release can't ship a package CI hasn't installed.
+
+---
+
 ## Versions
 
 The app and the `.deb` both take their version from `__version__` in
