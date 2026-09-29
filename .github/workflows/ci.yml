@@ -3,7 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
   pull_request:
+    # `labeled` so adding the `full-ci` label re-runs with the macOS, Windows
+    # and arm64 builds (see the `if:` on those jobs).
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+  # A full run by hand, every platform.
+  workflow_dispatch:
   # A release builds its installers with exactly these jobs and checks, at the
   # release tag (release-assets.yml). Empty ref = the event's own commit.
   workflow_call:
@@ -12,6 +25,11 @@ on:
         type: string
         required: false
         default: ""
+      # A release passes true: build and check every platform.
+      full:
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -165,6 +183,9 @@ jobs:
   # The Windows build (#207). There's no Windows bench yet, so this is the only
   # proof the app packages and starts there. Briefcase fetches WiX itself.
   msi:
+    # macOS and Windows runners cost 10x and 2x Linux minutes, so this runs
+    # for releases, by hand, or on a PR labelled full-ci, not on every push.
+    if: inputs.full || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -197,6 +218,9 @@ jobs:
   # signature needs the certificate in CI (#173), so the release build is still
   # signed on the maintainer's Mac (docs/PACKAGING.md).
   macos-app:
+    # macOS and Windows runners cost 10x and 2x Linux minutes, so this runs
+    # for releases, by hand, or on a PR labelled full-ci, not on every push.
+    if: inputs.full || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'full-ci')
     runs-on: macos-latest
     env:
       QT_QPA_PLATFORM: offscreen
