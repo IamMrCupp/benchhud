@@ -19,7 +19,7 @@ import sys
 from collections.abc import Callable, Sequence
 
 import cv2
-from PySide6.QtCore import QByteArray, Qt, QTimer
+from PySide6.QtCore import QByteArray, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
 
@@ -154,6 +154,10 @@ def thermal_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> Fal
 class MainWindow(QMainWindow):
     """Top-level HUD window."""
 
+    #: A supply command finished on the instrument's thread: (what, its Future).
+    #: A signal so the result is handled back on the GUI thread.
+    control_done = Signal(str, object)
+
     def __init__(
         self,
         config: Config | None = None,
@@ -227,6 +231,7 @@ class MainWindow(QMainWindow):
         # PowerPanel is the numeric power/DMM meter (DMM header + V/A/W/max).
         self.power_panel = PowerPanel()
         self.panels.add_panel(self.power_panel, right)
+        self._wire_supply_controls()
         self.controls_panel = ControlsPanel(self._config)
         controls_dock = self.panels.add_panel(self.controls_panel, left)
         self.launcher_panel = LauncherPanel(self._config.tools)
@@ -867,6 +872,7 @@ class MainWindow(QMainWindow):
         self._instrument_timer = QTimer(self)
         self._instrument_timer.timeout.connect(self._telemetry_tick)
         self._instrument_timer.start(max(50, int(interval * 1000)))
+        self._refresh_supply()
 
     def _telemetry_tick(self) -> None:
         session = self._instrument_session
@@ -887,11 +893,71 @@ class MainWindow(QMainWindow):
             # stop() runs the output-off invariant before closing the port.
             self._instrument_session.stop()
             self._instrument_session = None
+        self._refresh_supply()
 
     def reconfigure_instrument_session(self) -> None:
         """Rebuild the live session after a Preferences change."""
         self.stop_telemetry()
         self.start_telemetry()
+        self._refresh_supply()
+
+    # --- supply controls (#164) ---------------------------------------------
+
+    def _wire_supply_controls(self) -> None:
+        supply = self.power_panel.supply
+        supply.set_voltage_requested.connect(
+            lambda v: self.run_supply_command(f"Set {v:.2f} V", lambda d: d.set_voltage(v))
+        )
+        supply.set_current_requested.connect(
+            lambda a: self.run_supply_command(
+                f"Set the limit to {a:.3f} A", lambda d: d.set_current_limit(a)
+            )
+        )
+        supply.output_on_requested.connect(
+            lambda: self.run_supply_command("Output ON", lambda d: d.output_on())
+        )
+        supply.output_off_requested.connect(
+            lambda: self.run_supply_command("Output OFF", lambda d: d.output_off())
+        )
+        supply.dmm_mode_requested.connect(
+            lambda mode: self.run_supply_command(f"DMM to {mode}", lambda d: d.set_dmm_mode(mode))
+        )
+        self.control_done.connect(self._supply_command_done)
+        self._refresh_supply()
+
+    def _refresh_supply(self) -> None:
+        """Enable the controls that may be used right now."""
+        session = self._instrument_session
+        instruments = self._config.instruments
+        self.power_panel.supply.set_available(
+            connected=session is not None and session.is_running,
+            control=instruments.control,
+            max_voltage=instruments.max_voltage,
+            max_current=instruments.max_current,
+        )
+
+    def run_supply_command(self, what: str, action) -> None:
+        """Run one supply command through the session, once.
+
+        Never retried: a retried OUTP ON after a timeout is the electrical
+        version of double-counting stock. The result, good or bad, is shown.
+        """
+        supply = self.power_panel.supply
+        session = self._instrument_session
+        if session is None or not session.is_running:
+            supply.show_status(f"{what}: not done, no instrument is connected.", error=True)
+            return
+        supply.show_status(f"{what}…")
+        future = session.submit(action)
+        future.add_done_callback(lambda f: self.control_done.emit(what, f))
+
+    def _supply_command_done(self, what: str, future) -> None:
+        error = future.exception()
+        supply = self.power_panel.supply
+        if error is None:
+            supply.show_status(f"{what}: done.")
+        else:
+            supply.show_status(f"{what}: not done. {error}", error=True)
 
     @property
     def telemetry_active(self) -> bool:

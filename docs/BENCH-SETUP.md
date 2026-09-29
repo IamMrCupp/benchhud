@@ -175,6 +175,33 @@ for the repair log (captures, automatic fault logging, reports) and
 
 ---
 
+## 6. Controlling the supply (optional)
+
+By default benchhud only **reads** the OWON. The Meter panel's **Supply** section
+can also set the voltage and current limit, switch the output and change the
+DMM mode, once you turn control on:
+
+```toml
+[instruments]
+control = true
+max_voltage = 5.5   # hard ceilings, enforced by the driver
+max_current = 1.0
+```
+
+- **Output ON asks first**, naming the setpoints, and *No* is the default, so
+  Enter can't energize a rail.
+- **Output OFF always works,** even with control off.
+- The spin boxes stop at the ceilings, and the driver refuses anything over them
+  regardless.
+- A command that fails is shown and **never retried**; decide yourself whether
+  to send it again.
+- benchhud turns the output off when it connects, disconnects and quits, and
+  never inherits a live rail.
+
+**The write commands haven't been verified on the bench yet** (#164). The
+Supply section says so too. Before trusting them with a board, try each one with
+nothing connected and watch the OWON's own display.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
