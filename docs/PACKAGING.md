@@ -107,7 +107,26 @@ something a package should do behind your back):
 Unlike macOS, Linux has no per-app camera permission. The groups are the whole
 story.
 
-### Get one from CI (the normal way)
+### Download it from a release (the normal way)
+
+Every release carries its installers: the `.deb` and the Windows MSI are
+attached to the GitHub Release (`release-assets.yml`). They're built by the
+same CI jobs every PR runs, at the release tag, including the clean-container
+install check.
+
+```sh
+gh release download --repo IamMrCupp/benchhud --pattern '*.deb' --dir dist
+sudo apt install ./dist/benchhud_*.deb
+```
+
+The Mac app isn't attached. CI's build is ad-hoc signed, and macOS ties camera
+permission to the signature, so the one to install is the Developer ID build
+from *Build (macOS)* above.
+
+For a release made before this existed, run **release-assets** from the
+Actions tab with the tag (or `gh workflow run release-assets.yml -f tag=v0.3.0`).
+
+### Get one from CI (between releases)
 
 Every PR and every push to `main` builds the `.deb` and uploads it as a workflow
 artifact named **benchhud-deb**. CI also installs it in a clean `ubuntu:26.04`
