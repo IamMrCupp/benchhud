@@ -27,6 +27,7 @@ from benchhud.overlay.telemetry import CELL_TINT
 from benchhud.palette import palette, shade, tint
 from benchhud.shell.fonts import seven_segment_family
 from benchhud.shell.panel import Panel
+from benchhud.shell.panels.supply_controls import SupplyControls
 from benchhud.shell.power_chart import PowerChart
 
 _PLACEHOLDER = "—"
@@ -99,9 +100,14 @@ class PowerPanel(Panel):
         self.chart = PowerChart()
         self.chart.setMinimumHeight(150)
 
+        # Setpoints, output and DMM mode (#164). Requests only; the main window
+        # runs them through the instrument session.
+        self.supply = SupplyControls()
+
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_header())
         layout.addWidget(self._build_grid())
+        layout.addWidget(self.supply)
         layout.addWidget(self.chart, stretch=1)
 
     def _build_header(self) -> QWidget:
