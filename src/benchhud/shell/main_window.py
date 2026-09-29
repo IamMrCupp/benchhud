@@ -75,6 +75,7 @@ from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
+from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
 from benchhud.tickets import HttpTicketSource, NullTicketSource, TicketSource
 
 # Preview refresh rate for the on-screen scope panel (the virtual-cam output has
@@ -253,6 +254,8 @@ class MainWindow(QMainWindow):
         self.terminal_panel = TerminalPanel(terminal_view_factory)
         self.terminal_panel.restart_requested.connect(self.restart_terminal)
         self.terminal_panel.pause_toggled.connect(self.set_terminal_paused)
+        self.terminal_panel.target_changed.connect(self.set_terminal_target)
+        self._terminal_targets: list[tuple[str, str]] | None = None
         terminal_dock = self.panels.add_panel(self.terminal_panel, left)
         self.tabifyDockWidget(inventory_dock, terminal_dock)  # …and the terminal
 
@@ -1033,17 +1036,74 @@ class MainWindow(QMainWindow):
             return
         if not cfg.share_token:
             cfg.share_token = secrets.token_urlsafe(18)
-        argv = login_shell(cfg.shell)
+        argv, factory = self._terminal_target()
         if self._terminal is not None and self._terminal.argv != argv:
             self.stop_terminal()
         if self._terminal is None:
             kwargs = {}
             if self._terminal_session_factory is not None:
                 kwargs["session_factory"] = self._terminal_session_factory
+            elif factory is not None:
+                kwargs["session_factory"] = factory
             self._terminal = TerminalHost(argv, share_token=cfg.share_token, **kwargs)
             self._terminal.start()
         self._terminal.share_token = cfg.share_token
         self._terminal.set_sharing(cfg.share)
+
+    def _terminal_target(self):
+        """``(identity, session factory)`` for what the terminal attaches to (#174).
+
+        The identity is what :meth:`_sync_terminal` compares to decide whether to
+        reconnect; the factory is None for the shell (a pty).
+        """
+        cfg = self._config.terminal
+        target = cfg.target or "shell"
+        owon_port = self._config.panels.telemetry.port
+        if target == "shell":
+            return login_shell(cfg.shell), None
+        if target == "owon" or target == owon_port:
+            # Never a second handle on the OWON: every line goes through the
+            # running session, which also means reconnecting if it's replaced.
+            session = self._instrument_session
+            identity = ["owon:scpi", str(id(session))]
+            return identity, lambda _argv, **kw: OwonConsoleSession(session, **kw)
+        identity = [f"serial:{target}", str(cfg.baud), cfg.line_ending, str(cfg.local_echo)]
+        return identity, lambda _argv, **kw: SerialSession(
+            target,
+            baud=cfg.baud,
+            line_ending=cfg.line_ending,
+            local_echo=cfg.local_echo,
+            **kw,
+        )
+
+    def terminal_targets(self) -> list[tuple[str, str]]:
+        """What the panel offers: the shell, the OWON console, and other serial ports."""
+        targets = [("Shell", "shell")]
+        owon_port = self._config.panels.telemetry.port
+        if self._config.panels.telemetry.enabled:
+            targets.append(("OWON SCPI console (queries only)", "owon"))
+        try:
+            ports = self._scanner.serial_ports()
+        except Exception:
+            ports = []
+        for port in ports:
+            if port.device == owon_port:
+                continue  # it's the OWON: reached through its session, above
+            label = f"{port.device} — {port.description}" if port.description else port.device
+            targets.append((label, port.device))
+        return targets
+
+    def set_terminal_target(self, target: str, baud: int, line_ending: str, echo: bool) -> None:
+        """The panel's picker: attach the terminal to something else.
+
+        The server restarts too, so the in-app page and any OBS source move to
+        the new session rather than staying on the old one.
+        """
+        cfg = self._config.terminal
+        if target == self._config.panels.telemetry.port:
+            target = "owon"
+        cfg.target, cfg.baud, cfg.line_ending, cfg.local_echo = target, baud, line_ending, echo
+        self.restart_browser_sources()
 
     def stop_terminal(self) -> None:
         """End the shell (idempotent)."""
@@ -1081,6 +1141,17 @@ class MainWindow(QMainWindow):
         panel.set_share_state(
             sharing=bool(state and state.sharing), paused=bool(state and state.paused)
         )
+        if cfg.enabled and TERMINAL_SUPPORTED:
+            targets = self.terminal_targets()
+            if targets != self._terminal_targets or panel.target != (cfg.target or "shell"):
+                self._terminal_targets = targets
+                panel.set_targets(
+                    targets,
+                    cfg.target or "shell",
+                    baud=cfg.baud,
+                    line_ending=cfg.line_ending,
+                    local_echo=cfg.local_echo,
+                )
 
     def _publish_telemetry(self) -> None:
         """Hand the meter and graph pages the readings the docks just drew."""

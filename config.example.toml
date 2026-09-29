@@ -109,6 +109,13 @@ shell = ""             # empty = your login shell; or e.g. "/bin/zsh"
 # you typed while paused). The link carries a token, shown in Preferences.
 share = false
 share_token = ""       # generated on first use; regenerate in Preferences
+# What it's attached to: "shell", "owon" (the SCPI query console, through the
+# instrument session: queries only), or a serial port's device path. Picked
+# from the panel's "Connect to" menu; the OWON's own port always means "owon".
+target = "shell"
+baud = 115200          # a raw serial port's speed
+line_ending = "crlf"   # what Enter sends: crlf | cr | lf
+local_echo = false     # show typing, for devices that don't echo it
 
 [intake]
 # benchhud-intake ticket API (LAN-only, read-only). Leave base_url empty to run
