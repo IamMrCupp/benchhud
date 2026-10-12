@@ -8,11 +8,11 @@ serial, and pushes the whole composite out as a virtual camera for OBS.
 It started as "I want to see which part is overheating without looking away from
 the scope" and turned into the bench's command center.
 
-> **Status: early.** The application is built and tested off-hardware — shell,
-> capture pipeline, thermal math, overlay compositing, instrument driver, live
-> controls, repair log. Scope capture is verified against a real camera; the rest
-> of the device-facing work (thermal Y16, virtual cam, the OWON on serial) sits
-> behind tested interfaces and gets wired up on the bench. Not a daily driver yet.
+> **Status: early.** Installable from each release (see *Install*), and verified
+> on real hardware for scope capture and macOS virtual-camera output into OBS.
+> The rest of the device-facing work (raw Y16 thermal, the OWON's write
+> commands, Windows virtual-camera output) is built and tested off-hardware and
+> waits on the bench. Not a daily driver yet.
 
 ## What it does
 
@@ -73,6 +73,42 @@ OBS's camera extension on macOS ([MACOS-SETUP.md](docs/MACOS-SETUP.md)), and a
 Windows backend still to come. Where a backend isn't available, the status bar
 says so rather than streaming nothing quietly.
 
+## Install
+
+Every [release](https://github.com/IamMrCupp/benchhud/releases) carries its
+installers, built and install-checked by CI at the release tag.
+
+**Ubuntu (the bench).** The `.deb` from the latest release, for Ubuntu 26.04
+on amd64:
+
+```sh
+gh release download --repo IamMrCupp/benchhud --pattern '*.deb'
+sudo apt install ./benchhud_*.deb
+```
+
+`apt install` (not `dpkg -i`) pulls in the libraries Qt needs. It shows up in
+the app menu as **benchhud**. Two one-time steps are left to you, since a
+package shouldn't do them behind your back: join the `video`, `dialout` and
+`plugdev` groups, and load v4l2loopback for virtual-camera output. Both are in
+[BENCH-SETUP.md](docs/BENCH-SETUP.md).
+
+**Windows.** The `.msi` from the latest release. It installs per user, with no
+admin rights. It's ad-hoc signed, so SmartScreen warns on first run. The HUD
+runs, but two pieces aren't there yet: virtual-camera output (#124) and the
+terminal panel (#203).
+
+**macOS.** No download: macOS grants camera access per app *signature*, so the
+app has to be built and signed with a Developer ID, which
+[PACKAGING.md](docs/PACKAGING.md) walks through. For OBS, see
+[MACOS-SETUP.md](docs/MACOS-SETUP.md).
+
+**From source (any OS).** `uv run benchhud`; see *Development* below.
+
+The shop side runs separately, with its own installers (Linux service `.deb`,
+Windows and macOS tray apps, Docker, Kubernetes):
+[benchhud-intake](https://github.com/IamMrCupp/benchhud-intake) for tickets and
+[bench-parts](https://github.com/IamMrCupp/bench-parts) for parts inventory.
+
 ## Hardware
 
 benchhud isn't locked to specific gear — device paths are config — but it's
@@ -104,7 +140,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, the hardware seams, design rules. |
 | [BENCH-SETUP.md](docs/BENCH-SETUP.md) | Bringing it up on the Linux bench — cameras, the OWON, v4l2loopback → OBS. |
 | [MACOS-SETUP.md](docs/MACOS-SETUP.md) | Publishing into OBS's virtual camera on a Mac. |
-| [PACKAGING.md](docs/PACKAGING.md) | Building the signed macOS `.app` (needed for camera access on a Mac). |
+| [PACKAGING.md](docs/PACKAGING.md) | The packages: the Ubuntu `.deb`, the Windows MSI, the signed macOS `.app`, releases, and what CI builds when. |
 | [BROWSER-SOURCES.md](docs/BROWSER-SOURCES.md) | The data panels as OBS Browser sources: URLs, what goes on air. |
 | [TERMINAL.md](docs/TERMINAL.md) | The terminal panel and its read-only stream view. |
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
