@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/IamMrCupp/benchhud/compare/v0.3.0...v0.3.1) (2026-10-12)
+
+
+### Documentation
+
+* **readme:** an Install section, and a current status note ([e7d3e74](https://github.com/IamMrCupp/benchhud/commit/e7d3e74b3a95d443bd6c70af1ef8499957569d7f))
+
 ## [0.3.0](https://github.com/IamMrCupp/benchhud/compare/v0.2.0...v0.3.0) (2026-09-29)
 
 
