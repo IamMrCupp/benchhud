@@ -39,11 +39,11 @@ class ToolPickerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Detect installed tools")
-        self.resize(560, 420)
+        self.resize(640, 460)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels(["Tool", "Status", "Command"])
+        self.tree.setColumnCount(4)
+        self.tree.setHeaderLabels(["Tool", "Status", "Command", "Opens in"])
         self.tree.setRootIsDecorated(False)
 
         self._detected = detector()
@@ -75,6 +75,7 @@ class ToolPickerDialog(QDialog):
                     tool.name,
                     "installed" if detected.found else "not found",
                     detected.command or "",
+                    "terminal  >_" if tool.terminal else "window",
                 ]
             )
             tip = f"{tool.category} — {tool.description}"
@@ -91,7 +92,7 @@ class ToolPickerDialog(QDialog):
                 # Listed for discoverability, but nothing to add.
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self.tree.addTopLevelItem(item)
-        for column in range(3):
+        for column in range(4):
             self.tree.resizeColumnToContents(column)
 
     def selected_tools(self) -> list[ToolConfig]:

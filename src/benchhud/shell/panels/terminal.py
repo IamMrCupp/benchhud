@@ -14,11 +14,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -34,9 +35,9 @@ from benchhud.shell.qt_util import fit_combo_popup
 BAUD_RATES = (9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600)
 #: What Enter sends to a raw serial device.
 LINE_ENDING_CHOICES = (
-    ("Enter sends CR LF", "crlf"),
-    ("Enter sends CR", "cr"),
-    ("Enter sends LF", "lf"),
+    ("CR LF", "crlf"),
+    ("CR", "cr"),
+    ("LF", "lf"),
 )
 
 #: Builds the widget that shows the page. It must have ``setUrl(QUrl)``.
@@ -84,10 +85,11 @@ class TerminalPanel(Panel):
         self.restart_button = QPushButton("Restart shell")
         self.restart_button.clicked.connect(self.restart_requested)
 
+        # The ON STREAM marker gets its own line: beside both buttons the
+        # toolbar was wider than a narrow dock (#230).
         bar = QHBoxLayout()
-        bar.addWidget(self.on_air)
-        bar.addStretch(1)
         bar.addWidget(self.pause_button)
+        bar.addStretch(1)
         bar.addWidget(self.restart_button)
 
         # What the terminal is attached to: the shell, the OWON's query console,
@@ -96,19 +98,45 @@ class TerminalPanel(Panel):
         self.target_combo.setToolTip("Attach the terminal to a shell or a serial port")
         self.baud_combo = QComboBox()
         self.baud_combo.setEditable(True)
+        self.baud_combo.setToolTip("Speed (baud). Type any other rate.")
         for rate in BAUD_RATES:
             self.baud_combo.addItem(str(rate), rate)
         self.ending_combo = QComboBox()
         for label, value in LINE_ENDING_CHOICES:
             self.ending_combo.addItem(label, value)
+        self.ending_combo.setToolTip("What Enter sends to the device")
         self.echo_check = QCheckBox("Local echo")
         self.echo_check.setToolTip("Show what you type, for devices that don't echo it")
         self._serial_widgets = (self.baud_combo, self.ending_combo, self.echo_check)
+        # Long port names mustn't widen the panel past its dock.
+        self.target_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.target_combo.setMinimumContentsLength(8)
+        self.baud_combo.setMinimumContentsLength(6)
+        self.baud_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+
+        # Two rows, so the panel fits a narrow dock: what to connect to, then
+        # the serial settings (shown only for a raw port).
         target_row = QHBoxLayout()
         target_row.addWidget(QLabel("Connect to"))
         target_row.addWidget(self.target_combo, stretch=1)
-        for widget in self._serial_widgets:
-            target_row.addWidget(widget)
+        serial_row = QGridLayout()
+        serial_row.setContentsMargins(0, 0, 0, 0)
+        serial_row.addWidget(self.baud_combo, 0, 0)
+        serial_row.addWidget(QLabel("Enter"), 0, 1)
+        serial_row.addWidget(self.ending_combo, 0, 2)
+        serial_row.addWidget(self.echo_check, 1, 0, 1, 3)
+        serial_row.setColumnStretch(3, 1)
+        self._serial_row = QWidget()
+        self._serial_row.setLayout(serial_row)
+        self._target_box = QWidget()
+        target_box = QVBoxLayout(self._target_box)
+        target_box.setContentsMargins(0, 0, 0, 0)
+        target_box.addLayout(target_row)
+        target_box.addWidget(self._serial_row)
         self.target_combo.activated.connect(self._emit_target)
         self.baud_combo.activated.connect(self._emit_target)
         self.baud_combo.lineEdit().editingFinished.connect(self._emit_target)
@@ -119,13 +147,16 @@ class TerminalPanel(Panel):
         self.message.setObjectName("TerminalMessage")
         self.message.setWordWrap(True)
         self.message.setMargin(12)
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.message.setMinimumWidth(80)
         self._stack = QStackedWidget()
         self._stack.addWidget(self.message)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 8, 8, 0)  # the terminal runs to the bottom edge
+        layout.addWidget(self.on_air)
         layout.addLayout(bar)
-        layout.addLayout(target_row)
+        layout.addWidget(self._target_box)
         layout.addWidget(self._stack, stretch=1)
         self.set_share_state(sharing=False, paused=False)
         self.show_message("")
@@ -182,6 +213,7 @@ class TerminalPanel(Panel):
         raw = self._is_raw_serial()
         for widget in self._serial_widgets:
             widget.setVisible(raw)
+        self._serial_row.setVisible(raw)
         self.restart_button.setText("Restart shell" if self.target == "shell" else "Reconnect")
 
     def _emit_target(self, *_args) -> None:
@@ -203,11 +235,17 @@ class TerminalPanel(Panel):
         """The page the view is showing, or None when a message is up."""
         return self._url if self._stack.currentWidget() is self.view else None
 
-    def show_message(self, text: str) -> None:
-        """Show ``text`` instead of the terminal (off, unsupported, port taken)."""
+    def show_message(self, text: str, *, attachable: bool = True) -> None:
+        """Show ``text`` instead of the terminal (off, unsupported, port taken).
+
+        ``attachable=False`` (the terminal is off, or can't run here) hides the
+        Connect to controls and Restart too: there's nothing to attach.
+        """
         self.message.setText(text)
         self._stack.setCurrentWidget(self.message)
         self.restart_button.setEnabled(False)
+        self._target_box.setVisible(attachable)
+        self.restart_button.setVisible(attachable)
 
     def show_terminal(self, url: str) -> None:
         """Show the terminal page at ``url`` (loads only if it changed)."""
@@ -225,6 +263,8 @@ class TerminalPanel(Panel):
             self.view.setUrl(QUrl(url))
         self._stack.setCurrentWidget(self.view)
         self.restart_button.setEnabled(True)
+        self._target_box.setVisible(True)
+        self.restart_button.setVisible(True)
 
     def set_share_state(self, *, sharing: bool, paused: bool) -> None:
         """Reflect the stream view: the Pause button only means something while sharing."""

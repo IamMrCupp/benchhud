@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -112,15 +113,23 @@ class SupplyControls(QGroupBox):
         note.setObjectName("SupplyNote")
         note.setWordWrap(True)
 
+        # The output buttons get a row of their own: sharing the Set column
+        # made that column as wide as "Output OFF", and the meter dock too
+        # narrow to show it.
+        output_row = QHBoxLayout()
+        output_row.addWidget(self.on_button, stretch=1)
+        output_row.addWidget(self.off_button, stretch=1)
+
         grid = QGridLayout(self)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setColumnStretch(1, 1)
         grid.addWidget(QLabel("Voltage"), 0, 0)
         grid.addWidget(self.voltage, 0, 1)
         grid.addWidget(self.set_voltage_button, 0, 2)
         grid.addWidget(QLabel("Current limit"), 1, 0)
         grid.addWidget(self.current, 1, 1)
         grid.addWidget(self.set_current_button, 1, 2)
-        grid.addWidget(self.on_button, 2, 0, 1, 2)
-        grid.addWidget(self.off_button, 2, 2)
+        grid.addLayout(output_row, 2, 0, 1, 3)
         grid.addWidget(QLabel("DMM"), 3, 0)
         grid.addWidget(self.dmm_mode, 3, 1, 1, 2)
         grid.addWidget(self.status, 4, 0, 1, 3)

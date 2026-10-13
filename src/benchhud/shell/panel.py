@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget
 
+#: Margins inside a dock panel. macOS's default of 20 px a side spent 40 px of
+#: a narrow dock on nothing (#230).
+PANEL_MARGINS = (8, 8, 8, 8)
+
 
 class Panel(QWidget):
     """A dockable HUD panel.

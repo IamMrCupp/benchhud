@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from benchhud.inventory.source import InventorySource, InventoryWriteError, Part
-from benchhud.shell.panel import Panel
+from benchhud.shell.panel import PANEL_MARGINS, Panel
 
 InventorySourceProvider = Callable[[], InventorySource]
 #: The selected job's external ticket ref, or None when no job / not linked.
@@ -73,6 +73,7 @@ class InventoryPanel(Panel):
         self._on_consumed = on_consumed
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(*PANEL_MARGINS)
         layout.addLayout(self._build_search_row())
         self.part_list = QListWidget()
         self.part_list.setMinimumHeight(90)
