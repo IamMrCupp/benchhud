@@ -193,11 +193,33 @@ def test_with_the_terminal_on_the_command_waits_at_the_prompt(qtbot) -> None:
         window.close()
 
 
-def test_with_the_terminal_off_it_opens_a_system_terminal(qtbot) -> None:
+def test_with_the_terminal_off_it_opens_a_system_terminal(qtbot, monkeypatch) -> None:
     window, spawned = _window(qtbot, terminal=False)
+    launch = window.launcher_panel.launcher.launch_in_system_terminal
+    monkeypatch.setattr(
+        window.launcher_panel.launcher,
+        "launch_in_system_terminal",
+        lambda tool: launch(tool, platform="win32"),
+    )
     try:
         window.launcher_panel.buttons["flashrom"].click()
-        assert len(spawned) == 1 and "flashrom" in " ".join(spawned[0])
+        assert spawned == [["cmd.exe", "/k", "flashrom"]]
+    finally:
+        window.close()
+
+
+def test_with_no_terminal_anywhere_the_status_bar_says_so(qtbot, monkeypatch) -> None:
+    window, spawned = _window(qtbot, terminal=False)
+    launch = window.launcher_panel.launcher.launch_in_system_terminal
+    monkeypatch.setattr(
+        window.launcher_panel.launcher,
+        "launch_in_system_terminal",
+        lambda tool: launch(tool, platform="linux", which=lambda _name: None),
+    )
+    try:
+        window.launcher_panel.buttons["flashrom"].click()
+        assert spawned == []
+        assert "Terminal panel" in window.statusBar().currentMessage()
     finally:
         window.close()
 
