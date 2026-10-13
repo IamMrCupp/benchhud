@@ -34,8 +34,8 @@ from benchhud.boards.library import BoardFile, BoardLibrary
 from benchhud.jobs.capture import CaptureContext, capture_to_job
 from benchhud.jobs.report import export_report
 from benchhud.jobs.store import Job, JobStatus, JobStore
-from benchhud.shell.panel import Panel
-from benchhud.shell.qt_util import fit_combo_popup
+from benchhud.shell.panel import PANEL_MARGINS, Panel
+from benchhud.shell.qt_util import fit_combo_popup, grow_fields
 from benchhud.shell.ticket_picker import TicketPickerDialog
 from benchhud.tickets.importer import import_ticket
 from benchhud.tickets.source import Ticket, TicketSource
@@ -100,6 +100,7 @@ class JobsPanel(Panel):
         self._schematic_files: list[BoardFile] = []
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(*PANEL_MARGINS)
         layout.addLayout(self._build_new_row())
         layout.addWidget(self.job_list_widget())
         layout.addWidget(self._build_detail())
@@ -120,6 +121,7 @@ class JobsPanel(Panel):
         self.new_device_edit = QLineEdit()
         self.new_device_edit.setPlaceholderText("Device / board…")
         self.new_device_edit.returnPressed.connect(self.create_job)
+        self.new_device_edit.setMinimumWidth(60)
         self.new_button = QPushButton("New job")
         self.new_button.clicked.connect(self.create_job)
         self.import_button = QPushButton("Import…")
@@ -148,6 +150,7 @@ class JobsPanel(Panel):
         self.symptoms_edit.setMaximumHeight(60)
         self.status_combo = QComboBox()
         self.status_combo.addItems([s.value for s in JobStatus])
+        self.status_combo.setMinimumContentsLength(8)
         fit_combo_popup(self.status_combo)
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save_current)
@@ -160,14 +163,20 @@ class JobsPanel(Panel):
         buttons.addStretch(1)
         buttons.addWidget(self.export_button)
 
-        widget = QWidget()
-        form = QFormLayout(widget)
+        form = QFormLayout()
+        grow_fields(form)
         form.addRow("Device", self.device_edit)
         form.addRow("Serial", self.serial_edit)
         form.addRow("Customer", self.customer_edit)
         form.addRow("Symptoms", self.symptoms_edit)
         form.addRow("Status", self.status_combo)
-        form.addRow("", buttons)
+        # The buttons span the panel: under the field column they set the
+        # panel's minimum width past a narrow dock's (#230).
+        widget = QWidget()
+        box = QVBoxLayout(widget)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.addLayout(form)
+        box.addLayout(buttons)
         return widget
 
     def _build_notes(self) -> QWidget:
@@ -176,6 +185,7 @@ class JobsPanel(Panel):
         self.note_edit = QLineEdit()
         self.note_edit.setPlaceholderText("Add a note…")
         self.note_edit.returnPressed.connect(self.add_note)
+        self.note_edit.setMinimumWidth(60)
         self.add_note_button = QPushButton("Add note")
         self.add_note_button.clicked.connect(self.add_note)
         self.capture_button = QPushButton("Capture bench")
@@ -187,13 +197,17 @@ class JobsPanel(Panel):
         row = QHBoxLayout()
         row.addWidget(self.note_edit, stretch=1)
         row.addWidget(self.add_note_button)
-        row.addWidget(self.capture_button)
+        # Its own row: beside the note field it made the panel wider than the dock.
+        capture_row = QHBoxLayout()
+        capture_row.addStretch(1)
+        capture_row.addWidget(self.capture_button)
 
         widget = QWidget()
         box = QVBoxLayout(widget)
         box.setContentsMargins(0, 0, 0, 0)
         box.addWidget(self.notes_list)
         box.addLayout(row)
+        box.addLayout(capture_row)
         return widget
 
     def _build_board_row(self) -> QWidget:
@@ -207,11 +221,14 @@ class JobsPanel(Panel):
         self.open_schematic_button.setToolTip("Open this board's schematic PDF")
         self.open_schematic_button.clicked.connect(self.open_schematic_for_selected)
 
-        row = QHBoxLayout()
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self.open_board_button)
+        buttons.addWidget(self.open_schematic_button)
+        row = QVBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.board_label, stretch=1)
-        row.addWidget(self.open_board_button)
-        row.addWidget(self.open_schematic_button)
+        row.addWidget(self.board_label)
+        row.addLayout(buttons)
         widget = QWidget()
         widget.setLayout(row)
         self._board_row = widget

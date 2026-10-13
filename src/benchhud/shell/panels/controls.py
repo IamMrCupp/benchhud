@@ -30,8 +30,8 @@ from benchhud.overlay.config_adapter import (
     transform_from_config,
 )
 from benchhud.overlay.transform import RegistrationTransform
-from benchhud.shell.panel import Panel
-from benchhud.shell.qt_util import fit_combo_popup
+from benchhud.shell.panel import PANEL_MARGINS, Panel
+from benchhud.shell.qt_util import fit_combo_popup, grow_fields
 
 
 class ControlsPanel(Panel):
@@ -70,6 +70,9 @@ class ControlsPanel(Panel):
         self.rotation_spin = _spin(-180.0, 180.0, 0.5, transform.rotation_deg, "°")
 
         form = QFormLayout(self)
+        form.setContentsMargins(*PANEL_MARGINS)
+
+        grow_fields(form)
         form.addRow("Mode", self.mode_combo)
         form.addRow("Colormap", self.colormap_combo)
         form.addRow("Opacity", self.alpha_slider)

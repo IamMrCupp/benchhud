@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -37,7 +38,8 @@ from PySide6.QtWidgets import (
 from benchhud.boards.library import DEFAULT_EXTENSIONS
 from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
-from benchhud.shell.qt_util import fit_combo_popup
+from benchhud.launcher.catalog import is_command_line
+from benchhud.shell.qt_util import fit_combo_popup, grow_fields
 from benchhud.shell.tool_picker import ToolPickerDialog
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import login_shell
@@ -106,10 +108,14 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow("Scope camera", self.scope_combo)
         form.addRow("Thermal camera", self.thermal_combo)
         form.addRow("Instrument port", self.serial_combo)
-        form.addRow("", self.rescan_button)
+        rescan_row = QHBoxLayout()
+        rescan_row.addWidget(self.rescan_button)
+        rescan_row.addStretch(1)
+        form.addRow("", rescan_row)
         return widget
 
     def rescan_devices(self) -> None:
@@ -181,6 +187,7 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow(self.output_enabled)
         form.addRow("Loopback device", self.output_device)
         form.addRow("Width", self.output_width)
@@ -209,8 +216,16 @@ class PreferencesDialog(QDialog):
         self.tools_table.horizontalHeaderItem(2).setToolTip(
             "A command-line tool: open it in the Terminal panel instead of as a window"
         )
+        header = self.tools_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.tools_table.verticalHeader().setVisible(False)
         for tool in self._config.tools:
-            self._append_tool_row(tool.name, tool.command, tool.terminal)
+            # Ticked for a known command-line tool even when its entry predates
+            # the flag, matching what the Tools pane does with it (#230).
+            terminal = tool.terminal or is_command_line(tool.command)
+            self._append_tool_row(tool.name, tool.command, terminal)
 
         self.add_tool_button = QPushButton("Add")
         self.add_tool_button.clicked.connect(lambda: self._append_tool_row("", "", False))
@@ -300,6 +315,7 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow(self.fault_auto_log)
         form.addRow("Current threshold", self.fault_threshold)
         return widget
@@ -333,6 +349,7 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         if not TERMINAL_SUPPORTED:
             form.addRow(QLabel("The terminal isn't available on Windows yet."))
             self.terminal_enabled.setEnabled(False)
@@ -358,6 +375,7 @@ class PreferencesDialog(QDialog):
         self.terminal_share_url.setText(
             f"http://127.0.0.1:{port}/terminal?token={self._share_token}"
         )
+        self.terminal_share_url.setCursorPosition(0)  # show where it starts
 
     def _build_tickets_tab(self) -> QWidget:
         intake = self._config.intake
@@ -369,6 +387,7 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow("Intake base URL", self.intake_base_url)
         form.addRow("API token", self.intake_token)
         return widget
@@ -383,6 +402,7 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow("bench-parts base URL", self.inventory_base_url)
         form.addRow("API token", self.inventory_token)
         return widget
@@ -414,6 +434,7 @@ class PreferencesDialog(QDialog):
 
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow("Board library", row)
         form.addRow("Board formats", self.boards_extensions)
         form.addRow("Schematic formats", self.boards_schematic_extensions)
@@ -433,6 +454,7 @@ class PreferencesDialog(QDialog):
         fit_combo_popup(self.logging_combo)
         widget = QWidget()
         form = QFormLayout(widget)
+        grow_fields(form)
         form.addRow("Level", self.logging_combo)
         return widget
 

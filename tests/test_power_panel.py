@@ -118,4 +118,4 @@ def test_meter_cells_fit_their_widest_reading(qtbot):
     font.setBold(True)
     needed = QFontMetrics(font).horizontalAdvance("-000.00")
     assert cell_min_width() > needed
-    assert panel.minimumWidth() >= 2 * cell_min_width()
+    assert panel.minimumSizeHint().width() >= 2 * cell_min_width()

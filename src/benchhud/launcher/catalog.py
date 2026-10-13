@@ -324,6 +324,20 @@ def detect_tools(
     return sorted(results, key=lambda d: (not d.found, d.tool.category, d.tool.name))
 
 
+def is_command_line(command: str, tools: tuple[KnownTool, ...] = KNOWN_TOOLS) -> bool:
+    """Whether ``command`` runs a tool the catalog knows is command-line only.
+
+    Tools added before #225 have no ``terminal`` flag in the config, so the
+    Tools pane asks the catalog too: ``flashrom`` is a terminal tool whether or
+    not the config says so.
+    """
+    words = command.split()
+    if not words:
+        return False
+    program = words[0].replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+    return any(tool.terminal and program in tool.commands for tool in tools)
+
+
 def categories(tools: tuple[KnownTool, ...] = KNOWN_TOOLS) -> list[str]:
     """Distinct categories, in catalog order."""
     seen: list[str] = []

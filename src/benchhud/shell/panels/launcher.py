@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from benchhud.config import ToolConfig
+from benchhud.launcher.catalog import is_command_line
 from benchhud.launcher.tool_launcher import ToolLauncher
-from benchhud.shell.panel import Panel
+from benchhud.shell.panel import PANEL_MARGINS, Panel
 
 _log = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class LauncherPanel(Panel):
         self._tools: list[ToolConfig] = []
         self.buttons: dict[str, QPushButton] = {}
         self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(*PANEL_MARGINS)
         self.set_tools(tools or [])
 
     def set_tools(self, tools: Sequence[ToolConfig]) -> None:
@@ -52,7 +55,12 @@ class LauncherPanel(Panel):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
-        self._tools = list(tools)
+        # A known command-line tool runs in a terminal even when its config
+        # entry predates the flag (#230).
+        self._tools = [
+            replace(t, terminal=True) if not t.terminal and is_command_line(t.command) else t
+            for t in tools
+        ]
         self.buttons = {}
         if not self._tools:
             self._layout.addWidget(QLabel(EMPTY_HINT))

@@ -26,7 +26,7 @@ from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.overlay.telemetry import CELL_TINT
 from benchhud.palette import palette, shade, tint
 from benchhud.shell.fonts import seven_segment_family
-from benchhud.shell.panel import Panel
+from benchhud.shell.panel import PANEL_MARGINS, Panel
 from benchhud.shell.panels.supply_controls import SupplyControls
 from benchhud.shell.power_chart import PowerChart
 
@@ -93,9 +93,9 @@ class PowerPanel(Panel):
         self._max_current = 0.0
         self._last_snapshot: TelemetrySnapshot | None = None
         self.setStyleSheet(_build_style(seven_segment_family()))
-        # Two cells side by side; the panel lives in a scroll area, so a truthful
-        # minimum means the digits scroll rather than get clipped.
-        self.setMinimumWidth(2 * cell_min_width() + 24)
+        # No explicit minimum width: the cells carry their own, and the layout's
+        # minimum is the truthful one. A fixed number below it let the scroll
+        # area squeeze the supply controls until "Output OFF" was cut (#230).
 
         self.chart = PowerChart()
         self.chart.setMinimumHeight(150)
@@ -105,6 +105,7 @@ class PowerPanel(Panel):
         self.supply = SupplyControls()
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(*PANEL_MARGINS)
         layout.addWidget(self._build_header())
         layout.addWidget(self._build_grid())
         layout.addWidget(self.supply)

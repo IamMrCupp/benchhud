@@ -19,9 +19,9 @@ import sys
 from collections.abc import Callable, Sequence
 
 import cv2
-from PySide6.QtCore import QByteArray, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabBar, QWidget
 
 from benchhud import __version__
 from benchhud.boards.library import BoardLibrary
@@ -73,6 +73,7 @@ from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.terminal import TerminalPanel, ViewFactory
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
+from benchhud.shell.qt_util import unelide_tabs
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
@@ -280,6 +281,7 @@ class MainWindow(QMainWindow):
         self._refresh_status()
 
         self._apply_config()
+        unelide_tabs(self)
 
     def _apply_config(self) -> None:
         shell = self._config.shell
@@ -1249,9 +1251,11 @@ class MainWindow(QMainWindow):
         cfg = self._config.terminal
         terminal = self._terminal
         if not TERMINAL_SUPPORTED:
-            panel.show_message("The terminal isn't available on Windows yet.")
+            panel.show_message("The terminal isn't available on Windows yet.", attachable=False)
         elif not cfg.enabled:
-            panel.show_message("The terminal is off. Turn it on in Preferences → Terminal.")
+            panel.show_message(
+                "The terminal is off. Turn it on in Preferences → Terminal.", attachable=False
+            )
         elif self._browser_warning:
             panel.show_message(f"The terminal can't start: {self._browser_warning}.")
         elif terminal is None or self._browser_server is None:
@@ -1304,6 +1308,12 @@ class MainWindow(QMainWindow):
         shell.window_height = self.height()
         shell.layout = bytes(self.saveState().toBase64()).decode("ascii")
         shell.layout_version = LAYOUT_VERSION
+
+    def childEvent(self, event: QChildEvent) -> None:
+        """Keep tabbed docks' titles whole: Qt makes their tab bars on demand."""
+        super().childEvent(event)
+        if event.polished() and isinstance(event.child(), QTabBar):
+            unelide_tabs(self)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._stop_demo()
