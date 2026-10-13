@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/IamMrCupp/benchhud/compare/v0.3.1...v0.4.0) (2026-10-13)
+
+
+### Features
+
+* **tools:** open command-line tools in the terminal, GUI tools as windows ([e662a05](https://github.com/IamMrCupp/benchhud/commit/e662a05cfcaf68943ee08bfd3874c63156edd207))
+
 ## [0.3.1](https://github.com/IamMrCupp/benchhud/compare/v0.3.0...v0.3.1) (2026-10-12)
 
 
