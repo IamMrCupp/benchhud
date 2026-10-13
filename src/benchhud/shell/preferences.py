@@ -13,6 +13,7 @@ import secrets
 from collections.abc import Callable
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -203,13 +204,16 @@ class PreferencesDialog(QDialog):
     # --- Tools -----------------------------------------------------------
 
     def _build_tools_tab(self) -> QWidget:
-        self.tools_table = QTableWidget(0, 2)
-        self.tools_table.setHorizontalHeaderLabels(["Name", "Command"])
+        self.tools_table = QTableWidget(0, 3)
+        self.tools_table.setHorizontalHeaderLabels(["Name", "Command", "Terminal"])
+        self.tools_table.horizontalHeaderItem(2).setToolTip(
+            "A command-line tool: open it in the Terminal panel instead of as a window"
+        )
         for tool in self._config.tools:
-            self._append_tool_row(tool.name, tool.command)
+            self._append_tool_row(tool.name, tool.command, tool.terminal)
 
         self.add_tool_button = QPushButton("Add")
-        self.add_tool_button.clicked.connect(lambda: self._append_tool_row("", ""))
+        self.add_tool_button.clicked.connect(lambda: self._append_tool_row("", "", False))
         self.remove_tool_button = QPushButton("Remove")
         self.remove_tool_button.clicked.connect(self._remove_selected_tool)
         self.detect_tools_button = QPushButton("Detect installed…")
@@ -232,11 +236,15 @@ class PreferencesDialog(QDialog):
         layout.addLayout(buttons)
         return widget
 
-    def _append_tool_row(self, name: str, command: str) -> None:
+    def _append_tool_row(self, name: str, command: str, terminal: bool = False) -> None:
         row = self.tools_table.rowCount()
         self.tools_table.insertRow(row)
         self.tools_table.setItem(row, 0, QTableWidgetItem(name))
         self.tools_table.setItem(row, 1, QTableWidgetItem(command))
+        check = QTableWidgetItem()
+        check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        check.setCheckState(Qt.CheckState.Checked if terminal else Qt.CheckState.Unchecked)
+        self.tools_table.setItem(row, 2, check)
 
     def open_tool_picker(self) -> ToolPickerDialog:
         """Scan for installed tools; add the ticked ones (returned for tests)."""
@@ -257,7 +265,7 @@ class PreferencesDialog(QDialog):
         for tool in tools:
             if tool.command in existing:
                 continue
-            self._append_tool_row(tool.name, tool.command)
+            self._append_tool_row(tool.name, tool.command, tool.terminal)
             existing.add(tool.command)
 
     def _remove_selected_tool(self) -> None:
@@ -270,8 +278,10 @@ class PreferencesDialog(QDialog):
         for row in range(self.tools_table.rowCount()):
             name = _cell(self.tools_table, row, 0)
             command = _cell(self.tools_table, row, 1)
+            check = self.tools_table.item(row, 2)
+            terminal = check is not None and check.checkState() == Qt.CheckState.Checked
             if name and command:
-                tools.append(ToolConfig(name=name, command=command))
+                tools.append(ToolConfig(name=name, command=command, terminal=terminal))
         return tools
 
     # --- Logging ---------------------------------------------------------

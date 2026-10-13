@@ -38,6 +38,27 @@ what it's attached to: your shell, a serial port, or the OWON.
 Everything under *On stream* applies to a serial console too: the read-only
 view, Pause stream, and nothing typed while paused ever reaching OBS.
 
+## Command-line tools
+
+Some bench tools have no window: `minipro`, `flashrom`, `avrdude`, `sigrok-cli`,
+OpenOCD, `picocom`. In the Tools pane they're marked **>_**. Clicking one types
+the command at the terminal's prompt **without pressing Enter**, so you add the
+arguments (`flashrom -p ch341a_spi -r dump.bin`) and run it yourself.
+
+- **Attached to a serial port?** benchhud asks before switching the panel back to
+  your shell, and the answer defaults to No.
+- **Terminal panel off** (or on Windows): the tool opens in a system terminal
+  window instead: Terminal.app on macOS, a console on Windows, and on Linux the
+  first of `x-terminal-emulator`, GNOME Terminal, Konsole, Xfce Terminal, kitty,
+  Alacritty or xterm. The window stays open at a shell when the tool exits.
+- **There's a GUI for it?** Tools → Find installed tools says so in the tooltip:
+  minipro has *minipro GUI* and *qtl866*, `sigrok-cli` has PulseView, `picocom`
+  has GtkTerm.
+
+Tools → Find installed tools marks command-line tools for you. For one you add
+by hand, tick **Terminal** in Preferences → Tools, or set `terminal = true` in
+its `[[tools]]` block.
+
 ## On stream
 
 Turn on *Also show it on stream*, then copy the *Stream link* into OBS as a Browser

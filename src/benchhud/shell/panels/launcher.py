@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from benchhud.config import ToolConfig
@@ -26,6 +27,10 @@ EMPTY_HINT = "No tools yet.\nAdd some in Preferences → Tools."
 class LauncherPanel(Panel):
     panel_id = "launcher"
     panel_title = "Tools"
+
+    #: A command-line tool was clicked (#225). The main window opens it in a
+    #: terminal: the Terminal panel when it can, else a system terminal window.
+    terminal_tool_requested = Signal(object)
 
     def __init__(
         self,
@@ -52,13 +57,22 @@ class LauncherPanel(Panel):
         if not self._tools:
             self._layout.addWidget(QLabel(EMPTY_HINT))
         for tool in self._tools:
-            button = QPushButton(tool.name)
+            button = QPushButton(f"{tool.name}  >_" if tool.terminal else tool.name)
+            if tool.terminal:
+                button.setToolTip("Command line: opens in the Terminal panel, ready for arguments")
             button.clicked.connect(lambda _=False, t=tool: self._launch(t))
             self._layout.addWidget(button)
             self.buttons[tool.name] = button
         self._layout.addStretch(1)
 
+    @property
+    def launcher(self) -> ToolLauncher:
+        return self._launcher
+
     def _launch(self, tool: ToolConfig) -> None:
+        if tool.terminal:
+            self.terminal_tool_requested.emit(tool)
+            return
         try:
             self._launcher.launch(tool)
         except Exception:

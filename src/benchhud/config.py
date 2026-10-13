@@ -83,6 +83,9 @@ class PanelsConfig:
 class ToolConfig:
     name: str
     command: str
+    # A command-line tool: it runs in a terminal (the Terminal panel, or a
+    # system terminal window) instead of being launched as a window (#225).
+    terminal: bool = False
 
 
 @dataclass
@@ -346,7 +349,9 @@ class Config:
         )
 
         cfg.tools = [
-            ToolConfig(name=t["name"], command=t["command"])
+            ToolConfig(
+                name=t["name"], command=t["command"], terminal=bool(t.get("terminal", False))
+            )
             for t in data.get("tools", [])
             if isinstance(t, Mapping) and "name" in t and "command" in t
         ]

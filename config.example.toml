@@ -158,6 +158,9 @@ viewer = "auto"                        # auto | openboardview | flexbv
 
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
+# `terminal = true` marks a command-line tool: its button types the command at
+# the Terminal panel's prompt (or opens a system terminal window when the panel
+# is off) instead of launching a window. Tools → Find installed tools sets it.
 [[tools]]
 name = "OpenBoardView"
 command = "openboardview"
@@ -165,3 +168,8 @@ command = "openboardview"
 [[tools]]
 name = "minipro-gui"
 command = "minipro-gui"
+
+[[tools]]
+name = "flashrom"
+command = "flashrom"
+terminal = true
