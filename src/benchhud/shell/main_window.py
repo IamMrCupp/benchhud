@@ -235,6 +235,10 @@ class MainWindow(QMainWindow):
         self.controls_panel = ControlsPanel(self._config)
         controls_dock = self.panels.add_panel(self.controls_panel, left)
         self.launcher_panel = LauncherPanel(self._config.tools)
+        self.launcher_panel.terminal_tool_requested.connect(self.run_tool_in_terminal)
+        # Asked before a CLI tool takes the terminal from a serial console. A
+        # seam so tests needn't click a dialog: (current target) -> go ahead?
+        self.confirm_terminal_switch = self._ask_terminal_switch
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
         self.controls_panel.changed.connect(self.render_composite)
@@ -548,6 +552,57 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self._refresh_status)
         dialog.open()
         return dialog
+
+    # --- command-line tools (#225) ---------------------------------------------
+
+    def run_tool_in_terminal(self, tool) -> None:
+        """Open a command-line tool where it can be used.
+
+        In the Terminal panel when it's running: the command goes at the shell
+        prompt without Enter, so the operator adds arguments and runs it.
+        Otherwise (the terminal is off, or on Windows) in a system terminal window.
+        """
+        cfg = self._config.terminal
+        if not (TERMINAL_SUPPORTED and cfg.enabled and self._terminal is not None):
+            self._run_tool_in_system_terminal(tool)
+            return
+        target = cfg.target or "shell"
+        if target != "shell":
+            if not self.confirm_terminal_switch(target):
+                return
+            self.set_terminal_target("shell", cfg.baud, cfg.line_ending, cfg.local_echo)
+        if self._terminal is None:  # the switch failed to bring a shell up
+            self._run_tool_in_system_terminal(tool)
+            return
+        self._terminal.write(f"{tool.command} ")
+        dock = self.panels.dock("terminal")
+        if dock is not None:
+            dock.show()
+            dock.raise_()
+        self.terminal_panel.focus_terminal()
+
+    def _run_tool_in_system_terminal(self, tool) -> None:
+        try:
+            self.launcher_panel.launcher.launch_in_system_terminal(tool)
+        except Exception as exc:  # no terminal emulator, or it wouldn't start
+            log.warning("couldn't open %s in a terminal: %s", tool.name, exc)
+            self.statusBar().showMessage(
+                f"Couldn't open {tool.name}: {exc}. Turn on the Terminal panel "
+                "(Preferences → Terminal) to run command-line tools inside benchhud.",
+                15000,
+            )
+
+    def _ask_terminal_switch(self, target: str) -> bool:
+        label = "the OWON console" if target == "owon" else target
+        answer = QMessageBox.question(
+            self,
+            "Switch the terminal?",
+            f"The terminal is connected to {label}. Switch it to your shell to run "
+            "this tool? That ends the serial session.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def reconfigure_tools(self) -> None:
         """Rebuild the Tools pane from config (after Preferences edits it)."""

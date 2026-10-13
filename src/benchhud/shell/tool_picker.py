@@ -77,7 +77,12 @@ class ToolPickerDialog(QDialog):
                     detected.command or "",
                 ]
             )
-            item.setToolTip(0, f"{tool.category} — {tool.description}")
+            tip = f"{tool.category} — {tool.description}"
+            if tool.terminal:
+                tip += "\nCommand line: opens in the Terminal panel."
+                if tool.gui:
+                    tip += f" GUI alternative: {', '.join(tool.gui)}."
+            item.setToolTip(0, tip)
             if detected.found:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 item.setCheckState(0, Qt.CheckState.Checked)
@@ -97,5 +102,11 @@ class ToolPickerDialog(QDialog):
             detected = item.data(0, Qt.ItemDataRole.UserRole)
             if detected is None or item.checkState(0) != Qt.CheckState.Checked:
                 continue
-            chosen.append(ToolConfig(name=detected.tool.name, command=detected.command))
+            chosen.append(
+                ToolConfig(
+                    name=detected.tool.name,
+                    command=detected.command,
+                    terminal=detected.tool.terminal,
+                )
+            )
         return chosen

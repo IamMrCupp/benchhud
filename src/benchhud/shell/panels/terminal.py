@@ -193,6 +193,11 @@ class TerminalPanel(Panel):
             self.echo_check.isChecked(),
         )
 
+    def focus_terminal(self) -> None:
+        """Give the terminal keyboard focus (a tool was just put at its prompt)."""
+        if self.view is not None:
+            self.view.setFocus()
+
     @property
     def url(self) -> str | None:
         """The page the view is showing, or None when a message is up."""

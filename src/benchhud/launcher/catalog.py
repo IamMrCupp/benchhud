@@ -51,6 +51,12 @@ class KnownTool:
     windows_install: tuple[str, str] | None = None
     # Which platforms this tool can exist on. Defaults to all three.
     platforms: tuple[str, ...] = ALL_PLATFORMS
+    # A command-line tool: it runs in a terminal, not as a window of its own
+    # (#225). The Tools pane opens it in the Terminal panel.
+    terminal: bool = False
+    # Catalog names of GUI tools that do the same job, offered alongside a
+    # command-line tool (e.g. minipro → "minipro GUI").
+    gui: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -87,8 +93,15 @@ KNOWN_TOOLS: tuple[KnownTool, ...] = (
     KnownTool(
         "minipro GUI",
         "Programmer",
-        "GUI for the minipro / TL866 chip programmer",
+        "GUI for the minipro / TL866 / T48 chip programmer",
         ("minipro-gui", "miniprogui"),
+        platforms=(LINUX,),
+    ),
+    KnownTool(
+        "qtl866",
+        "Programmer",
+        "Older GUI for minipro (TL866 family)",
+        ("qtl866",),
         platforms=(LINUX,),
     ),
     KnownTool(
@@ -97,6 +110,8 @@ KNOWN_TOOLS: tuple[KnownTool, ...] = (
         "minipro / TL866 CLI programmer",
         ("minipro",),
         platforms=(LINUX, MACOS),
+        terminal=True,
+        gui=("minipro GUI", "qtl866", "Xgpro"),
     ),
     KnownTool(
         "Xgpro",
@@ -106,8 +121,10 @@ KNOWN_TOOLS: tuple[KnownTool, ...] = (
         windows_install=("Xgpro", "Xgpro.exe"),
         platforms=(WINDOWS,),
     ),
-    KnownTool("flashrom", "Programmer", "Read/write SPI and BIOS flash", ("flashrom",)),
-    KnownTool("avrdude", "Programmer", "AVR programmer", ("avrdude",)),
+    KnownTool(
+        "flashrom", "Programmer", "Read/write SPI and BIOS flash", ("flashrom",), terminal=True
+    ),
+    KnownTool("avrdude", "Programmer", "AVR programmer", ("avrdude",), terminal=True),
     KnownTool(
         "DSView",
         "Logic analyzer",
@@ -124,14 +141,25 @@ KNOWN_TOOLS: tuple[KnownTool, ...] = (
         macos_app="PulseView",
         windows_install=("sigrok-PulseView", "pulseview.exe"),
     ),
-    KnownTool("sigrok-cli", "Logic analyzer", "sigrok command line", ("sigrok-cli",)),
-    KnownTool("OpenOCD", "Debug / JTAG", "On-chip debugger (JTAG/SWD)", ("openocd",)),
+    KnownTool(
+        "sigrok-cli",
+        "Logic analyzer",
+        "sigrok command line",
+        ("sigrok-cli",),
+        terminal=True,
+        gui=("PulseView", "DSView"),
+    ),
+    KnownTool(
+        "OpenOCD", "Debug / JTAG", "On-chip debugger (JTAG/SWD)", ("openocd",), terminal=True
+    ),
     KnownTool(
         "picocom",
         "Serial terminal",
         "Minimal serial terminal",
         ("picocom",),
         platforms=(LINUX, MACOS),
+        terminal=True,
+        gui=("GtkTerm", "PuTTY"),
     ),
     KnownTool(
         "minicom",
@@ -139,6 +167,8 @@ KNOWN_TOOLS: tuple[KnownTool, ...] = (
         "Serial terminal",
         ("minicom",),
         platforms=(LINUX, MACOS),
+        terminal=True,
+        gui=("GtkTerm", "PuTTY"),
     ),
     KnownTool(
         "GtkTerm",
@@ -174,8 +204,17 @@ KNOWN_TOOLS: tuple[KnownTool, ...] = (
         "qv4l2",
         "Camera",
         "V4L2 device control — handy for checking camera formats",
-        ("qv4l2", "v4l2-ctl"),
+        ("qv4l2",),
         platforms=(LINUX,),
+    ),
+    KnownTool(
+        "v4l2-ctl",
+        "Camera",
+        "V4L2 command line: list devices and formats",
+        ("v4l2-ctl",),
+        platforms=(LINUX,),
+        terminal=True,
+        gui=("qv4l2",),
     ),
 )
 
