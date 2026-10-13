@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/IamMrCupp/benchhud/compare/v0.4.0...v0.4.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **ui:** fit every panel in a narrow dock and stop clipping text ([2687449](https://github.com/IamMrCupp/benchhud/commit/26874493de524f41e02973229e6be5acfba0981a))
+
 ## [0.4.0](https://github.com/IamMrCupp/benchhud/compare/v0.3.1...v0.4.0) (2026-10-13)
 
 
