@@ -65,6 +65,7 @@ from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.controls import ControlsPanel
+from benchhud.shell.panels.flash import FlashPanel
 from benchhud.shell.panels.inventory import InventoryPanel
 from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
@@ -268,6 +269,12 @@ class MainWindow(QMainWindow):
         self._terminal_targets: list[tuple[str, str]] | None = None
         terminal_dock = self.panels.add_panel(self.terminal_panel, left)
         self.tabifyDockWidget(inventory_dock, terminal_dock)  # …and the terminal
+        self.flash_panel = FlashPanel(
+            self._config.flash, self._job_store, self.jobs_panel.selected_job_id
+        )
+        self.flash_panel.job_note_added.connect(self.jobs_panel.refresh_notes)
+        flash_dock = self.panels.add_panel(self.flash_panel, left)
+        self.tabifyDockWidget(terminal_dock, flash_dock)  # …and flashrom (#227)
 
         scope_dock.raise_()
         controls_dock.raise_()
