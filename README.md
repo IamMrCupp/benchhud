@@ -51,6 +51,9 @@ the scope" and turned into the bench's command center.
 - **Readings** — test-point measurements from the DMM, compared live with a
   known-good board of the same part number. A short shows up as LOW the moment
   you probe it. [More →](docs/READINGS.md)
+- **Power-on signatures** — the current draw for the first seconds after Output
+  ON, saved on the job and compared with a known-good board: a rail that never
+  comes up shows as LOW. [More →](docs/POWER-ON.md)
 
 Everything lives in dockable panels — arrange the bench the way you work, and the
 layout sticks across restarts.
@@ -149,6 +152,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [PACKAGING.md](docs/PACKAGING.md) | The packages: the Ubuntu `.deb`, the Windows MSI, the signed macOS `.app`, releases, and what CI builds when. |
 | [BROWSER-SOURCES.md](docs/BROWSER-SOURCES.md) | The data panels as OBS Browser sources: URLs, what goes on air. |
 | [TERMINAL.md](docs/TERMINAL.md) | The terminal panel and its read-only stream view. |
+| [POWER-ON.md](docs/POWER-ON.md) | Power-on current signatures compared with a known-good board. |
 | [READINGS.md](docs/READINGS.md) | Test-point readings compared with a known-good board. |
 | [FLASH.md](docs/FLASH.md) | The Flash panel: backing up and writing SPI chips with flashrom. |
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
