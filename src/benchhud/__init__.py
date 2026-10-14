@@ -5,4 +5,4 @@ telemetry, tool launcher), composites its output to a virtual camera for OBS,
 and drives live board-repair diagnosis on stream.
 """
 
-__version__ = "0.4.1"  # x-release-please-version
+__version__ = "0.5.0"  # x-release-please-version
