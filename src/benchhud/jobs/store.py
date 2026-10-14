@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS job_notes (
     text       TEXT NOT NULL,
     attachment TEXT
 );
+CREATE TABLE IF NOT EXISTS readings (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    point      TEXT NOT NULL,
+    mode       TEXT NOT NULL,
+    value      REAL,
+    status     TEXT,
+    unit       TEXT NOT NULL DEFAULT '',
+    reference  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 """
 
 # Fields a caller may update on a job (whitelist — never interpolate raw input).
@@ -79,6 +90,26 @@ class JobNote:
     created_at: str
     text: str
     attachment: str | None = None  # path to a captured image, if any
+
+
+@dataclass(frozen=True)
+class Reading:
+    """One measurement at a test point (#235).
+
+    ``value`` is None when the meter showed a status instead (``OL``: open).
+    ``reference`` marks a known-good board's reading: those become the
+    comparison for every later job on the same board number.
+    """
+
+    id: int
+    job_id: int
+    point: str
+    mode: str  # diode | ohm | vdc, or the meter's own token for anything else
+    value: float | None
+    status: str | None
+    unit: str
+    reference: bool
+    created_at: str
 
 
 def default_db_path() -> Path:
@@ -253,6 +284,82 @@ class JobStore:
             )
             for r in rows
         ]
+
+    # --- readings (#235) -------------------------------------------------
+
+    def add_reading(
+        self,
+        job_id: int,
+        point: str,
+        mode: str,
+        value: float | None,
+        *,
+        status: str | None = None,
+        unit: str = "",
+        reference: bool = False,
+    ) -> Reading:
+        point = normalize_point(point)
+        if not point:
+            raise ValueError("a reading needs a test point")
+        stamp = self._now()
+        cur = self._conn.execute(
+            "INSERT INTO readings (job_id, point, mode, value, status, unit, reference,"
+            " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (job_id, point, mode, value, status, unit, int(reference), stamp),
+        )
+        self._conn.commit()
+        row = self._conn.execute("SELECT * FROM readings WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return _reading(row)
+
+    def list_readings(self, job_id: int) -> list[Reading]:
+        """A job's readings, oldest first."""
+        rows = self._conn.execute(
+            "SELECT * FROM readings WHERE job_id = ? ORDER BY id ASC", (job_id,)
+        ).fetchall()
+        return [_reading(r) for r in rows]
+
+    def reference_readings(self, board_id: str, *, exclude_job: int | None = None) -> list[Reading]:
+        """Known-good readings for a board number, from every job on it."""
+        board_id = board_id.strip()
+        if not board_id:
+            return []
+        rows = self._conn.execute(
+            "SELECT readings.* FROM readings JOIN jobs ON jobs.id = readings.job_id"
+            " WHERE jobs.board_id = ? AND readings.reference = 1 AND readings.job_id != ?"
+            " ORDER BY readings.id ASC",
+            (board_id, -1 if exclude_job is None else exclude_job),
+        ).fetchall()
+        return [_reading(r) for r in rows]
+
+    def set_readings_reference(self, job_id: int, reference: bool) -> None:
+        """Mark all of a job's readings known-good (or not): after the fix is proven."""
+        self._conn.execute(
+            "UPDATE readings SET reference = ? WHERE job_id = ?", (int(reference), job_id)
+        )
+        self._conn.commit()
+
+    def delete_reading(self, reading_id: int) -> None:
+        self._conn.execute("DELETE FROM readings WHERE id = ?", (reading_id,))
+        self._conn.commit()
+
+
+def _reading(row: sqlite3.Row) -> Reading:
+    return Reading(
+        id=row["id"],
+        job_id=row["job_id"],
+        point=row["point"],
+        mode=row["mode"],
+        value=row["value"],
+        status=row["status"],
+        unit=row["unit"],
+        reference=bool(row["reference"]),
+        created_at=row["created_at"],
+    )
+
+
+def normalize_point(point: str) -> str:
+    """Test points compare case-insensitively: ``pp3v3_s5`` is ``PP3V3_S5``."""
+    return " ".join(point.split()).upper()
 
 
 def _job(row: sqlite3.Row) -> Job:
