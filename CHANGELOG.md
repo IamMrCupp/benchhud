@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/IamMrCupp/benchhud/compare/v0.4.1...v0.5.0) (2026-10-14)
+
+
+### Features
+
+* **flash:** a flashrom panel for backing up and writing SPI chips ([1e3917a](https://github.com/IamMrCupp/benchhud/commit/1e3917a0d3aa0a1ee00e234e8b78f28afd48c449))
+* **readings:** test-point readings compared with a known-good board ([2a81b8e](https://github.com/IamMrCupp/benchhud/commit/2a81b8e73d48e9e208987efeb7a57add255f9d49))
+
 ## [0.4.1](https://github.com/IamMrCupp/benchhud/compare/v0.4.0...v0.4.1) (2026-10-13)
 
 
