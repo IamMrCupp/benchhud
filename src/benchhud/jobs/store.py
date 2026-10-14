@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS readings (
     reference  INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS signatures (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    points     TEXT NOT NULL,
+    reference  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 """
 
 # Fields a caller may update on a job (whitelist — never interpolate raw input).
@@ -108,6 +115,17 @@ class Reading:
     value: float | None
     status: str | None
     unit: str
+    reference: bool
+    created_at: str
+
+
+@dataclass(frozen=True)
+class StoredSignature:
+    """A recorded power-on current curve (#236). ``points`` is its JSON."""
+
+    id: int
+    job_id: int
+    points: str
     reference: bool
     created_at: str
 
@@ -341,6 +359,61 @@ class JobStore:
     def delete_reading(self, reading_id: int) -> None:
         self._conn.execute("DELETE FROM readings WHERE id = ?", (reading_id,))
         self._conn.commit()
+
+    # --- power-on signatures (#236) ----------------------------------------
+
+    def add_signature(
+        self, job_id: int, points: str, *, reference: bool = False
+    ) -> StoredSignature:
+        cur = self._conn.execute(
+            "INSERT INTO signatures (job_id, points, reference, created_at) VALUES (?, ?, ?, ?)",
+            (job_id, points, int(reference), self._now()),
+        )
+        self._conn.commit()
+        return self._signature(int(cur.lastrowid))
+
+    def _signature(self, signature_id: int) -> StoredSignature:
+        row = self._conn.execute(
+            "SELECT * FROM signatures WHERE id = ?", (signature_id,)
+        ).fetchone()
+        return _stored_signature(row)
+
+    def list_signatures(self, job_id: int) -> list[StoredSignature]:
+        rows = self._conn.execute(
+            "SELECT * FROM signatures WHERE job_id = ? ORDER BY id ASC", (job_id,)
+        ).fetchall()
+        return [_stored_signature(r) for r in rows]
+
+    def reference_signatures(
+        self, board_id: str, *, exclude_job: int | None = None
+    ) -> list[StoredSignature]:
+        """Known-good power-on curves for a board number."""
+        board_id = board_id.strip()
+        if not board_id:
+            return []
+        rows = self._conn.execute(
+            "SELECT signatures.* FROM signatures JOIN jobs ON jobs.id = signatures.job_id"
+            " WHERE jobs.board_id = ? AND signatures.reference = 1 AND signatures.job_id != ?"
+            " ORDER BY signatures.id ASC",
+            (board_id, -1 if exclude_job is None else exclude_job),
+        ).fetchall()
+        return [_stored_signature(r) for r in rows]
+
+    def set_signature_reference(self, signature_id: int, reference: bool) -> None:
+        self._conn.execute(
+            "UPDATE signatures SET reference = ? WHERE id = ?", (int(reference), signature_id)
+        )
+        self._conn.commit()
+
+
+def _stored_signature(row: sqlite3.Row) -> StoredSignature:
+    return StoredSignature(
+        id=row["id"],
+        job_id=row["job_id"],
+        points=row["points"],
+        reference=bool(row["reference"]),
+        created_at=row["created_at"],
+    )
 
 
 def _reading(row: sqlite3.Row) -> Reading:

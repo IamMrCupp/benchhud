@@ -17,6 +17,7 @@ import logging
 import secrets
 import sys
 from collections.abc import Callable, Sequence
+from datetime import datetime
 
 import cv2
 from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, Signal
@@ -45,6 +46,8 @@ from benchhud.devices.discovery import (
 )
 from benchhud.instruments.owon_spm8104 import InstrumentLimits, open_device
 from benchhud.instruments.session import InstrumentSession
+from benchhud.instruments.signature import Signature, SignatureRecorder, compare, reference_at
+from benchhud.instruments.signature import Verdict as SignatureVerdict
 from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.inventory import (
     HttpInventorySource,
@@ -54,7 +57,7 @@ from benchhud.inventory import (
 )
 from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.fault import FaultMonitor, format_fault_note
-from benchhud.jobs.store import JobStore, default_db_path
+from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.composite import colorize, compose
 from benchhud.overlay.graph import draw_graph_overlay
@@ -76,6 +79,7 @@ from benchhud.shell.panels.terminal import TerminalPanel, ViewFactory
 from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 from benchhud.shell.qt_util import unelide_tabs
+from benchhud.shell.signature_image import render_signature
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
@@ -205,6 +209,10 @@ class MainWindow(QMainWindow):
         self._instrument_timer: QTimer | None = None
         self._instrument_t = 0.0
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
+        # Power-on signatures (#236): the latest telemetry time anchors a recording.
+        self._signature_recorder = SignatureRecorder()
+        self._last_signature: StoredSignature | None = None
+        self._telemetry_t: float | None = None
         self._ticket_source: TicketSource = self._make_ticket_source()
         self._inventory_source: InventorySource = self._make_inventory_source()
         self._board_library = self._make_board_library()
@@ -235,6 +243,7 @@ class MainWindow(QMainWindow):
         self.power_panel = PowerPanel()
         self.panels.add_panel(self.power_panel, right)
         self._wire_supply_controls()
+        self._wire_signature()
         self.controls_panel = ControlsPanel(self._config)
         controls_dock = self.panels.add_panel(self.controls_panel, left)
         self.launcher_panel = LauncherPanel(self._config.tools)
@@ -431,6 +440,7 @@ class MainWindow(QMainWindow):
         board logs itself to the active job.
         """
         self.power_panel.update_from_snapshot(snapshot, t)
+        self._feed_signature(snapshot, t)
         self.readings_panel.update_meter(snapshot.dmm if snapshot.ok else None)
         self._publish_telemetry()
         if snapshot.current is not None:
@@ -1021,11 +1031,119 @@ class MainWindow(QMainWindow):
         future = session.submit(action)
         future.add_done_callback(lambda f: self.control_done.emit(what, f))
 
+    # --- power-on signatures (#236) ------------------------------------------
+
+    def _wire_signature(self) -> None:
+        bar = self.power_panel.signature
+        bar.record_requested.connect(self.start_signature)
+        bar.mark_good_requested.connect(self.mark_signature_known_good)
+
+    def _signature_references(self) -> tuple[str, list[Signature]]:
+        """The selected job's board number and its known-good curves."""
+        job_id = self.jobs_panel.selected_job_id()
+        job = self._job_store.get_job(job_id) if job_id is not None else None
+        board = (job.board_id or "").strip() if job is not None else ""
+        stored = self._job_store.reference_signatures(board, exclude_job=job_id)
+        return board, [Signature.from_json(s.points) for s in stored]
+
+    def start_signature(self) -> None:
+        """Record the current draw for the next few seconds, from now."""
+        bar = self.power_panel.signature
+        if self._telemetry_t is None:
+            bar.show_status(
+                "No supply readings to record. Turn on instrument telemetry first.", error=True
+            )
+            return
+        self._signature_recorder.start(self._telemetry_t)
+        _, references = self._signature_references()
+        chart = self.power_panel.chart
+        if references:
+            window = self._signature_recorder.window
+            steps = [i * 0.2 for i in range(int(window / 0.2) + 1)]
+            chart.set_reference(
+                [(t, reference_at(references, t)) for t in steps], self._telemetry_t
+            )
+        else:
+            chart.clear_reference()
+        bar.show_status(f"Recording the power-on for {self._signature_recorder.window:.0f} s…")
+
+    def _feed_signature(self, snapshot: TelemetrySnapshot, t: float) -> None:
+        self._telemetry_t = t
+        if snapshot.voltage is None or snapshot.current is None:
+            return
+        recorder = self._signature_recorder
+        if not recorder.recording:
+            return
+        signature = recorder.feed(t, snapshot.voltage, snapshot.current)
+        if signature is None:
+            self.power_panel.signature.show_status(
+                f"Recording the power-on… {recorder.elapsed:.0f} / {recorder.window:.0f} s"
+            )
+            return
+        self._signature_done(signature)
+
+    def _signature_done(self, signature: Signature) -> None:
+        bar = self.power_panel.signature
+        board, references = self._signature_references()
+        result = compare(signature, references)
+        summary = (
+            f"peak {signature.peak:.3f} A, settled {signature.settled:.3f} A over "
+            f"{signature.duration:.0f} s"
+        )
+        flagged = result.verdict in (SignatureVerdict.LOW, SignatureVerdict.HIGH)
+        job_id = self.jobs_panel.selected_job_id()
+        if job_id is None:
+            self._last_signature = None
+            bar.good_button.setEnabled(False)
+            bar.show_status(
+                f"Power-on: {summary}, {result.describe()}. Select a job to keep it.",
+                error=flagged,
+            )
+            return
+        self._last_signature = self._job_store.add_signature(job_id, signature.to_json())
+        attachment = self._write_signature_files(job_id, signature, references, board)
+        self._job_store.add_note(
+            job_id, f"Power-on signature: {summary}, {result.describe()}.", attachment=attachment
+        )
+        self.jobs_panel.refresh_notes()
+        bar.good_button.setEnabled(True)
+        bar.show_status(f"Power-on: {summary}, {result.describe()}.", error=flagged)
+
+    def _write_signature_files(
+        self, job_id: int, signature: Signature, references: list[Signature], board: str
+    ) -> str | None:
+        """The chart (PNG, the note's attachment) and the raw data (CSV) beside it."""
+        directory = self._job_store.attachments_dir(job_id)
+        if directory is None:
+            return None
+        stem = directory / f"power-on-{datetime.now():%Y%m%d-%H%M%S}"
+        title = f"Power-on current, board {board}" if board else "Power-on current"
+        render_signature(signature, references, title=title).save(str(stem) + ".png")
+        (directory / (stem.name + ".csv")).write_text(signature.to_csv())
+        return str(stem) + ".png"
+
+    def mark_signature_known_good(self) -> None:
+        bar = self.power_panel.signature
+        stored = self._last_signature
+        if stored is None:
+            return
+        job = self._job_store.get_job(stored.job_id)
+        if job is None or not (job.board_id or "").strip():
+            bar.show_status(
+                "This job has no board number, so the curve can't be a reference yet.",
+                error=True,
+            )
+            return
+        self._job_store.set_signature_reference(stored.id, True)
+        bar.show_status(f"That curve is now the known-good reference for board {job.board_id}.")
+
     def _supply_command_done(self, what: str, future) -> None:
         error = future.exception()
         supply = self.power_panel.supply
         if error is None:
             supply.show_status(f"{what}: done.")
+            if what == "Output ON":
+                self.start_signature()
         else:
             supply.show_status(f"{what}: not done. {error}", error=True)
 
