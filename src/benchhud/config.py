@@ -241,6 +241,14 @@ class BoardsConfig:
 
 
 @dataclass
+class FlashConfig:
+    """The flashrom panel (#227): which flashrom, and the last programmer used."""
+
+    command: str = "flashrom"  # on PATH, or an absolute path
+    programmer: str = "ch341a_spi"  # flashrom's -p value
+
+
+@dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -256,6 +264,7 @@ class Config:
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
+    flash: FlashConfig = field(default_factory=FlashConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -347,6 +356,7 @@ class Config:
             data.get("boards", {}),
             ("library_dir", "extensions", "schematic_extensions", "viewer"),
         )
+        _apply(cfg.flash, data.get("flash", {}), ("command", "programmer"))
 
         cfg.tools = [
             ToolConfig(

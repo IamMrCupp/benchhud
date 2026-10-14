@@ -156,6 +156,12 @@ extensions = ["obv", "brd", "bdv"]     # board-view formats
 schematic_extensions = ["pdf"]         # schematic formats filed alongside
 viewer = "auto"                        # auto | openboardview | flexbv
 
+[flash]
+# The Flash panel: read, back up and write SPI flash chips with flashrom. A
+# backup is two reads that must match; dumps are filed with the selected job.
+command = "flashrom"      # on PATH, or an absolute path
+programmer = "ch341a_spi" # flashrom's -p value; the panel remembers the last one
+
 # External tools surfaced by the launcher panel (Phase 7). Repeat the block per
 # tool; `command` is resolved on PATH (or give an absolute path / AppImage).
 # `terminal = true` marks a command-line tool: its button types the command at
