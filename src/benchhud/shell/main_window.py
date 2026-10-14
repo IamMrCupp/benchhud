@@ -70,6 +70,7 @@ from benchhud.shell.panels.inventory import InventoryPanel
 from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
 from benchhud.shell.panels.power import PowerPanel
+from benchhud.shell.panels.readings import ReadingsPanel
 from benchhud.shell.panels.scope import ScopePanel
 from benchhud.shell.panels.terminal import TerminalPanel, ViewFactory
 from benchhud.shell.panels.thermal import ThermalPanel
@@ -275,6 +276,10 @@ class MainWindow(QMainWindow):
         self.flash_panel.job_note_added.connect(self.jobs_panel.refresh_notes)
         flash_dock = self.panels.add_panel(self.flash_panel, left)
         self.tabifyDockWidget(terminal_dock, flash_dock)  # …and flashrom (#227)
+        self.readings_panel = ReadingsPanel(self._job_store, self.jobs_panel.selected_job_id)
+        self.jobs_panel.job_changed.connect(self.readings_panel.refresh)
+        readings_dock = self.panels.add_panel(self.readings_panel, left)
+        self.tabifyDockWidget(flash_dock, readings_dock)  # …and readings (#235)
 
         scope_dock.raise_()
         controls_dock.raise_()
@@ -426,6 +431,7 @@ class MainWindow(QMainWindow):
         board logs itself to the active job.
         """
         self.power_panel.update_from_snapshot(snapshot, t)
+        self.readings_panel.update_meter(snapshot.dmm if snapshot.ok else None)
         self._publish_telemetry()
         if snapshot.current is not None:
             self._check_fault(snapshot.current)
