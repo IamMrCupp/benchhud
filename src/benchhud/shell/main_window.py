@@ -43,6 +43,7 @@ from benchhud.capture.thermal import Y16Camera
 from benchhud.config import Config, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import (
+    SERIAL_BY_ID_DIR,
     CameraDevice,
     DeviceScanner,
     SystemDeviceScanner,
@@ -342,7 +343,11 @@ class MainWindow(QMainWindow):
         self._apply_config()
         unelide_tabs(self)
 
-    def _stabilise_camera_paths(self, stable: Callable[[str], str | None] = stable_path) -> None:
+    def _stabilise_camera_paths(
+        self,
+        stable: Callable[[str], str | None] = stable_path,
+        serial_stable: Callable[[str], str | None] | None = None,
+    ) -> None:
         """Swap a configured /dev/videoN for its stable by-id link (#257).
 
         A camera that drops off USB can come back under another number; its
@@ -351,7 +356,18 @@ class MainWindow(QMainWindow):
         """
         if not sys.platform.startswith("linux"):
             return
+        if serial_stable is None:
+
+            def serial_stable(path: str) -> str | None:
+                return stable_path(path, SERIAL_BY_ID_DIR)
+
         panels = self._config.panels
+        port = panels.telemetry.port.strip()
+        if port.startswith("/") and os.path.basename(port).startswith("tty"):
+            link = serial_stable(port)
+            if link:
+                log.info("instrument port %s is now configured as %s", port, link)
+                panels.telemetry.port = link
         for panel in (panels.scope, panels.thermal):
             device = panel.device.strip()
             if device.startswith("/") and os.path.basename(device).startswith("video"):
@@ -1569,7 +1585,9 @@ class MainWindow(QMainWindow):
         owon_port = self._config.panels.telemetry.port
         if target == "shell":
             return login_shell(cfg.shell), None
-        if target == "owon" or target == owon_port:
+        # Matched by device, not by spelling: /dev/ttyUSB0 and its by-id link are
+        # the same OWON, and a second handle would interleave with the polling.
+        if target == "owon" or (owon_port and same_device(target, owon_port)):
             # Never a second handle on the OWON: every line goes through the
             # running session, which also means reconnecting if it's replaced.
             session = self._instrument_session
@@ -1595,7 +1613,7 @@ class MainWindow(QMainWindow):
         except Exception:
             ports = []
         for port in ports:
-            if port.device == owon_port:
+            if owon_port and same_device(port.device, owon_port):
                 continue  # it's the OWON: reached through its session, above
             label = f"{port.device} — {port.description}" if port.description else port.device
             targets.append((label, port.device))
@@ -1608,7 +1626,8 @@ class MainWindow(QMainWindow):
         the new session rather than staying on the old one.
         """
         cfg = self._config.terminal
-        if target == self._config.panels.telemetry.port:
+        owon_port = self._config.panels.telemetry.port
+        if owon_port and same_device(target, owon_port):
             target = "owon"
         cfg.target, cfg.baud, cfg.line_ending, cfg.local_echo = target, baud, line_ending, echo
         self.restart_browser_sources()
