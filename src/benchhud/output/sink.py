@@ -19,6 +19,7 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from benchhud.output.loopback_probe import diagnose as diagnose_loopback
 from benchhud.output.v4l2 import V4l2LoopbackSink
 
 log = logging.getLogger(__name__)
@@ -137,4 +138,6 @@ def open_output_sink(device: str, width: int, height: int) -> OutputSink:
         return V4l2LoopbackSink(device, width, height)
     except (OSError, RuntimeError) as exc:
         log.warning("virtual-camera output unavailable on %s: %s", device, exc)
-        return NullSink(width, height, reason=f"{device} unavailable ({exc})")
+        # Say which of the usual problems it is (#240); the raw error otherwise.
+        reason = diagnose_loopback(device) or f"{device} unavailable ({exc})"
+        return NullSink(width, height, reason=reason)
