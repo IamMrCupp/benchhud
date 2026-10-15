@@ -59,6 +59,20 @@ function draw(data) {
   }
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
+  // The known-good power-on curve (#263): dashed and quiet, under the live traces,
+  // on the current trace's scale.
+  const reference = (data && data.reference) || [];
+  if (reference.length >= 2) {
+    ctx.strokeStyle = "#8a93a3";
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    reference.forEach(([x, y], i) => {
+      const px = x * w, py = (1 - y) * (h - 4) + 2;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   for (const s of drawable) {
     ctx.strokeStyle = s.colour;
     ctx.beginPath();

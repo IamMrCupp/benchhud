@@ -87,6 +87,14 @@ class PowerChart(QWidget):
         """The samples behind the chart (the on-stream graph overlay reads these too)."""
         return self._history
 
+    @property
+    def reference(self) -> list[tuple[float, float]]:
+        """The known-good curve as (time, amps) on the history's clock, if any.
+
+        The stream's graph overlay and browser source draw the same curve (#263).
+        """
+        return list(self._reference)
+
     def set_reference(self, points: list[tuple[float, float]], t0: float) -> None:
         """Show a known-good curve of (seconds after power-on, amps) from ``t0``."""
         self._reference = [(t0 + t, a) for t, a in points]

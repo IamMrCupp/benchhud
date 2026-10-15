@@ -925,6 +925,7 @@ class MainWindow(QMainWindow):
                 stack=footprint.height if stacked else 0,
                 width=footprint.width if stacked else None,
                 margin=footprint.margin if stacked else None,
+                reference=self.power_panel.chart.reference,
             )
         return frame
 
@@ -1673,6 +1674,7 @@ class MainWindow(QMainWindow):
             graph_payload(
                 self.power_panel.chart.history.samples(),
                 self._config.graph_overlay.window_seconds,
+                reference=self.power_panel.chart.reference,
             ),
         )
 
