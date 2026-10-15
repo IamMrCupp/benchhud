@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/IamMrCupp/benchhud/compare/v0.5.0...v0.6.0) (2026-10-15)
+
+
+### Features
+
+* **power:** record power-on current signatures and compare with a known-good board ([6e09066](https://github.com/IamMrCupp/benchhud/commit/6e09066de3eb808119485d4d8d19e8f88cbe68fd))
+
+
+### Bug Fixes
+
+* **output:** say why the loopback device is missing, and offer the ones that exist ([c724ff1](https://github.com/IamMrCupp/benchhud/commit/c724ff1618373d0b9fc598e67b443b3f13617167))
+
 ## [0.5.0](https://github.com/IamMrCupp/benchhud/compare/v0.4.1...v0.5.0) (2026-10-14)
 
 
