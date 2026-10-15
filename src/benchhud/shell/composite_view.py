@@ -9,8 +9,8 @@ one feed is live, and a hint when neither is.
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QResizeEvent
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from benchhud.shell.qt_image import bgr_to_qimage
@@ -23,6 +23,9 @@ _PLACEHOLDER = (
 
 class CompositeView(QWidget):
     """Displays the composited BGR frame, scaled to fit."""
+
+    #: A click on the picture, in the frame's own pixels (thermal calibration, #243).
+    clicked = Signal(float, float)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -66,3 +69,28 @@ class CompositeView(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._render()
+
+    def frame_point(self, pos: QPointF) -> tuple[float, float] | None:
+        """Where a point in this widget falls on the frame, or None if off it."""
+        shown = self._label.pixmap()
+        if self._source_pixmap is None or shown is None or shown.isNull():
+            return None
+        local = self._label.mapFrom(self, pos.toPoint())
+        left = (self._label.width() - shown.width()) / 2.0
+        top = (self._label.height() - shown.height()) / 2.0
+        x, y = local.x() - left, local.y() - top
+        if not (0 <= x < shown.width() and 0 <= y < shown.height()):
+            return None
+        source = self._source_pixmap
+        return x * source.width() / shown.width(), y * source.height() / shown.height()
+
+    def set_picking(self, picking: bool) -> None:
+        """A crosshair while a click is wanted."""
+        cursor = Qt.CursorShape.CrossCursor if picking else Qt.CursorShape.ArrowCursor
+        self.setCursor(cursor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        point = self.frame_point(event.position())
+        if point is not None and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(*point)
+        super().mousePressEvent(event)
