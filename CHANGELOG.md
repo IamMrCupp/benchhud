@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/IamMrCupp/benchhud/compare/v0.8.0...v0.9.0) (2026-10-15)
+
+
+### Features
+
+* **overlay:** compare the scope with a known-good board's reference ([6031749](https://github.com/IamMrCupp/benchhud/commit/6031749bfb65e6af395cf6c189d7df7afea30a89))
+* **overlay:** quarter turns and a rotation-aware fit for a portrait thermal ([79581d8](https://github.com/IamMrCupp/benchhud/commit/79581d8bcf329148b8923820dd28b1c0d2f1e121))
+
+
+### Bug Fixes
+
+* **capture:** keep cameras by their stable names so they reconnect after a drop ([a3380b8](https://github.com/IamMrCupp/benchhud/commit/a3380b8489a6838d39dda7de7fe99b80282bc34f))
+
 ## [0.8.0](https://github.com/IamMrCupp/benchhud/compare/v0.7.0...v0.8.0) (2026-10-15)
 
 
