@@ -5,6 +5,7 @@
 
 ### Features
 
+* **flash:** a minipro panel for the T48 ([#254](https://github.com/IamMrCupp/benchhud/pull/254))
 * **overlay:** compare the scope with a known-good board's reference ([6031749](https://github.com/IamMrCupp/benchhud/commit/6031749bfb65e6af395cf6c189d7df7afea30a89))
 * **overlay:** quarter turns and a rotation-aware fit for a portrait thermal ([79581d8](https://github.com/IamMrCupp/benchhud/commit/79581d8bcf329148b8923820dd28b1c0d2f1e121))
 
