@@ -21,7 +21,7 @@ from datetime import datetime
 
 import cv2
 from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence
+from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabBar, QWidget
 
 from benchhud import __version__
@@ -59,9 +59,11 @@ from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.output.sink import OutputSink, open_output_sink
+from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
 from benchhud.overlay.composite import colorize, compose
 from benchhud.overlay.graph import draw_graph_overlay
 from benchhud.overlay.telemetry import Footprint, MeterReadout, draw_telemetry_overlay_sized
+from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.about import about_html
 from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
@@ -254,6 +256,14 @@ class MainWindow(QMainWindow):
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
         self.controls_panel.changed.connect(self.render_composite)
+        # Two-point thermal calibration (#243).
+        self._calibration: list[Pair] | None = None
+        self._before_calibration: RegistrationTransform | None = None
+        self.controls_panel.calibrate_requested.connect(self.start_calibration)
+        self.controls_panel.undo_requested.connect(self.undo_calibration)
+        self.composite_view.clicked.connect(self.calibration_click)
+        cancel = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        cancel.activated.connect(self.cancel_calibration)
         self.jobs_panel = JobsPanel(
             self._job_store,
             capture_provider=self.capture_context,
@@ -679,6 +689,84 @@ class MainWindow(QMainWindow):
             self.controls_panel.set_transform(transform)
             log.info("thermal registration converted to the centred placement: %s", transform)
         self._show_composite(compose(scope, temps, transform, settings))
+
+    # --- thermal calibration (#243) --------------------------------------------
+
+    @property
+    def calibrating(self) -> bool:
+        return self._calibration is not None
+
+    def start_calibration(self) -> None:
+        panel = self.controls_panel
+        if self.scope_panel.last_frame is None or self.thermal_panel.last_temps is None:
+            panel.show_calibration(
+                "Calibration needs both cameras running: the scope and the thermal.",
+                error=True,
+            )
+            return
+        self._calibration = []
+        self.composite_view.set_picking(True)
+        panel.show_calibration(
+            "1 of 2: touch the hot iron tip to the board, then click the tip in the "
+            "main view. Esc cancels."
+        )
+
+    def calibration_click(self, x: float, y: float) -> None:
+        if self._calibration is None:
+            return
+        panel = self.controls_panel
+        temps = self.thermal_panel.last_temps
+        scope = self.scope_panel.last_frame
+        if temps is None or scope is None:
+            self.cancel_calibration()
+            return
+        try:
+            tip, celsius = find_tip(temps)
+        except CalibrationError as exc:
+            panel.show_calibration(str(exc), error=True)
+            return
+        self._calibration.append(Pair(tip, (x, y), celsius))
+        if len(self._calibration) == 1:
+            panel.show_calibration(
+                f"Got the first spot ({celsius:.0f} °C). 2 of 2: move the tip somewhere "
+                "far from it, then click the tip again."
+            )
+            return
+        first, second = self._calibration
+        src = (temps.shape[1], temps.shape[0])
+        dst = (scope.shape[1], scope.shape[0])
+        try:
+            transform = solve(first, second, src, dst)
+        except CalibrationError as exc:
+            self._calibration = [first]  # keep the first spot, retry the second
+            panel.show_calibration(str(exc), error=True)
+            return
+        self._before_calibration = panel.current_transform()
+        self._finish_calibration()
+        panel.set_transform(transform)
+        panel.undo_button.setEnabled(True)
+        panel.show_calibration(
+            f"Calibrated: scale {transform.scale:.2f}, rotation "
+            f"{transform.rotation_deg:.1f}°. Undo goes back."
+        )
+
+    def cancel_calibration(self) -> None:
+        if self._calibration is None:
+            return
+        self._finish_calibration()
+        self.controls_panel.show_calibration("")
+
+    def _finish_calibration(self) -> None:
+        self._calibration = None
+        self.composite_view.set_picking(False)
+
+    def undo_calibration(self) -> None:
+        if self._before_calibration is None:
+            return
+        self.controls_panel.set_transform(self._before_calibration)
+        self._before_calibration = None
+        self.controls_panel.undo_button.setEnabled(False)
+        self.controls_panel.show_calibration("Back to the previous alignment.")
 
     def _show_composite(self, frame) -> None:
         """Put one composed frame on screen and, if open, out to the sink.

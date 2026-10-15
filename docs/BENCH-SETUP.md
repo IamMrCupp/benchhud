@@ -196,9 +196,21 @@ Bring-up checklist:
 3. **Meter reads the OWON** — V/A/W and the DMM header update.
 4. **OBS sees `benchhud`** — add a Video Capture Device source and pick the
    loopback node. The composite should appear and update smoothly.
-5. **Register the thermal onto the scope** — with scale 1.0 / offset 0,0 the
-   thermal lands in the frame's top-left corner. Nudge scale/offset in the
-   Controls dock until the bloom sits on the component; it's saved for next time.
+5. **Line the thermal up with the scope.** The thermal starts centred and
+   filling the view (scale 1.0). The quick way is **Calibrate…** in the Controls
+   dock:
+   1. Touch a hot iron tip to the board and click the tip in the main view.
+   2. Move the tip well away (opposite corners of the scope's view work best)
+      and click it again.
+
+   benchhud finds the tip in the thermal image itself and works out the scale,
+   rotation and offset. **Undo** goes back, and Esc cancels halfway. Fine-tune
+   with the Scale and Offset fields if you like; it's all saved for next time.
+
+   The thermal camera usually sees far more than the microscope, so expect a
+   scale well above 1. Changing the scope's focus height shifts the alignment a
+   little (the cameras look from different angles), so calibrate at your working
+   height.
 
 Once the hardware's up, the bench-workflow docs take over: [JOBS.md](JOBS.md)
 for the repair log (captures, automatic fault logging, reports) and

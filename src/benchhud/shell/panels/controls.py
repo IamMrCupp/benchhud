@@ -14,6 +14,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
     QSlider,
     QWidget,
 )
@@ -39,6 +42,8 @@ class ControlsPanel(Panel):
     panel_title = "Controls"
 
     changed = Signal()
+    calibrate_requested = Signal()
+    undo_requested = Signal()
 
     def __init__(self, config: Config | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -79,6 +84,22 @@ class ControlsPanel(Panel):
         form.addRow("Colormap", self.colormap_combo)
         form.addRow("Opacity", self.alpha_slider)
         form.addRow("Threshold", self.threshold_spin)
+        self.calibrate_button = QPushButton("Calibrate…")
+        self.calibrate_button.setToolTip("Line the thermal up with two touches of a hot iron tip")
+        self.calibrate_button.clicked.connect(self.calibrate_requested)
+        self.undo_button = QPushButton("Undo")
+        self.undo_button.setToolTip("Go back to the alignment before the last calibration")
+        self.undo_button.setEnabled(False)
+        self.undo_button.clicked.connect(self.undo_requested)
+        self.calibration_status = QLabel()
+        self.calibration_status.setWordWrap(True)
+        self.calibration_status.setVisible(False)
+        calibrate_row = QHBoxLayout()
+        calibrate_row.addWidget(self.calibrate_button, stretch=1)
+        calibrate_row.addWidget(self.undo_button)
+
+        form.addRow(calibrate_row)
+        form.addRow(self.calibration_status)
         form.addRow("Scale", self.scale_spin)
         form.addRow("Offset X", self.offset_x_spin)
         form.addRow("Offset Y", self.offset_y_spin)
@@ -114,6 +135,12 @@ class ControlsPanel(Panel):
             rotation_deg=self.rotation_spin.value(),
             fit=self._fit,
         )
+
+    def show_calibration(self, text: str, *, error: bool = False) -> None:
+        """Calibration's step-by-step prompt (empty hides it)."""
+        self.calibration_status.setText(text)
+        self.calibration_status.setVisible(bool(text))
+        self.calibration_status.setStyleSheet("color: #ff7a7a;" if error else "")
 
     def set_transform(self, transform: RegistrationTransform) -> None:
         """Show (and save) a transform found elsewhere: migration, calibration."""
