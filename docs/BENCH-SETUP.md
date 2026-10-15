@@ -212,6 +212,16 @@ Bring-up checklist:
    little (the cameras look from different angles), so calibrate at your working
    height.
 
+   - **Use the thermal's macro lens for board work.** The bare lens sees a whole
+     room and goes soft a few centimetres away. The macro lens narrows the view
+     to a patch of board, so far more of its 256×192 pixels land on the parts
+     you're probing, and it focuses close. Mount the camera at the lens's
+     working distance, and calibrate again after fitting or removing it.
+   - **A portrait thermal on a landscape scope** (the T256s is 192×256): use ⟲
+     / ⟳ beside Rotation to turn it 90° at a time. The fit follows the turn, so
+     it still fills the view at Scale 1.00. Calibrate… works out the turn by
+     itself.
+
 Once the hardware's up, the bench-workflow docs take over: [JOBS.md](JOBS.md)
 for the repair log (captures, automatic fault logging, reports) and
 [INTAKE.md](INTAKE.md) if you're pulling tickets from a shop intake system.

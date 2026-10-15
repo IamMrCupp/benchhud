@@ -712,9 +712,9 @@ class MainWindow(QMainWindow):
             self._show_composite(colorize(temps, settings.tmin, settings.tmax, settings.colormap))
             return
         transform = self.controls_panel.current_transform()
-        if not transform.fit:
-            # A transform saved before #242: convert it to the centred placement
-            # now that both frame sizes are known. Same picture, new numbers.
+        if not transform.current:
+            # A transform saved before #242 or #259: convert it to the current
+            # placement now that both frame sizes are known. Same picture, new numbers.
             src = (temps.shape[1], temps.shape[0])
             dst = (scope.shape[1], scope.shape[0])
             transform = transform.migrated(src, dst)
