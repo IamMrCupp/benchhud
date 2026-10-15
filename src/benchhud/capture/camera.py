@@ -24,6 +24,8 @@ import numpy as np
 # import time (cv2 is only touched inside the default factory).
 _CAP_PROP_FRAME_WIDTH = 3
 _CAP_PROP_FRAME_HEIGHT = 4
+_CAP_PROP_FOURCC = 6
+_FOURCC_MJPG = 0x47504A4D  # "MJPG", little-endian
 
 
 class Capture(Protocol):
@@ -34,6 +36,8 @@ class Capture(Protocol):
     def read(self) -> tuple[bool, Any]: ...
 
     def get(self, prop_id: int) -> float: ...
+
+    def set(self, prop_id: int, value: float) -> bool: ...
 
     def release(self) -> None: ...
 
@@ -66,9 +70,13 @@ class CameraFrameSource:
         self,
         device: int | str = 0,
         *,
+        size: tuple[int, int] | None = None,
         capture_factory: CaptureFactory | None = None,
     ) -> None:
         self._device = parse_device(device)
+        # The resolution to ask for (#247); None takes the camera's default.
+        self._requested = size if size and size[0] > 0 and size[1] > 0 else None
+        self.size_note: str | None = None
         self._factory = capture_factory or _default_factory
         self._capture: Capture | None = None
         self._size = (0, 0)
@@ -94,11 +102,27 @@ class CameraFrameSource:
 
         self._capture = capture
         self._last_error = None
+        if self._requested is not None:
+            self._request_size(capture, self._requested)
         self._size = (
             int(capture.get(_CAP_PROP_FRAME_WIDTH)),
             int(capture.get(_CAP_PROP_FRAME_HEIGHT)),
         )
+        self.size_note = None
+        if self._requested is not None and self._size != self._requested:
+            want, got = self._requested, self._size
+            self.size_note = f"asked for {want[0]}x{want[1]}, the camera gave {got[0]}x{got[1]}"
         return True
+
+    @staticmethod
+    def _request_size(capture: Capture, size: tuple[int, int]) -> None:
+        """MJPG first: it's what reaches 1080p and 4K over USB 2."""
+        setter = getattr(capture, "set", None)
+        if setter is None:
+            return
+        setter(_CAP_PROP_FOURCC, _FOURCC_MJPG)
+        setter(_CAP_PROP_FRAME_WIDTH, size[0])
+        setter(_CAP_PROP_FRAME_HEIGHT, size[1])
 
     def release(self) -> None:
         if self._capture is not None:

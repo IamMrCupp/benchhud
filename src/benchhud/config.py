@@ -57,6 +57,9 @@ class OutputConfig:
 class ScopePanelConfig:
     enabled: bool = True
     device: str = "/dev/video4"
+    # The resolution to ask the camera for (#247); 0 x 0 takes its default.
+    width: int = 0
+    height: int = 0
 
 
 @dataclass
@@ -294,7 +297,9 @@ class Config:
         )
 
         panels_d = data.get("panels", {})
-        _apply(cfg.panels.scope, panels_d.get("scope", {}), ("enabled", "device"))
+        _apply(
+            cfg.panels.scope, panels_d.get("scope", {}), ("enabled", "device", "width", "height")
+        )
         _apply(cfg.panels.thermal, panels_d.get("thermal", {}), ("enabled", "device"))
         _apply(
             cfg.panels.telemetry,

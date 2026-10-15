@@ -124,7 +124,9 @@ def camera_label(device: str, cameras: Sequence[CameraDevice] = ()) -> str:
     return text
 
 
-def scope_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> FallbackFrameSource:
+def scope_source_for(
+    device: str, cameras: Sequence[CameraDevice] = (), size: tuple[int, int] | None = None
+) -> FallbackFrameSource:
     """The scope feed: the configured camera, or the synthetic pattern until it opens.
 
     A camera that is unplugged, busy (UVC allows one reader), not yet allowed by
@@ -135,7 +137,7 @@ def scope_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> Fallb
     fallback = SyntheticFrameSource(960, 540)
     if not device.strip():
         return FallbackFrameSource(None, fallback)
-    camera = CameraFrameSource(resolve_capture_device(device, cameras))
+    camera = CameraFrameSource(resolve_capture_device(device, cameras), size=size)
     return FallbackFrameSource(
         camera,
         fallback,
@@ -191,6 +193,7 @@ class MainWindow(QMainWindow):
         self._scope_source: FrameSource | None = None
         self._scope_status: SourceStatus | None = None
         self._preview_device: str | None = None
+        self._preview_size: tuple[int, int] = (0, 0)
         self._thermal_pump: FramePump | None = None
         self._thermal_timer: QTimer | None = None
         self._thermal_source: FrameSource | None = None
@@ -848,7 +851,10 @@ class MainWindow(QMainWindow):
         label = camera_label(device, self._cameras) if device.strip() else "—"
         status = self.scope_status()
         if status is None or status.live:
-            return label
+            # Say when the camera didn't take the resolution asked for (#247).
+            camera = getattr(self._scope_source, "camera", None)
+            note = getattr(camera, "size_note", None)
+            return f"{label} (⚠ {note})" if note else label
         return f"{label} (⚠ test pattern — {status.reason})"
 
     def thermal_status(self) -> SourceStatus | None:
@@ -893,15 +899,18 @@ class MainWindow(QMainWindow):
         """
         if self._pump is not None:
             return
-        device = self._config.panels.scope.device
+        scope = self._config.panels.scope
+        device = scope.device
+        size = (scope.width, scope.height)
         if source_factory is None:
             cameras = self._scan_cameras()
             self._cameras = cameras
 
             def source_factory() -> FrameSource:
-                return scope_source_for(device, cameras)
+                return scope_source_for(device, cameras, size)
 
         self._preview_device = device
+        self._preview_size = size
         self._scope_source = source_factory()
         reader = LatestFrameReader(self._scope_source)
         self._pump = FramePump(reader, consumers=[self._on_scope_frame])
@@ -924,7 +933,12 @@ class MainWindow(QMainWindow):
 
     def reconfigure_preview(self) -> None:
         """Reopen the scope after Preferences, if the chosen camera changed."""
-        if self._pump is None or self._config.panels.scope.device == self._preview_device:
+        scope = self._config.panels.scope
+        unchanged = (
+            scope.device == self._preview_device
+            and (scope.width, scope.height) == self._preview_size
+        )
+        if self._pump is None or unchanged:
             return
         self.stop_preview()
         self.start_preview()

@@ -108,6 +108,11 @@ class FallbackFrameSource:
     # --- state -----------------------------------------------------------
 
     @property
+    def camera(self) -> Camera | None:
+        """The real camera behind the fallback, or None (for its size note, #247)."""
+        return self._camera
+
+    @property
     def status(self) -> SourceStatus:
         return self._status
 

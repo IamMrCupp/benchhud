@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from benchhud.boards.library import DEFAULT_EXTENSIONS
+from benchhud.capture.modes import camera_modes, describe
 from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
 from benchhud.launcher.catalog import is_command_line
@@ -69,6 +70,7 @@ class PreferencesDialog(QDialog):
         *,
         on_save: SaveCallback | None = None,
         loopback_nodes: Callable[[], list[LoopbackNode]] = loopback_nodes,
+        camera_modes: Callable[[str], list[tuple[int, int]]] = camera_modes,
         platform: str = sys.platform,
         parent: QWidget | None = None,
     ) -> None:
@@ -77,6 +79,7 @@ class PreferencesDialog(QDialog):
         self._scanner = scanner
         self._on_save = on_save
         self._loopback_nodes = loopback_nodes
+        self._camera_modes = camera_modes
         self._linux = platform.startswith("linux")
         self.setWindowTitle("benchhud — Preferences")
 
@@ -107,6 +110,12 @@ class PreferencesDialog(QDialog):
 
     def _build_devices_tab(self) -> QWidget:
         self.scope_combo = QComboBox()
+        # The scope's resolution (#247), from the modes the chosen camera lists.
+        self.scope_resolution = QComboBox()
+        self.scope_resolution.setToolTip(
+            "Camera default asks for nothing. MJPG at the chosen size otherwise."
+        )
+        self.scope_combo.currentIndexChanged.connect(lambda _i: self._fill_resolutions())
         self.thermal_combo = QComboBox()
         self.serial_combo = QComboBox()
         self.rescan_button = QPushButton("Rescan")
@@ -116,6 +125,7 @@ class PreferencesDialog(QDialog):
         form = QFormLayout(widget)
         grow_fields(form)
         form.addRow("Scope camera", self.scope_combo)
+        form.addRow("Resolution", self.scope_resolution)
         form.addRow("Thermal camera", self.thermal_combo)
         form.addRow("Instrument port", self.serial_combo)
         rescan_row = QHBoxLayout()
@@ -124,11 +134,37 @@ class PreferencesDialog(QDialog):
         form.addRow("", rescan_row)
         return widget
 
+    def _fill_resolutions(self) -> None:
+        """Offer the chosen scope camera's sizes, keeping the configured one.
+
+        Sizes ride as "WxH" text: Qt doesn't hand a Python tuple back intact.
+        """
+        scope = self._config.panels.scope
+        current = self.scope_resolution.currentData() or f"{scope.width}x{scope.height}"
+        device = self.scope_combo.currentData() or ""
+        sizes = self._camera_modes(device) if device else []
+        combo = self.scope_resolution
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(describe((0, 0)), "0x0")
+        for width, height in sizes:
+            combo.addItem(describe((width, height)), f"{width}x{height}")
+        if current != "0x0" and combo.findData(current) < 0:
+            combo.addItem(f"{describe(_size(current))} (configured)", current)
+        combo.setCurrentIndex(max(0, combo.findData(current)))
+        combo.blockSignals(False)
+
+    @property
+    def scope_size(self) -> tuple[int, int]:
+        """The chosen scope resolution; (0, 0) is the camera's default."""
+        return _size(self.scope_resolution.currentData() or "0x0")
+
     def rescan_devices(self) -> None:
         """Re-enumerate devices and repopulate the dropdowns."""
         cameras = self._scanner.cameras()
         ports = self._scanner.serial_ports()
         _fill_camera_combo(self.scope_combo, cameras, self._config.panels.scope.device)
+        self._fill_resolutions()
         _fill_camera_combo(self.thermal_combo, cameras, self._config.panels.thermal.device)
         _fill_serial_combo(self.serial_combo, ports, self._config.panels.telemetry.port)
 
@@ -490,6 +526,9 @@ class PreferencesDialog(QDialog):
         """Write the dialog's current values back into the config object."""
         # currentData() is None when a combo is empty — keep the field a string.
         self._config.panels.scope.device = self.scope_combo.currentData() or ""
+        width, height = self.scope_size
+        self._config.panels.scope.width = width
+        self._config.panels.scope.height = height
         self._config.panels.thermal.device = self.thermal_combo.currentData() or ""
         # Picking a thermal camera is what turns thermal on; "(none)" turns it off.
         self._config.panels.thermal.enabled = bool(self._config.panels.thermal.device)
@@ -597,3 +636,11 @@ def _spin(lo: int, hi: int, value: int) -> QSpinBox:
     spin.setRange(lo, hi)
     spin.setValue(value)
     return spin
+
+
+def _size(text: str) -> tuple[int, int]:
+    width, _, height = text.partition("x")
+    try:
+        return int(width), int(height)
+    except ValueError:
+        return 0, 0
