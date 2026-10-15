@@ -60,3 +60,29 @@ version works.
   on a Windows bench yet.
 
 If it isn't on `PATH`, set its location under `[flash] command` in the config.
+
+## The T48 panel (minipro)
+
+For chips on an XGecu **T48** (or TL866II+) in the ZIF socket or on a clip:
+EEPROMs like the 24C02, SPI flash, parallel flash. It drives
+[minipro](https://gitlab.com/DavidGriffith/minipro) the same way the Flash panel
+drives flashrom, with the same rules: a backup is two matching reads, writes and
+erases ask first, a wrong-size image is refused, and everything goes on the job.
+
+The difference: minipro can't detect a chip, so you tell it.
+
+1. Type part of the name (`W25Q64`, `24C02`) and **Find**. Pick the exact part
+   *and package* (`W25Q64BV@SOIC8`); the panel never guesses one. It remembers
+   the last chip.
+2. **Check ID** reads the chip's ID and says one of three things:
+   - it matches;
+   - no chip answered (`0x0000`): seating, pin 1 at the lever end, or the wrong
+     package;
+   - it's a different part, with both IDs, so you can pick the right one.
+3. **Read backup**, **Write…**, **Erase…** as on the Flash panel.
+
+**Keep the T48's firmware current.** On the bench, minipro warns *Firmware is
+out of date* (00.1.03, it expects 01.1.39) and *T48 support is not yet
+complete*. Old firmware is a common cause of failed or flaky reads. XGecu's
+Xgpro (Windows) updates it.
+

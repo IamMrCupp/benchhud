@@ -75,6 +75,7 @@ from benchhud.shell.panels.flash import FlashPanel
 from benchhud.shell.panels.inventory import InventoryPanel
 from benchhud.shell.panels.jobs import JobsPanel
 from benchhud.shell.panels.launcher import LauncherPanel
+from benchhud.shell.panels.minipro import MiniproPanel
 from benchhud.shell.panels.power import PowerPanel
 from benchhud.shell.panels.readings import ReadingsPanel
 from benchhud.shell.panels.scope import ScopePanel
@@ -303,7 +304,13 @@ class MainWindow(QMainWindow):
         self.readings_panel = ReadingsPanel(self._job_store, self.jobs_panel.selected_job_id)
         self.jobs_panel.job_changed.connect(self.readings_panel.refresh)
         readings_dock = self.panels.add_panel(self.readings_panel, left)
-        self.tabifyDockWidget(flash_dock, readings_dock)  # …and readings (#235)
+        self.minipro_panel = MiniproPanel(
+            self._config.minipro, self._job_store, self.jobs_panel.selected_job_id
+        )
+        self.minipro_panel.job_note_added.connect(self.jobs_panel.refresh_notes)
+        minipro_dock = self.panels.add_panel(self.minipro_panel, left)
+        self.tabifyDockWidget(flash_dock, minipro_dock)  # …and the T48 (#253)
+        self.tabifyDockWidget(minipro_dock, readings_dock)  # …and readings (#235)
 
         scope_dock.raise_()
         controls_dock.raise_()

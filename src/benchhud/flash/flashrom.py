@@ -153,6 +153,34 @@ def probe(runner: Runner, command: str, programmer: str, on_line: LineSink) -> l
     return parse_chips("\n".join(lines))
 
 
+def read_twice(
+    runner: Runner,
+    argv_for: Callable[[Path], list[str]],
+    dest: Path,
+    on_line: LineSink,
+    what: str = "flashrom",
+) -> DumpResult:
+    """Read the chip twice with ``argv_for(path)``. Only a matching pair becomes ``dest``.
+
+    A mismatch keeps both reads beside ``dest``, for a look, and returns
+    ``matched=False``: the usual cause is a clip or socket that isn't seated.
+    Shared by flashrom and minipro.
+    """
+    first = dest.with_name(dest.stem + ".read1.bin")
+    second = dest.with_name(dest.stem + ".read2.bin")
+    for path in (first, second):
+        code = runner.run(argv_for(path), on_line)
+        if code != 0:
+            raise FlashError(f"{what} couldn't read the chip (exit {code})")
+    hashes = sha256_file(first), sha256_file(second)
+    if hashes[0] != hashes[1]:
+        return DumpResult(matched=False, path=None, sha256=hashes[0], reads=(first, second))
+    first.replace(dest)
+    second.unlink()
+    dest.with_name(dest.name + ".sha256").write_text(f"{hashes[0]}  {dest.name}\n")
+    return DumpResult(matched=True, path=dest, sha256=hashes[0])
+
+
 def read_verified(
     runner: Runner,
     command: str,
@@ -161,24 +189,13 @@ def read_verified(
     dest: Path,
     on_line: LineSink,
 ) -> DumpResult:
-    """Read the chip twice. Only a matching pair becomes ``dest``.
-
-    A mismatch keeps both reads beside ``dest``, for a look, and returns
-    ``matched=False``: the usual cause is a clip that isn't seated.
-    """
-    first = dest.with_name(dest.stem + ".read1.bin")
-    second = dest.with_name(dest.stem + ".read2.bin")
-    for path in (first, second):
-        code = runner.run([*_base(command, programmer, chip), "-r", str(path)], on_line)
-        if code != 0:
-            raise FlashError(f"flashrom couldn't read the chip (exit {code})")
-    hashes = sha256_file(first), sha256_file(second)
-    if hashes[0] != hashes[1]:
-        return DumpResult(matched=False, path=None, sha256=hashes[0], reads=(first, second))
-    first.replace(dest)
-    second.unlink()
-    dest.with_name(dest.name + ".sha256").write_text(f"{hashes[0]}  {dest.name}\n")
-    return DumpResult(matched=True, path=dest, sha256=hashes[0])
+    """Read the chip twice; only a matching pair becomes ``dest``."""
+    return read_twice(
+        runner,
+        lambda path: [*_base(command, programmer, chip), "-r", str(path)],
+        dest,
+        on_line,
+    )
 
 
 def check_image(chip: Chip, image: Path) -> None:

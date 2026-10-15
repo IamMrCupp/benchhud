@@ -45,8 +45,9 @@ the scope" and turned into the bench's command center.
 - **Terminal** — your shell in a panel, and optionally on stream as a read-only
   OBS source with a pause button for anything private. macOS and Linux.
   [More →](docs/TERMINAL.md)
-- **Flash** — read, back up and write SPI flash chips with flashrom. A backup is
-  two reads that must match, and every dump is filed with the job.
+- **Flash** — read, back up and write SPI flash chips with flashrom, and chips on
+  a T48 programmer with minipro. A backup is two reads that must match, and
+  every dump is filed with the job.
   [More →](docs/FLASH.md)
 - **Readings** — test-point measurements from the DMM, compared live with a
   known-good board of the same part number. A short shows up as LOW the moment

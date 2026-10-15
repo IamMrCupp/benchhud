@@ -251,6 +251,14 @@ class BoardsConfig:
 
 
 @dataclass
+class MiniproConfig:
+    """The T48 panel (#253): which minipro, and the last chip used."""
+
+    command: str = "minipro"
+    last_chip: str = ""  # e.g. W25Q64BV@SOIC8; the panel looks it up on start
+
+
+@dataclass
 class FlashConfig:
     """The flashrom panel (#227): which flashrom, and the last programmer used."""
 
@@ -275,6 +283,7 @@ class Config:
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
     flash: FlashConfig = field(default_factory=FlashConfig)
+    minipro: MiniproConfig = field(default_factory=MiniproConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -381,6 +390,7 @@ class Config:
             ("library_dir", "extensions", "schematic_extensions", "viewer"),
         )
         _apply(cfg.flash, data.get("flash", {}), ("command", "programmer"))
+        _apply(cfg.minipro, data.get("minipro", {}), ("command", "last_chip"))
 
         cfg.tools = [
             ToolConfig(
