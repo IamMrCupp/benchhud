@@ -79,6 +79,7 @@ class ControlsPanel(Panel):
 
         self.threshold_spin = _spin(0.0, 300.0, 1.0, settings.threshold, " °C")
         self._fit = transform.fit
+        self._rotated_fit = transform.rotated_fit
         self.scale_spin = _spin(0.05, 30.0, 0.05, transform.scale)
         self.scale_spin.setToolTip("1.00 = the thermal fills the scope view; higher zooms it in")
         self.offset_x_spin = _spin(-2000.0, 2000.0, 1.0, transform.offset_x, " px")
@@ -123,7 +124,21 @@ class ControlsPanel(Panel):
         form.addRow("Scale", self.scale_spin)
         form.addRow("Offset X", self.offset_x_spin)
         form.addRow("Offset Y", self.offset_y_spin)
+        # Quarter turns (#259): a portrait thermal on a landscape scope.
+        self.turn_left_button = QPushButton("⟲")
+        self.turn_left_button.setToolTip("Turn the thermal 90° counter-clockwise")
+        self.turn_left_button.clicked.connect(lambda: self.turn(1))
+        self.turn_right_button = QPushButton("⟳")
+        self.turn_right_button.setToolTip("Turn the thermal 90° clockwise")
+        self.turn_right_button.clicked.connect(lambda: self.turn(-1))
+        # On their own line: beside the spin box they made the panel wider than a
+        # narrow dock.
+        turn_row = QHBoxLayout()
+        turn_row.addWidget(self.turn_left_button)
+        turn_row.addWidget(self.turn_right_button)
+        turn_row.addStretch(1)
         form.addRow("Rotation", self.rotation_spin)
+        form.addRow("", turn_row)
 
         self.mode_combo.currentTextChanged.connect(self._on_change)
         self.range_combo.currentTextChanged.connect(self._on_change)
@@ -161,6 +176,7 @@ class ControlsPanel(Panel):
             offset_y=self.offset_y_spin.value(),
             rotation_deg=self.rotation_spin.value(),
             fit=self._fit,
+            rotated_fit=self._rotated_fit,
         )
 
     def show_calibration(self, text: str, *, error: bool = False) -> None:
@@ -169,12 +185,17 @@ class ControlsPanel(Panel):
         self.calibration_status.setVisible(bool(text))
         self.calibration_status.setStyleSheet("color: #ff7a7a;" if error else "")
 
+    def turn(self, quarter_turns: int) -> None:
+        """Turn the thermal by 90° steps; the fit follows, so it still fills the view."""
+        self.set_transform(self.current_transform().turned(quarter_turns))
+
     def set_transform(self, transform: RegistrationTransform) -> None:
         """Show (and save) a transform found elsewhere: migration, calibration."""
         spins = (self.scale_spin, self.offset_x_spin, self.offset_y_spin, self.rotation_spin)
         for spin in spins:
             spin.blockSignals(True)
         self._fit = transform.fit
+        self._rotated_fit = transform.rotated_fit
         self.scale_spin.setValue(transform.scale)
         self.offset_x_spin.setValue(transform.offset_x)
         self.offset_y_spin.setValue(transform.offset_y)
