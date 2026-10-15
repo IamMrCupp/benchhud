@@ -30,6 +30,11 @@ fps = 15 # paced to the slower feed; thermal is 25 fps, see research.md §4
 # macOS/Windows use an integer camera index instead.
 enabled = true
 device = "/dev/video4"
+# Resolution to ask the camera for (Preferences → Devices → Resolution lists the
+# camera's own). 0 x 0 takes its default. 1920 x 1080 suits a 1280 x 720 stream;
+# 4K works but decodes heavier.
+width = 0
+height = 0
 
 [panels.thermal]
 # Sipeed T256s. Analysis uses the raw Y16 192x256 @ 25 fps stream.
