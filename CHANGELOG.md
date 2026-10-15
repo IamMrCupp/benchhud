@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/IamMrCupp/benchhud/compare/v0.9.0...v0.10.0) (2026-10-15)
+
+
+### Features
+
+* **overlay:** draw the known-good power-on curve on the stream's graph ([e045243](https://github.com/IamMrCupp/benchhud/commit/e04524367ada102ae275ee2697dabe10449f3b7c))
+
+
+### Bug Fixes
+
+* **prefs:** a switch for instrument telemetry, and the port by its stable name ([efab31c](https://github.com/IamMrCupp/benchhud/commit/efab31c5497f39e721b937bd4c3aa4caa6d62517))
+
 ## [0.9.0](https://github.com/IamMrCupp/benchhud/compare/v0.8.0...v0.9.0) (2026-10-15)
 
 
