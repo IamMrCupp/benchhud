@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0](https://github.com/IamMrCupp/benchhud/compare/v0.6.0...v0.7.0) (2026-10-15)
+
+
+### Features
+
+* **capture:** pick the scope camera's resolution ([1c8209b](https://github.com/IamMrCupp/benchhud/commit/1c8209b5e38400896b1ec017794598e4a9f83869))
+* **overlay:** readable thermal overlays with a heat-only blend, auto range and outlines ([576c4b6](https://github.com/IamMrCupp/benchhud/commit/576c4b66d6777725d90ea3a273da736670215ca6))
+* **overlay:** two-point thermal calibration with a hot tip ([debb968](https://github.com/IamMrCupp/benchhud/commit/debb968c8be102ebd8586fb5a3393682bf0bec98))
+
 ## [0.6.0](https://github.com/IamMrCupp/benchhud/compare/v0.5.0...v0.6.0) (2026-10-15)
 
 
