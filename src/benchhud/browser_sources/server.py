@@ -9,6 +9,8 @@ never touches the GUI thread. Routes:
 * ``/events/<name>`` — that panel's live feed as Server-Sent Events. SSE is
   one-directional, which is all a display needs, and ``EventSource``
   reconnects on its own when benchhud restarts.
+* ``/panel/nowplaying/art`` — the current track's artwork (#251): only the file
+  the media player reported, and only if it's an image.
 * ``/static/<file>`` — the shared script, stylesheet, the DSEG font and the
   vendored xterm.js. Nothing loads from a CDN, so a page works with the bench
   offline.
@@ -30,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import Callable
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -48,6 +51,7 @@ PANELS: dict[str, str] = {
     "meter": "Meter",
     "graph": "Power graph",
     "job": "Job card",
+    "nowplaying": "Now playing",
 }
 
 HOST = "127.0.0.1"
@@ -88,10 +92,13 @@ class BrowserSourceServer:
         *,
         panels: bool = True,
         terminal: TerminalHost | None = None,
+        now_playing_art: Callable[[], tuple[bytes, str] | None] | None = None,
     ) -> None:
         self._hub = hub
         self.panels_enabled = panels
         self.terminal = terminal
+        #: The now-playing artwork as (bytes, content type), or None (#251).
+        self.now_playing_art = now_playing_art
         self._requested_port = port
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -175,6 +182,12 @@ class _Handler(BaseHTTPRequestHandler):
         panels = self.owner.panels_enabled
         if path == "/" and panels:
             self._send(HTTPStatus.OK, "text/html; charset=utf-8", self._index().encode())
+        elif path == "/panel/nowplaying/art" and panels:
+            art = self.owner.now_playing_art() if self.owner.now_playing_art else None
+            if art is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+            else:
+                self._send(HTTPStatus.OK, art[1], art[0])
         elif path.startswith("/panel/") and path[7:] in PANELS and panels:
             page = _resource(f"web/{path[7:]}.html")
             self._send(HTTPStatus.OK, "text/html; charset=utf-8", page)

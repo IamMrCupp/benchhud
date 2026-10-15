@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/IamMrCupp/benchhud/compare/v0.7.0...v0.8.0) (2026-10-15)
+
+
+### Features
+
+* **sources:** a now-playing banner for the stream ([f458ba5](https://github.com/IamMrCupp/benchhud/commit/f458ba5256f0f97c243b8d9d2d048cce61b23b7d))
+
 ## [0.7.0](https://github.com/IamMrCupp/benchhud/compare/v0.6.0...v0.7.0) (2026-10-15)
 
 

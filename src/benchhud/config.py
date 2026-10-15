@@ -259,6 +259,16 @@ class MiniproConfig:
 
 
 @dataclass
+class NowPlayingConfig:
+    """The now-playing banner, an OBS Browser source (#251). Linux: it reads the
+    desktop's media players (MPRIS), so Chrome playing SoundCloud just works."""
+
+    enabled: bool = True  # served with the other browser sources
+    hide_when_paused: bool = True
+    label: str = "Now playing"
+
+
+@dataclass
 class FlashConfig:
     """The flashrom panel (#227): which flashrom, and the last programmer used."""
 
@@ -284,6 +294,7 @@ class Config:
     boards: BoardsConfig = field(default_factory=BoardsConfig)
     flash: FlashConfig = field(default_factory=FlashConfig)
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
+    now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
     @classmethod
@@ -391,6 +402,11 @@ class Config:
         )
         _apply(cfg.flash, data.get("flash", {}), ("command", "programmer"))
         _apply(cfg.minipro, data.get("minipro", {}), ("command", "last_chip"))
+        _apply(
+            cfg.now_playing,
+            data.get("now_playing", {}),
+            ("enabled", "hide_when_paused", "label"),
+        )
 
         cfg.tools = [
             ToolConfig(

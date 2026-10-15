@@ -38,7 +38,8 @@ the scope" and turned into the bench's command center.
   minipro-gui, whatever's in your config) straight from the HUD.
 - **Virtual camera out** — the composite is written to a v4l2loopback device, so
   OBS treats it as a normal camera source.
-- **OBS browser sources** — the meter, the power graph and the job card, each
+- **OBS browser sources** — the meter, the power graph, the job card and a
+  now-playing banner (the track playing on the bench, artwork and all), each
   served as its own transparent page on localhost, so every panel is a separate
   OBS source you can place anywhere. Never shows the customer.
   [More →](docs/BROWSER-SOURCES.md)

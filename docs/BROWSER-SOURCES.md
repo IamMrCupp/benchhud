@@ -30,6 +30,7 @@ panel URLs.
 | `http://127.0.0.1:8780/panel/meter` | The meter: DMM line plus the V / A / W / max-current cells, in the dock's LCD style and colours. |
 | `http://127.0.0.1:8780/panel/graph` | The live V / A / W trend. Each line gets its own vertical range, as the on-stream graph does. History length follows *Graph history* in Preferences. |
 | `http://127.0.0.1:8780/panel/job` | The selected job: device, board number, ticket ref, status. Empty when no job is selected. |
+| `http://127.0.0.1:8780/panel/nowplaying` | What's playing on the bench: artwork, title, artist. Slides in on each new track, hides while paused. Linux. See below. |
 
 In OBS: **+** → **Browser** → paste a URL. Width 400 × height 200 fits the meter
 and the graph at 1×. Every page has a transparent background, so there's no
@@ -40,6 +41,28 @@ link and a pause button. See [TERMINAL.md](TERMINAL.md).
 
 Video stays on the virtual camera. Separate scope and thermal sources are a
 different problem (Syphon on macOS, Spout on Windows) and not part of this.
+
+## Now playing
+
+The now-playing banner shows the track playing **on the bench box**, from any
+player that publishes it on the desktop (MPRIS). That includes Chrome playing
+SoundCloud or YouTube, VLC and Spotify. No accounts or API keys: SoundCloud's
+page tells the browser what's playing, and the browser tells the desktop.
+
+- **Which player wins:** the one that's playing. When nothing is, the last track
+  stays, so a paused tab elsewhere never takes the banner over.
+- **The title:** SoundCloud mixes often repeat the uploader at the front
+  (`Alegria - Voices In My Head`). The banner drops that, since the artist line
+  already says it.
+- **The artist line:** for a mix it's usually the uploader's account name, so
+  check that your mixes read well on stream.
+- **The artwork:** benchhud serves the image file the player reported, and
+  only if it really is an image.
+
+Settings under `[now_playing]`: `enabled`, `hide_when_paused`, and `label`
+("Now playing"). A size of about 600 × 90 fits the banner.
+
+Linux only. macOS has no public API for what's playing.
 
 ## What goes on air
 
