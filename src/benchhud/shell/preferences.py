@@ -10,6 +10,7 @@ so the whole dialog is testable offscreen with no hardware.
 from __future__ import annotations
 
 import secrets
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from benchhud.boards.library import DEFAULT_EXTENSIONS
 from benchhud.config import Config, ToolConfig
 from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
 from benchhud.launcher.catalog import is_command_line
+from benchhud.output.loopback_probe import LoopbackNode, loopback_nodes
 from benchhud.shell.qt_util import fit_combo_popup, grow_fields
 from benchhud.shell.tool_picker import ToolPickerDialog
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
@@ -66,12 +68,16 @@ class PreferencesDialog(QDialog):
         scanner: DeviceScanner,
         *,
         on_save: SaveCallback | None = None,
+        loopback_nodes: Callable[[], list[LoopbackNode]] = loopback_nodes,
+        platform: str = sys.platform,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._config = config
         self._scanner = scanner
         self._on_save = on_save
+        self._loopback_nodes = loopback_nodes
+        self._linux = platform.startswith("linux")
         self.setWindowTitle("benchhud — Preferences")
 
         tabs = QTabWidget()
@@ -132,8 +138,18 @@ class PreferencesDialog(QDialog):
         out = self._config.output
         self.output_enabled = QCheckBox("Enable virtual camera output")
         self.output_enabled.setChecked(out.enabled)
-        self.output_device = QLineEdit(out.device)
-        self.output_device.setPlaceholderText("/dev/video10")
+        # The loopback nodes that exist, to pick from; still editable (#240).
+        self.output_device = QComboBox()
+        self.output_device.setEditable(True)
+        self.output_device.lineEdit().setPlaceholderText("/dev/video10")
+        self.output_device.setToolTip("The v4l2loopback node OBS reads benchhud from")
+        if self._linux:
+            for node in self._loopback_nodes():
+                self.output_device.addItem(node.path)
+                self.output_device.setItemData(
+                    self.output_device.count() - 1, str(node), Qt.ItemDataRole.ToolTipRole
+                )
+        self.output_device.setCurrentText(out.device)
         self.output_width = _spin(1, 7680, out.width)
         self.output_height = _spin(1, 4320, out.height)
         self.output_fps = _spin(1, 120, out.fps)
@@ -190,6 +206,10 @@ class PreferencesDialog(QDialog):
         grow_fields(form)
         form.addRow(self.output_enabled)
         form.addRow("Loopback device", self.output_device)
+        if not self._linux:
+            # macOS publishes into OBS's camera extension and Windows through
+            # softcam: there's no device path to set.
+            form.setRowVisible(self.output_device, False)
         form.addRow("Width", self.output_width)
         form.addRow("Height", self.output_height)
         form.addRow("FPS", self.output_fps)
@@ -476,7 +496,7 @@ class PreferencesDialog(QDialog):
         self._config.panels.telemetry.port = self.serial_combo.currentData() or ""
 
         self._config.output.enabled = self.output_enabled.isChecked()
-        self._config.output.device = self.output_device.text().strip()
+        self._config.output.device = self.output_device.currentText().strip()
         self._config.output.width = self.output_width.value()
         self._config.output.height = self.output_height.value()
         self._config.output.fps = self.output_fps.value()

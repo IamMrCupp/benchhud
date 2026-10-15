@@ -104,13 +104,44 @@ Confirm it exists:
 v4l2-ctl --list-devices | grep -A1 benchhud   # -> /dev/video10
 ```
 
-Make it load on boot (optional):
+Make it load on boot. Without this, the first thing to load the module after a
+reboot decides its options, and that's often OBS (below):
 
 ```bash
 echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf
 printf 'options v4l2loopback exclusive_caps=1 card_label=benchhud video_nr=10\n' \
   | sudo tee /etc/modprobe.d/benchhud-loopback.conf
 ```
+
+### OBS loads the module too
+
+OBS's **Start Virtual Camera** runs `modprobe v4l2loopback` with its own options
+when the module isn't loaded yet. If OBS gets there first, the only node is
+OBS's (`/dev/video5` "OBS Virtual Camera", say). Options only apply when the
+module loads, so `video_nr=10` never happens. benchhud then says `/dev/video10
+doesn't exist` and lists the nodes that do.
+
+If you also use OBS's own virtual camera (for Zoom or Discord), give each one a
+node. Quit OBS, then:
+
+```bash
+sudo modprobe -r v4l2loopback
+sudo modprobe v4l2loopback devices=2 video_nr=10,11 \
+  card_label=benchhud,OBS-Virtual-Camera exclusive_caps=1,1
+printf 'options v4l2loopback devices=2 video_nr=10,11 card_label=benchhud,OBS-Virtual-Camera exclusive_caps=1,1\n' \
+  | sudo tee /etc/modprobe.d/benchhud-loopback.conf
+```
+
+benchhud writes `/dev/video10`, and OBS's Start Virtual Camera takes the other
+one.
+
+### When it still won't load
+
+- **`Key was rejected by service`:** Secure Boot is blocking the unsigned DKMS
+  module. Reboot and finish the MOK enrollment screen the package set up, or
+  turn Secure Boot off.
+- **`Module v4l2loopback not found` after a kernel update:** rebuild it with
+  `sudo dpkg-reconfigure v4l2loopback-dkms`.
 
 ---
 
