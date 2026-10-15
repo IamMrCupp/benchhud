@@ -17,8 +17,11 @@ the scope" and turned into the bench's command center.
 ## What it does
 
 - **Scope + thermal fusion** — a thermal camera registered onto the microscope
-  image, so the heat bloom sits over the actual component. Heatmap blend,
-  threshold tint, or a marker with a live temperature label. This is the headline.
+  image, so the heat bloom sits over the actual component. Line it up with two
+  touches of a hot iron tip. Warm-parts blend, isotherm outlines, threshold
+  tint, or a marker with a live temperature label. This is the headline.
+- **Known-good compare** — save a good board's scope frame per board number,
+  then fade it over the live view or blink between them to spot what's missing.
 - **Instrument telemetry** — live DMM / PSU readings over SCPI in a bench-style
   meter with peak-hold and a V/A/W trend graph, on-screen and optionally burned
   into the stream.

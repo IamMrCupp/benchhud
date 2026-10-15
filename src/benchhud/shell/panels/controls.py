@@ -33,6 +33,7 @@ from benchhud.overlay.config_adapter import (
     settings_from_config,
     transform_from_config,
 )
+from benchhud.overlay.reference import CompareMode, ReferenceSettings
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.panel import PANEL_MARGINS, Panel
 from benchhud.shell.qt_util import fit_combo_popup, grow_fields
@@ -44,6 +45,9 @@ class ControlsPanel(Panel):
 
     changed = Signal()
     calibrate_requested = Signal()
+    #: Known-good board comparison (#256).
+    reference_capture_requested = Signal()
+    reference_load_requested = Signal()
     undo_requested = Signal()
 
     def __init__(self, config: Config | None = None, parent: QWidget | None = None) -> None:
@@ -140,6 +144,37 @@ class ControlsPanel(Panel):
         form.addRow("Rotation", self.rotation_spin)
         form.addRow("", turn_row)
 
+        # Compare with a known-good board (#256). Starts Off every launch: it's
+        # a diagnostic aid, not a look.
+        self.reference_mode = QComboBox()
+        for mode in CompareMode:
+            self.reference_mode.addItem(mode.value.capitalize(), mode.value)
+        self.reference_mode.setToolTip(
+            "Overlay fades the good board over the live view; Blink flips between them"
+        )
+        self.reference_opacity = QSlider(Qt.Orientation.Horizontal)
+        self.reference_opacity.setRange(0, 100)
+        self.reference_opacity.setValue(50)
+        self.reference_capture_button = QPushButton("Use this frame")
+        self.reference_capture_button.setToolTip(
+            "Save the current scope frame as this board's known-good reference"
+        )
+        self.reference_capture_button.clicked.connect(self.reference_capture_requested)
+        self.reference_load_button = QPushButton("Load photo…")
+        self.reference_load_button.clicked.connect(self.reference_load_requested)
+        self.reference_status = QLabel("No reference for this board.")
+        self.reference_status.setWordWrap(True)
+        reference_buttons = QHBoxLayout()
+        reference_buttons.addWidget(self.reference_capture_button, stretch=1)
+        reference_buttons.addWidget(self.reference_load_button, stretch=1)
+        form.addRow(QLabel("Known-good board"))
+        form.addRow("Compare", self.reference_mode)
+        form.addRow("Opacity", self.reference_opacity)
+        form.addRow(reference_buttons)
+        form.addRow(self.reference_status)
+        self.reference_mode.currentIndexChanged.connect(lambda _i: self.changed.emit())
+        self.reference_opacity.valueChanged.connect(lambda _v: self.changed.emit())
+
         self.mode_combo.currentTextChanged.connect(self._on_change)
         self.range_combo.currentTextChanged.connect(self._on_change)
         self.tmin_spin.valueChanged.connect(self._on_change)
@@ -178,6 +213,16 @@ class ControlsPanel(Panel):
             fit=self._fit,
             rotated_fit=self._rotated_fit,
         )
+
+    def reference_settings(self) -> ReferenceSettings:
+        return ReferenceSettings(
+            mode=CompareMode(self.reference_mode.currentData() or "off"),
+            opacity=self.reference_opacity.value() / 100.0,
+        )
+
+    def show_reference(self, text: str, *, error: bool = False) -> None:
+        self.reference_status.setText(text)
+        self.reference_status.setStyleSheet("color: #ff7a7a;" if error else "")
 
     def show_calibration(self, text: str, *, error: bool = False) -> None:
         """Calibration's step-by-step prompt (empty hides it)."""
