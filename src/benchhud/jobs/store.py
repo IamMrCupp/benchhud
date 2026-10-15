@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS readings (
     reference  INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS board_references (
+    board_id   TEXT PRIMARY KEY,
+    path       TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS signatures (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id     INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -359,6 +364,31 @@ class JobStore:
     def delete_reading(self, reading_id: int) -> None:
         self._conn.execute("DELETE FROM readings WHERE id = ?", (reading_id,))
         self._conn.commit()
+
+    # --- reference images per board (#256) ---------------------------------
+
+    def references_dir(self) -> Path | None:
+        """Where reference images live (``None`` for in-memory stores)."""
+        if self._root is None:
+            return None
+        path = self._root / "board_references"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def set_board_reference(self, board_id: str, path: str) -> None:
+        self._conn.execute(
+            "INSERT INTO board_references (board_id, path, updated_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(board_id) DO UPDATE SET path = excluded.path,"
+            " updated_at = excluded.updated_at",
+            (board_id.strip(), path, self._now()),
+        )
+        self._conn.commit()
+
+    def board_reference(self, board_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT path FROM board_references WHERE board_id = ?", (board_id.strip(),)
+        ).fetchone()
+        return row["path"] if row else None
 
     # --- power-on signatures (#236) ----------------------------------------
 
