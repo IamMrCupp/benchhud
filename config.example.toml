@@ -44,12 +44,14 @@ baud = 115200
 
 [overlay]
 # Thermal-over-scope overlay preferences.
-mode = "blend"       # blend (heatmap) | tint (>threshold) | marker (hottest)
-alpha = 0.5          # overlay opacity for blend/tint
+mode = "blend"       # blend (warm parts) | outline (isotherms) | tint (>threshold) | marker
+alpha = 0.5          # overlay opacity at the hot end, for blend/tint
 threshold = 60.0     # °C, for tint mode
-tmin = 20.0          # °C mapped to the low end of the colormap
-tmax = 100.0         # °C mapped to the high end
+auto_range = true    # colours span ambient to the hottest point; false uses tmin/tmax
+tmin = 20.0          # °C at the low end of the colormap, when auto_range is off
+tmax = 100.0         # °C at the high end
 colormap = "INFERNO" # INFERNO | MAGMA | PLASMA | VIRIDIS | TURBO | JET | HOT
+scale_bar = true     # a colour scale with the range, top left of the composite
 
 [registration]
 # Thermal→scope alignment, set from the Controls panel and saved here. The

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -50,9 +51,17 @@ class ControlsPanel(Panel):
         self._config = config
         settings = settings_from_config((config or Config()).overlay)
         transform = transform_from_config((config or Config()).registration)
-        # tmin/tmax aren't exposed as controls yet — preserve them.
-        self._tmin = settings.tmin
-        self._tmax = settings.tmax
+        # The colour range (#244): Auto follows the board; Manual is fixed.
+        self.range_combo = QComboBox()
+        self.range_combo.addItems(["Auto", "Manual"])
+        self.range_combo.setCurrentText("Auto" if settings.auto_range else "Manual")
+        self.range_combo.setToolTip(
+            "Auto: ambient to the hottest point, so warm parts use the whole palette"
+        )
+        self.tmin_spin = _spin(-40.0, 500.0, 1.0, settings.tmin, " °C")
+        self.tmax_spin = _spin(-40.0, 500.0, 1.0, settings.tmax, " °C")
+        self.scale_bar_check = QCheckBox("Show the colour scale")
+        self.scale_bar_check.setChecked(settings.scale_bar)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems([m.value for m in OverlayMode])
@@ -80,7 +89,18 @@ class ControlsPanel(Panel):
         form.setContentsMargins(*PANEL_MARGINS)
 
         grow_fields(form)
+        range_row = QHBoxLayout()
+        range_row.addWidget(self.tmin_spin)
+        range_row.addWidget(QLabel("to"))
+        range_row.addWidget(self.tmax_spin)
+        self._range_row = QWidget()
+        range_row.setContentsMargins(0, 0, 0, 0)
+        self._range_row.setLayout(range_row)
+
         form.addRow("Mode", self.mode_combo)
+        form.addRow("Range", self.range_combo)
+        form.addRow("", self._range_row)
+        form.addRow("", self.scale_bar_check)
         form.addRow("Colormap", self.colormap_combo)
         form.addRow("Opacity", self.alpha_slider)
         form.addRow("Threshold", self.threshold_spin)
@@ -106,6 +126,11 @@ class ControlsPanel(Panel):
         form.addRow("Rotation", self.rotation_spin)
 
         self.mode_combo.currentTextChanged.connect(self._on_change)
+        self.range_combo.currentTextChanged.connect(self._on_change)
+        self.tmin_spin.valueChanged.connect(self._on_change)
+        self.tmax_spin.valueChanged.connect(self._on_change)
+        self.scale_bar_check.toggled.connect(self._on_change)
+        self._range_row.setVisible(not settings.auto_range)
         self.colormap_combo.currentTextChanged.connect(self._on_change)
         self.alpha_slider.valueChanged.connect(self._on_change)
         for spin in (
@@ -122,8 +147,10 @@ class ControlsPanel(Panel):
             mode=OverlayMode(self.mode_combo.currentText()),
             alpha=self.alpha_slider.value() / 100.0,
             threshold=self.threshold_spin.value(),
-            tmin=self._tmin,
-            tmax=self._tmax,
+            tmin=self.tmin_spin.value(),
+            tmax=self.tmax_spin.value(),
+            auto_range=self.range_combo.currentText() == "Auto",
+            scale_bar=self.scale_bar_check.isChecked(),
             colormap=colormap_from_name(self.colormap_combo.currentText()),
         )
 
@@ -157,6 +184,7 @@ class ControlsPanel(Panel):
         self._on_change()
 
     def _on_change(self, *_: object) -> None:
+        self._range_row.setVisible(self.range_combo.currentText() == "Manual")
         if self._config is not None:
             self._config.overlay = config_from_settings(self.current_settings())
             self._config.registration = config_from_transform(self.current_transform())

@@ -54,6 +54,8 @@ def settings_from_config(cfg: OverlayConfig) -> OverlaySettings:
         tmin=cfg.tmin,
         tmax=cfg.tmax,
         colormap=colormap_from_name(cfg.colormap),
+        auto_range=cfg.auto_range,
+        scale_bar=cfg.scale_bar,
     )
 
 
@@ -65,6 +67,8 @@ def config_from_settings(settings: OverlaySettings) -> OverlayConfig:
         tmin=settings.tmin,
         tmax=settings.tmax,
         colormap=colormap_to_name(settings.colormap),
+        auto_range=settings.auto_range,
+        scale_bar=settings.scale_bar,
     )
 
 

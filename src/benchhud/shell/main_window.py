@@ -17,6 +17,7 @@ import logging
 import secrets
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import datetime
 
 import cv2
@@ -60,7 +61,7 @@ from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
-from benchhud.overlay.composite import colorize, compose
+from benchhud.overlay.composite import RangeTracker, colorize, compose
 from benchhud.overlay.graph import draw_graph_overlay
 from benchhud.overlay.telemetry import Footprint, MeterReadout, draw_telemetry_overlay_sized
 from benchhud.overlay.transform import RegistrationTransform
@@ -258,6 +259,7 @@ class MainWindow(QMainWindow):
         self.controls_panel.changed.connect(self.render_composite)
         # Two-point thermal calibration (#243).
         self._calibration: list[Pair] | None = None
+        self._thermal_range = RangeTracker()  # the overlay's auto range (#244)
         self._before_calibration: RegistrationTransform | None = None
         self.controls_panel.calibrate_requested.connect(self.start_calibration)
         self.controls_panel.undo_requested.connect(self.undo_calibration)
@@ -675,6 +677,9 @@ class MainWindow(QMainWindow):
             return
 
         settings = self.controls_panel.current_settings()
+        if settings.auto_range:
+            low, high = self._thermal_range.update(temps)
+            settings = replace(settings, tmin=low, tmax=high)
         if scope is None:
             # Thermal only — show it colourised on its own.
             self._show_composite(colorize(temps, settings.tmin, settings.tmax, settings.colormap))
