@@ -63,15 +63,38 @@ class DeviceScanner(Protocol):
     def serial_ports(self) -> list[SerialDevice]: ...
 
 
-def list_serial_ports(comports: Callable[[], list] | None = None) -> list[SerialDevice]:
-    """Enumerate serial ports (``comports`` injectable for tests)."""
+def list_serial_ports(
+    comports: Callable[[], list] | None = None,
+    stable_fn: Callable[[str], str | None] | None = None,
+) -> list[SerialDevice]:
+    """Enumerate serial ports (``comports`` injectable for tests).
+
+    On Linux each is identified by its ``/dev/serial/by-id`` link where udev made
+    one (#264), so an adapter that comes back as ``ttyUSB1`` is still found.
+    """
     if comports is None:
         from serial.tools import list_ports
 
         comports = list_ports.comports
-    return [
-        SerialDevice(device=p.device, description=(p.description or p.device)) for p in comports()
-    ]
+    if stable_fn is None:
+        if sys.platform.startswith("linux"):
+
+            def stable_fn(path: str) -> str | None:
+                return stable_path(path, SERIAL_BY_ID_DIR)
+
+        else:
+
+            def stable_fn(_path: str) -> str | None:
+                return None
+
+    devices = []
+    for port in comports():
+        description = port.description or port.device
+        link = stable_fn(port.device)
+        if link:
+            description = f"{description} ({os.path.basename(port.device)})"
+        devices.append(SerialDevice(device=link or port.device, description=description))
+    return devices
 
 
 def _read_sysfs_name(path: str) -> str | None:
@@ -86,6 +109,8 @@ def _read_sysfs_name(path: str) -> str | None:
 #: udev's stable links for video nodes: they follow the camera, not the order
 #: it was plugged in, so they survive a reconnect or a reboot (#257).
 BY_ID_DIR = "/dev/v4l/by-id"
+#: The same for serial ports: a USB-serial adapter renumbers too (#264).
+SERIAL_BY_ID_DIR = "/dev/serial/by-id"
 
 
 def stable_path(path: str, by_id_dir: str = BY_ID_DIR) -> str | None:

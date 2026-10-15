@@ -135,6 +135,11 @@ class PreferencesDialog(QDialog):
         form.addRow("Resolution", self.scope_resolution)
         form.addRow("Thermal camera", self.thermal_combo)
         form.addRow("Instrument port", self.serial_combo)
+        # The switch Preferences never had (#264): without it, telemetry could
+        # only be turned on by editing the config file.
+        self.telemetry_enabled = QCheckBox("Read the instrument (OWON PSU + DMM)")
+        self.telemetry_enabled.setChecked(self._config.panels.telemetry.enabled)
+        form.addRow("", self.telemetry_enabled)
         rescan_row = QHBoxLayout()
         rescan_row.addWidget(self.rescan_button)
         rescan_row.addStretch(1)
@@ -540,6 +545,7 @@ class PreferencesDialog(QDialog):
         # Picking a thermal camera is what turns thermal on; "(none)" turns it off.
         self._config.panels.thermal.enabled = bool(self._config.panels.thermal.device)
         self._config.panels.telemetry.port = self.serial_combo.currentData() or ""
+        self._config.panels.telemetry.enabled = self.telemetry_enabled.isChecked()
 
         self._config.output.enabled = self.output_enabled.isChecked()
         self._config.output.device = self.output_device.currentText().strip()
@@ -613,7 +619,7 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
     selected = -1
     for port in ports:
         combo.addItem(f"{port.description} ({port.device})", port.device)
-        if port.device == current:
+        if same_device(port.device, current):
             selected = combo.count() - 1
     if current and selected < 0:
         combo.addItem(f"{current} (configured, not detected)", current)
