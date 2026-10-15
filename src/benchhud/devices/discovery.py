@@ -13,6 +13,7 @@ take injectable dependencies so they run without real hardware.
 from __future__ import annotations
 
 import glob as glob_module
+import os
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -82,9 +83,44 @@ def _read_sysfs_name(path: str) -> str | None:
         return None
 
 
+#: udev's stable links for video nodes: they follow the camera, not the order
+#: it was plugged in, so they survive a reconnect or a reboot (#257).
+BY_ID_DIR = "/dev/v4l/by-id"
+
+
+def stable_path(path: str, by_id_dir: str = BY_ID_DIR) -> str | None:
+    """The ``/dev/v4l/by-id`` link for a ``/dev/videoN`` node, if udev made one.
+
+    ``/dev/video6`` today can be ``/dev/video7`` after the camera drops off the
+    bus and comes back; its by-id link stays the same.
+    """
+    try:
+        real = os.path.realpath(path)
+        links = sorted(Path(by_id_dir).iterdir())
+    except OSError:
+        return None
+    for link in links:
+        if os.path.realpath(link) == real:
+            return str(link)
+    return None
+
+
+def same_device(a: str, b: str) -> bool:
+    """Whether two configured paths name the same node (a by-id link or not)."""
+    if a.strip() == b.strip():
+        return True
+    if not (a.startswith("/") and b.startswith("/")):
+        return False  # a camera index or a macOS id, not a path
+    try:
+        return os.path.realpath(a) == os.path.realpath(b) and os.path.exists(a)
+    except OSError:
+        return False
+
+
 def list_cameras_v4l2(
     glob_fn: Callable[[str], list[str]] = glob_module.glob,
     name_fn: Callable[[str], str | None] | None = None,
+    stable_fn: Callable[[str], str | None] = stable_path,
 ) -> list[CameraDevice]:
     """Linux: enumerate /dev/video* with names (deps injectable for tests).
 
@@ -96,7 +132,10 @@ def list_cameras_v4l2(
     read = name_fn or _read_sysfs_name
     cameras = []
     for index, path in enumerate(sorted(glob_fn("/dev/video*"))):
-        cameras.append(CameraDevice(identifier=path, label=(read(path) or path), index=index))
+        # Identified by the stable link where there is one (#257); named from
+        # the node it points at today.
+        identifier = stable_fn(path) or path
+        cameras.append(CameraDevice(identifier=identifier, label=(read(path) or path), index=index))
     return cameras
 
 

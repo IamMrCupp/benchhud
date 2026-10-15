@@ -9,6 +9,7 @@ so the whole dialog is testable offscreen with no hardware.
 
 from __future__ import annotations
 
+import os
 import secrets
 import sys
 from collections.abc import Callable
@@ -39,7 +40,13 @@ from PySide6.QtWidgets import (
 from benchhud.boards.library import DEFAULT_EXTENSIONS
 from benchhud.capture.modes import camera_modes, describe
 from benchhud.config import Config, ToolConfig
-from benchhud.devices.discovery import CameraDevice, DeviceScanner, SerialDevice
+from benchhud.devices.discovery import (
+    BY_ID_DIR,
+    CameraDevice,
+    DeviceScanner,
+    SerialDevice,
+    same_device,
+)
 from benchhud.launcher.catalog import is_command_line
 from benchhud.output.loopback_probe import LoopbackNode, loopback_nodes
 from benchhud.shell.qt_util import fit_combo_popup, grow_fields
@@ -585,8 +592,13 @@ def _fill_camera_combo(combo: QComboBox, cameras: list[CameraDevice], current: s
     combo.addItem("(none)", "")
     selected = 0 if not current else -1
     for cam in cameras:
-        combo.addItem(f"{cam.label} ({cam.identifier})", cam.identifier)
-        if cam.identifier == current:
+        shown = cam.identifier
+        if shown.startswith(BY_ID_DIR):
+            # The stable name is long; the node it points at today is enough to show.
+            shown = os.path.basename(os.path.realpath(shown)) or shown
+        combo.addItem(f"{cam.label} ({shown})", cam.identifier)
+        combo.setItemData(combo.count() - 1, cam.identifier, Qt.ItemDataRole.ToolTipRole)
+        if same_device(cam.identifier, current):
             selected = combo.count() - 1
     if current and selected < 0:
         combo.addItem(f"{current} (configured, not detected)", current)

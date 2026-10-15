@@ -82,6 +82,32 @@ uv run scripts/check_camera.py /dev/video4   # -> device=... open=True size=(w, 
 
 ---
 
+### Cameras keep their names
+
+`/dev/videoN` numbers are handed out in plug-in order, so a camera that drops off
+USB and comes back can return under another number. benchhud saves each camera
+by its stable name instead, for example
+`/dev/v4l/by-id/usb-Sipeed_Ltd._Thermal_Camera__UVC__0123456789-video-index0`.
+That name follows the camera, so after a drop the scope or thermal reconnects by
+itself within a few seconds. The status bar says *reconnecting* meanwhile.
+Configs with a plain `/dev/videoN` are converted on start.
+
+### Keep the thermal camera awake
+
+Linux suspends idle USB devices after two seconds, and some thermal cameras
+(the Sipeed T256s among them) don't wake cleanly; they reset and drop off the
+bus. Turn autosuspend off for it:
+
+```bash
+echo 'ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="359f", ATTR{idProduct}=="4201", TEST=="power/control", ATTR{power/control}="on"' \
+  | sudo tee /etc/udev/rules.d/60-benchhud-thermal.rules
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+Check how often it has dropped since boot with
+`journalctl -k -b | grep -c "USB disconnect"`. For a different camera, take its
+`idVendor:idProduct` from `lsusb`.
+
 ## 3. Create the virtual-camera output
 
 benchhud writes its composite to a **v4l2loopback** node that OBS then reads as a

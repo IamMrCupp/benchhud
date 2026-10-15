@@ -164,7 +164,9 @@ class FallbackFrameSource:
                     # and start retrying.
                     camera.release()
                     self._next_retry = now + self._retry_interval
-                    self._status = SourceStatus(False, f"{self._name} stopped sending frames")
+                    self._status = SourceStatus(
+                        False, f"{self._name} stopped sending frames, reconnecting…"
+                    )
 
         self._sleep(self._frame_period)
         return self._fallback.read() if self._fallback is not None else None
