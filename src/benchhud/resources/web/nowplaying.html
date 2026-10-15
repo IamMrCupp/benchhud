@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>benchhud · now playing</title>
+<link rel="stylesheet" href="/static/panel.css">
+<script src="/static/panel.js"></script>
+</head>
+<body>
+<!-- The track playing on the bench (#251): artwork, title, artist. Nothing else
+     from the player reaches this page (see media/now_playing.py). -->
+<div class="nowplaying live hidden" id="card">
+  <img class="art" id="art" alt="">
+  <div class="text">
+    <div class="label" id="label"></div>
+    <div class="title" id="title"></div>
+    <div class="artist" id="artist"></div>
+  </div>
+</div>
+<script>
+"use strict";
+const card = document.getElementById("card");
+const art = document.getElementById("art");
+let shown = "";
+
+subscribe("nowplaying", (data) => {
+  const visible = Boolean(data && data.visible);
+  card.classList.toggle("hidden", !visible);
+  if (!visible) {
+    shown = "";
+    return;
+  }
+  document.getElementById("label").textContent = data.label || "";
+  document.getElementById("title").textContent = data.title || "";
+  document.getElementById("artist").textContent = data.artist || "";
+  card.classList.toggle("paused", !data.playing);
+  card.classList.toggle("no-art", !data.art);
+  if (data.art) art.src = data.art;
+  // A new track slides in again.
+  const key = `${data.title}|${data.artist}`;
+  if (key !== shown) {
+    shown = key;
+    card.classList.remove("enter");
+    void card.offsetWidth; // restart the animation
+    card.classList.add("enter");
+  }
+});
+</script>
+</body>
+</html>

@@ -154,3 +154,75 @@ body.offline .live {
 .hidden {
   display: none;
 }
+
+/* --- now playing (#251) --- */
+
+.nowplaying {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 560px;
+  padding: 10px 16px 10px 10px;
+  border-radius: 10px;
+  background: var(--panel-bg);
+  color: var(--panel-fg);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.nowplaying .art {
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: none;
+}
+
+.nowplaying.no-art .art {
+  display: none;
+}
+
+.nowplaying .text {
+  min-width: 0;
+}
+
+.nowplaying .label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cell-bg);
+}
+
+.nowplaying .title {
+  font-size: 18px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nowplaying .artist {
+  font-size: 14px;
+  opacity: 0.8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nowplaying.paused {
+  opacity: 0.6;
+}
+
+.nowplaying.enter {
+  animation: nowplaying-in 450ms ease-out;
+}
+
+@keyframes nowplaying-in {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
