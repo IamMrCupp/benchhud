@@ -64,7 +64,9 @@ class ControlsPanel(Panel):
         self.alpha_slider.setValue(round(settings.alpha * 100))
 
         self.threshold_spin = _spin(0.0, 300.0, 1.0, settings.threshold, " °C")
-        self.scale_spin = _spin(0.05, 10.0, 0.05, transform.scale)
+        self._fit = transform.fit
+        self.scale_spin = _spin(0.05, 30.0, 0.05, transform.scale)
+        self.scale_spin.setToolTip("1.00 = the thermal fills the scope view; higher zooms it in")
         self.offset_x_spin = _spin(-2000.0, 2000.0, 1.0, transform.offset_x, " px")
         self.offset_y_spin = _spin(-2000.0, 2000.0, 1.0, transform.offset_y, " px")
         self.rotation_spin = _spin(-180.0, 180.0, 0.5, transform.rotation_deg, "°")
@@ -110,7 +112,22 @@ class ControlsPanel(Panel):
             offset_x=self.offset_x_spin.value(),
             offset_y=self.offset_y_spin.value(),
             rotation_deg=self.rotation_spin.value(),
+            fit=self._fit,
         )
+
+    def set_transform(self, transform: RegistrationTransform) -> None:
+        """Show (and save) a transform found elsewhere: migration, calibration."""
+        spins = (self.scale_spin, self.offset_x_spin, self.offset_y_spin, self.rotation_spin)
+        for spin in spins:
+            spin.blockSignals(True)
+        self._fit = transform.fit
+        self.scale_spin.setValue(transform.scale)
+        self.offset_x_spin.setValue(transform.offset_x)
+        self.offset_y_spin.setValue(transform.offset_y)
+        self.rotation_spin.setValue(transform.rotation_deg)
+        for spin in spins:
+            spin.blockSignals(False)
+        self._on_change()
 
     def _on_change(self, *_: object) -> None:
         if self._config is not None:

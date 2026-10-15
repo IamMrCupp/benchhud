@@ -109,6 +109,9 @@ class RegistrationConfig:
     offset_x: float = 0.0
     offset_y: float = 0.0
     rotation_deg: float = 0.0
+    # 2: the thermal starts fitted to the scope frame and centred (#242).
+    # 1: the original native-size, top-left placement; converted on first use.
+    version: int = 2
 
 
 @dataclass
@@ -300,11 +303,14 @@ class Config:
             data.get("overlay", {}),
             ("mode", "alpha", "threshold", "tmin", "tmax", "colormap"),
         )
+        registration = data.get("registration", {})
         _apply(
             cfg.registration,
-            data.get("registration", {}),
-            ("scale", "offset_x", "offset_y", "rotation_deg"),
+            registration,
+            ("scale", "offset_x", "offset_y", "rotation_deg", "version"),
         )
+        if registration and "version" not in registration:
+            cfg.registration.version = 1  # saved before #242: the old placement
         _apply(
             cfg.faults,
             data.get("faults", {}),

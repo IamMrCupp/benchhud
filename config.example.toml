@@ -52,12 +52,15 @@ tmax = 100.0         # °C mapped to the high end
 colormap = "INFERNO" # INFERNO | MAGMA | PLASMA | VIRIDIS | TURBO | JET | HOT
 
 [registration]
-# Calibrated thermal→scope transform (Phase 6). Nudge live, saved here so
-# calibration survives restarts.
+# Thermal→scope alignment, set from the Controls panel and saved here. The
+# thermal starts centred and filling the scope view: scale 1.0 is the same field
+# of view, higher zooms the thermal in (the thermal camera usually sees much
+# more than the microscope). Offsets nudge it in scope pixels.
 scale = 1.0
 offset_x = 0.0
 offset_y = 0.0
 rotation_deg = 0.0
+version = 2      # 1 = the original top-left placement, converted on first use
 
 [faults]
 # Auto-log an over-current fault to the selected repair job when the PSU current
