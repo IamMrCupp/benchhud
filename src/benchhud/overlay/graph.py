@@ -52,6 +52,8 @@ class GraphModel:
     lines: tuple[tuple[tuple[float, float], ...], ...]
     latest: tuple[float, float, float] | None  # V, A, W; None before the first reading
     window_seconds: float
+    #: The known-good power-on curve (#263), on the *current* trace's scale.
+    reference: tuple[tuple[float, float], ...] = ()
 
     @property
     def is_empty(self) -> bool:
@@ -67,8 +69,17 @@ def _normalise(values: np.ndarray) -> np.ndarray:
     return (values - low) / span
 
 
-def build_graph_model(samples: Sequence[PowerSample], window_seconds: float) -> GraphModel:
-    """Turn the most recent ``window_seconds`` of history into polylines (pure)."""
+def build_graph_model(
+    samples: Sequence[PowerSample],
+    window_seconds: float,
+    reference: Sequence[tuple[float, float]] = (),
+) -> GraphModel:
+    """Turn the most recent ``window_seconds`` of history into polylines (pure).
+
+    ``reference`` is a known-good current curve as (time, amps) on the samples'
+    clock (#263). It shares the current trace's scale, so a board that stalls
+    below it reads as below it.
+    """
     window = max(1.0, window_seconds)
     if not samples:
         return GraphModel(lines=((), (), ()), latest=None, window_seconds=window)
@@ -88,10 +99,22 @@ def build_graph_model(samples: Sequence[PowerSample], window_seconds: float) -> 
         np.array([s.current for s in recent], dtype=np.float64),
         np.array([s.power for s in recent], dtype=np.float64),
     )
-    lines = tuple(
-        tuple(zip(x.tolist(), _normalise(values).tolist(), strict=True)) for values in columns
-    )
-    return GraphModel(lines=lines, latest=latest, window_seconds=window)
+    start = t_latest - window
+    ref = [(t, a) for t, a in reference if start <= t <= t_latest]
+    if len(ref) < 2:
+        lines = tuple(
+            tuple(zip(x.tolist(), _normalise(values).tolist(), strict=True)) for values in columns
+        )
+        return GraphModel(lines=lines, latest=latest, window_seconds=window)
+    # Normalise the current and the good curve together: one scale for both.
+    ref_amps = np.array([a for _, a in ref], dtype=np.float64)
+    both = _normalise(np.concatenate([columns[1], ref_amps]))
+    current, ref_y = both[: len(columns[1])], both[len(columns[1]) :]
+    normalised = (_normalise(columns[0]), current, _normalise(columns[2]))
+    lines = tuple(tuple(zip(x.tolist(), values.tolist(), strict=True)) for values in normalised)
+    ref_x = [(t - start) / window for t, _ in ref]
+    reference_line = tuple(zip(ref_x, ref_y.tolist(), strict=True))
+    return GraphModel(lines=lines, latest=latest, window_seconds=window, reference=reference_line)
 
 
 # --- rendering (Qt) ------------------------------------------------------
@@ -100,6 +123,7 @@ _PANEL_BG = QColor(24, 28, 38, 225)  # the dock chart's dark theme, lightly tran
 _PANEL_BORDER = "#4f97a8"  # the meter overlay's border, so the two read as a set
 _GRID = QColor(255, 255, 255, 38)
 _LABEL_FG = "#d7e3ea"
+_REFERENCE = "#8a93a3"  # the known-good curve, as in the Meter's chart
 
 _PLOT_W = 320
 _PLOT_H = 110
@@ -203,6 +227,18 @@ def render_graph_image(
             painter.drawText(plot, int(Qt.AlignmentFlag.AlignCenter), WAITING)
 
         line_w = max(1.0, 2.0 * factor)
+        if len(model.reference) >= 2:
+            # The known-good board, dashed and quiet, under the live traces.
+            pen = QPen(QColor(_REFERENCE), line_w, Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.drawPolyline(
+                QPolygonF(
+                    [
+                        QPointF(plot.left() + px * plot.width(), plot.bottom() - py * plot.height())
+                        for px, py in model.reference
+                    ]
+                )
+            )
         for colour, line in zip(line_colours, model.lines, strict=True):
             if len(line) < 2:
                 continue
@@ -228,6 +264,7 @@ def draw_graph_overlay(
     width: int | None = None,
     margin: int | None = None,
     colours: SeriesPalette | None = None,
+    reference: Sequence[tuple[float, float]] = (),
 ) -> np.ndarray:
     """Render the trend and composite it onto ``frame``.
 
@@ -240,7 +277,7 @@ def draw_graph_overlay(
     the readout's, so the two panels share both edges instead of the graph
     sticking out (#196).
     """
-    model = build_graph_model(samples, config.window_seconds)
+    model = build_graph_model(samples, config.window_seconds, reference)
     scale = auto_scale(frame.shape[1]) * max(0.1, config.scale)
     image = render_graph_image(model, scale, colours, width=width)
     if image.isNull():

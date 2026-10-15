@@ -51,9 +51,13 @@ def graph_payload(
     samples: Sequence[PowerSample],
     window_seconds: float,
     colours: SeriesPalette | None = None,
+    reference: Sequence[tuple[float, float]] = (),
 ) -> dict[str, Any]:
-    """The graph page: normalised polylines (x, y in 0..1) and the live values."""
-    model = build_graph_model(samples, window_seconds)
+    """The graph page: normalised polylines (x, y in 0..1) and the live values.
+
+    ``reference`` is the known-good power-on curve (#263), drawn dashed.
+    """
+    model = build_graph_model(samples, window_seconds, reference)
     c = colours or palette()
     return {
         "window_seconds": model.window_seconds,
@@ -64,6 +68,7 @@ def graph_payload(
             )
         ],
         "latest": list(model.latest) if model.latest is not None else None,
+        "reference": [list(p) for p in model.reference],
     }
 
 
