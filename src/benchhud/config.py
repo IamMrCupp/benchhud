@@ -93,12 +93,16 @@ class OverlayConfig:
     """Overlay preferences. ``colormap`` is a name (e.g. INFERNO), not a cv2 int —
     the mapping lives in the overlay adapter so config stays cv2-free."""
 
-    mode: str = "blend"  # blend | tint | marker
+    mode: str = "blend"  # blend | outline | tint | marker
     alpha: float = 0.5
     threshold: float = 60.0
+    # The colour range: auto follows the board (ambient to the hottest point);
+    # off uses tmin / tmax.
+    auto_range: bool = True
     tmin: float = 20.0
     tmax: float = 100.0
     colormap: str = "INFERNO"
+    scale_bar: bool = True  # a small colour scale with the range, top left
 
 
 @dataclass
@@ -301,7 +305,16 @@ class Config:
         _apply(
             cfg.overlay,
             data.get("overlay", {}),
-            ("mode", "alpha", "threshold", "tmin", "tmax", "colormap"),
+            (
+                "mode",
+                "alpha",
+                "threshold",
+                "auto_range",
+                "tmin",
+                "tmax",
+                "colormap",
+                "scale_bar",
+            ),
         )
         registration = data.get("registration", {})
         _apply(
