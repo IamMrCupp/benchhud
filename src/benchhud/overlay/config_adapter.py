@@ -74,6 +74,7 @@ def transform_from_config(cfg: RegistrationConfig) -> RegistrationTransform:
         offset_x=cfg.offset_x,
         offset_y=cfg.offset_y,
         rotation_deg=cfg.rotation_deg,
+        fit=cfg.version >= 2,
     )
 
 
@@ -83,4 +84,5 @@ def config_from_transform(transform: RegistrationTransform) -> RegistrationConfi
         offset_x=transform.offset_x,
         offset_y=transform.offset_y,
         rotation_deg=transform.rotation_deg,
+        version=2 if transform.fit else 1,
     )
