@@ -59,6 +59,8 @@ from benchhud.inventory import (
 from benchhud.jobs.capture import CaptureContext
 from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
+from benchhud.media import now_playing
+from benchhud.media.now_playing import NowPlayingWatcher
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
 from benchhud.overlay.composite import RangeTracker, colorize, compose
@@ -206,6 +208,7 @@ class MainWindow(QMainWindow):
         # Preferences change gets the current readings straight away.
         self._browser_hub = TopicHub()
         self._browser_server: BrowserSourceServer | None = None
+        self._now_playing: NowPlayingWatcher | None = None
         self._browser_warning: str | None = None
         self._demo: DemoSignal | None = None
         self._demo_timer: QTimer | None = None
@@ -1357,8 +1360,13 @@ class MainWindow(QMainWindow):
         self._sync_terminal()
         if self._browser_server is None and self._server_wanted():
             cfg = self._config.browser_sources
+            self._now_playing = self._make_now_playing()
             server = BrowserSourceServer(
-                self._browser_hub, cfg.port, panels=cfg.enabled, terminal=self._terminal
+                self._browser_hub,
+                cfg.port,
+                panels=cfg.enabled,
+                terminal=self._terminal,
+                now_playing_art=self._now_playing.art if self._now_playing else None,
             )
             try:
                 server.start()
@@ -1370,16 +1378,32 @@ class MainWindow(QMainWindow):
                 self._browser_warning = None
                 self._publish_telemetry()
                 self._publish_job()
+                if self._now_playing is not None:
+                    self._now_playing.start()
         self._update_terminal_panel()
         self._refresh_status()
 
     def stop_browser_sources(self) -> None:
         """Stop serving and drop every connected page (idempotent). The shell keeps running."""
         self._browser_warning = None
+        if self._now_playing is not None:
+            self._now_playing.stop()
+            self._now_playing = None
         if self._browser_server is None:
             return
         self._browser_server.stop()
         self._browser_server = None
+
+    def _make_now_playing(self) -> NowPlayingWatcher | None:
+        """The now-playing banner's watcher (#251), when it's on and can work here."""
+        cfg = self._config.now_playing
+        if not (now_playing.SUPPORTED and cfg.enabled and self._config.browser_sources.enabled):
+            return None
+        return NowPlayingWatcher(
+            lambda body: self._browser_hub.publish("nowplaying", body),
+            hide_when_paused=cfg.hide_when_paused,
+            label=cfg.label,
+        )
 
     def restart_browser_sources(self) -> None:
         """Apply a Preferences change (enable, port, terminal) without a relaunch."""

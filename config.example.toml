@@ -105,6 +105,7 @@ opacity = 0.9           # below 1.0 lets the board show through
 #   http://127.0.0.1:8780/panel/meter   V / A / W / DMM readout
 #   http://127.0.0.1:8780/panel/graph   live power trend
 #   http://127.0.0.1:8780/panel/job     selected job card (never the customer)
+#   http://127.0.0.1:8780/panel/nowplaying   the track playing on the bench (Linux)
 # Works the same on macOS, Linux and Windows. Loopback only; off by default.
 enabled = false
 port = 8780
@@ -165,6 +166,14 @@ library_dir = ""                       # e.g. "~/boards"
 extensions = ["obv", "brd", "bdv"]     # board-view formats
 schematic_extensions = ["pdf"]         # schematic formats filed alongside
 viewer = "auto"                        # auto | openboardview | flexbv
+
+[now_playing]
+# The now-playing banner (/panel/nowplaying): the track playing on the bench box,
+# from any player that publishes it on the desktop (Chrome playing SoundCloud,
+# VLC, Spotify). Served with the browser sources above. Linux only.
+enabled = true
+hide_when_paused = true
+label = "Now playing"
 
 [flash]
 # The Flash panel: read, back up and write SPI flash chips with flashrom. A
