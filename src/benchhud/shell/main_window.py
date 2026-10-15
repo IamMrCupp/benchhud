@@ -14,6 +14,7 @@ shell animates end to end with no camera.
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import sys
 import time
@@ -46,6 +47,8 @@ from benchhud.devices.discovery import (
     DeviceScanner,
     SystemDeviceScanner,
     resolve_capture_device,
+    same_device,
+    stable_path,
 )
 from benchhud.instruments.owon_spm8104 import InstrumentLimits, open_device
 from benchhud.instruments.session import InstrumentSession
@@ -125,7 +128,7 @@ def camera_label(device: str, cameras: Sequence[CameraDevice] = ()) -> str:
     """A human name for a configured camera: its scanned label, else the raw id."""
     text = device.strip()
     for camera in cameras:
-        if camera.identifier == text:
+        if same_device(camera.identifier, text):
             return camera.label
     return text
 
@@ -230,6 +233,7 @@ class MainWindow(QMainWindow):
         self._inventory_source: InventorySource = self._make_inventory_source()
         self._board_library = self._make_board_library()
 
+        self._stabilise_camera_paths()
         self.setObjectName("BenchhudMainWindow")
         self.setWindowTitle("benchhud")
         self.setWindowIcon(app_icon())
@@ -337,6 +341,24 @@ class MainWindow(QMainWindow):
 
         self._apply_config()
         unelide_tabs(self)
+
+    def _stabilise_camera_paths(self, stable: Callable[[str], str | None] = stable_path) -> None:
+        """Swap a configured /dev/videoN for its stable by-id link (#257).
+
+        A camera that drops off USB can come back under another number; its
+        by-id link follows it, so the scope and thermal reconnect by themselves.
+        A path with no camera behind it right now is left alone.
+        """
+        if not sys.platform.startswith("linux"):
+            return
+        panels = self._config.panels
+        for panel in (panels.scope, panels.thermal):
+            device = panel.device.strip()
+            if device.startswith("/") and os.path.basename(device).startswith("video"):
+                link = stable(device)
+                if link:
+                    log.info("camera %s is now configured by its stable name %s", device, link)
+                    panel.device = link
 
     def _apply_config(self) -> None:
         shell = self._config.shell

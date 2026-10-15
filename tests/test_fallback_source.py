@@ -141,7 +141,7 @@ def test_a_stalled_camera_is_released_and_retried():
     frame = source.read()
     assert frame is not None and frame.shape == (8, 8, 3)  # pattern, not frozen
     assert not camera.is_open
-    assert source.status == SourceStatus(False, "Scope Cam stopped sending frames")
+    assert source.status == SourceStatus(False, "Scope Cam stopped sending frames, reconnecting…")
 
     camera.frames = True  # plugged back in
     clock.now = 7.0
@@ -159,7 +159,7 @@ def test_stall_reason_survives_until_a_retry_actually_fails():
     source.read()
     clock.now = 2.0
     source.read()
-    assert source.status.reason == "Scope Cam stopped sending frames"
+    assert source.status.reason == "Scope Cam stopped sending frames, reconnecting…"
 
     camera.openable = False
     clock.now = 5.0

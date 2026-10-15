@@ -204,7 +204,10 @@ def test_losing_the_thermal_camera_clears_the_stale_heatmap(qtbot) -> None:
         )
         cam.live = False  # unplugged: OpenCV stays 'open' but frames stop
         qtbot.waitUntil(lambda: window.thermal_panel.last_temps is None, timeout=2000)
-        assert "no signal — T256s stopped sending frames" in window.statusBar().currentMessage()
+        assert (
+            "no signal — T256s stopped sending frames, reconnecting…"
+            in window.statusBar().currentMessage()
+        )
     finally:
         window.stop_thermal()
 
