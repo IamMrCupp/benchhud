@@ -16,11 +16,13 @@ from __future__ import annotations
 import logging
 import secrets
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime
 
 import cv2
+import numpy as np
 from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabBar, QWidget
@@ -65,6 +67,7 @@ from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
 from benchhud.overlay.composite import RangeTracker, colorize, compose
 from benchhud.overlay.graph import draw_graph_overlay
+from benchhud.overlay.reference import compare as compare_reference
 from benchhud.overlay.telemetry import Footprint, MeterReadout, draw_telemetry_overlay_sized
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.about import about_html
@@ -267,6 +270,11 @@ class MainWindow(QMainWindow):
         # Two-point thermal calibration (#243).
         self._calibration: list[Pair] | None = None
         self._thermal_range = RangeTracker()  # the overlay's auto range (#244)
+        # The known-good board's reference image for the selected job (#256).
+        self._reference: np.ndarray | None = None
+        self.choose_reference_file = self._ask_reference_file
+        self.controls_panel.reference_capture_requested.connect(self.capture_reference)
+        self.controls_panel.reference_load_requested.connect(self.load_reference)
         self._before_calibration: RegistrationTransform | None = None
         self.controls_panel.calibrate_requested.connect(self.start_calibration)
         self.controls_panel.undo_requested.connect(self.undo_calibration)
@@ -306,6 +314,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(terminal_dock, flash_dock)  # …and flashrom (#227)
         self.readings_panel = ReadingsPanel(self._job_store, self.jobs_panel.selected_job_id)
         self.jobs_panel.job_changed.connect(self.readings_panel.refresh)
+        self.jobs_panel.job_changed.connect(self._reference_for_job)
         readings_dock = self.panels.add_panel(self.readings_panel, left)
         self.minipro_panel = MiniproPanel(
             self._config.minipro, self._job_store, self.jobs_panel.selected_job_id
@@ -685,6 +694,11 @@ class MainWindow(QMainWindow):
         temps = self.thermal_panel.last_temps
         if scope is None and temps is None:
             return
+        if scope is not None:
+            # The good board goes under the thermal, so heat still reads on top (#256).
+            scope = compare_reference(
+                scope, self._reference, self.controls_panel.reference_settings(), time.monotonic()
+            )
         if temps is None:
             self._show_composite(scope)
             return
@@ -709,6 +723,78 @@ class MainWindow(QMainWindow):
         self._show_composite(compose(scope, temps, transform, settings))
 
     # --- thermal calibration (#243) --------------------------------------------
+
+    # --- known-good reference (#256) ---------------------------------------------
+
+    def _selected_board(self) -> str:
+        job_id = self.jobs_panel.selected_job_id()
+        job = self._job_store.get_job(job_id) if job_id is not None else None
+        return (job.board_id or "").strip() if job is not None else ""
+
+    def _reference_for_job(self) -> None:
+        """Load the selected job's board reference, if it has one."""
+        board = self._selected_board()
+        path = self._job_store.board_reference(board) if board else None
+        image = cv2.imread(path) if path else None
+        self._reference = image
+        panel = self.controls_panel
+        if not board:
+            panel.show_reference("Select a job with a board number to use a reference.")
+        elif image is None:
+            panel.show_reference(f"No reference for {board} yet. Capture a good board.")
+        else:
+            panel.show_reference(f"Reference for {board} loaded.")
+        self.render_composite()
+
+    def _save_reference(self, image: np.ndarray, board: str) -> None:
+        directory = self._job_store.references_dir()
+        self._reference = image
+        if directory is None:
+            self.controls_panel.show_reference(f"Reference for {board} set (not saved).")
+            return
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in board)
+        path = directory / f"{safe}.png"
+        cv2.imwrite(str(path), image)
+        self._job_store.set_board_reference(board, str(path))
+        self.controls_panel.show_reference(f"Saved as the known-good reference for {board}.")
+        self.render_composite()
+
+    def capture_reference(self) -> None:
+        """This scope frame becomes the board's known-good reference."""
+        board = self._selected_board()
+        frame = self.scope_panel.last_frame
+        if not board:
+            self.controls_panel.show_reference(
+                "Select a job with a board number first: references are per board.", error=True
+            )
+        elif frame is None:
+            self.controls_panel.show_reference("No scope frame to capture yet.", error=True)
+        else:
+            self._save_reference(frame.copy(), board)
+
+    def load_reference(self) -> None:
+        board = self._selected_board()
+        if not board:
+            self.controls_panel.show_reference(
+                "Select a job with a board number first: references are per board.", error=True
+            )
+            return
+        path = self.choose_reference_file()
+        if not path:
+            return
+        image = cv2.imread(path)
+        if image is None:
+            self.controls_panel.show_reference(f"Couldn't read {path} as an image.", error=True)
+            return
+        self._save_reference(image, board)
+
+    def _ask_reference_file(self) -> str | None:
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Known-good board photo", "", "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
+        )
+        return path or None
 
     @property
     def calibrating(self) -> bool:
