@@ -116,9 +116,10 @@ class RegistrationConfig:
     offset_x: float = 0.0
     offset_y: float = 0.0
     rotation_deg: float = 0.0
-    # 2: the thermal starts fitted to the scope frame and centred (#242).
-    # 1: the original native-size, top-left placement; converted on first use.
-    version: int = 2
+    # 3: fitted to the scope frame, centred, the fit following the rotation (#259).
+    # 2: fitted ignoring the rotation (#242). 1: native size, top left.
+    # Older versions are converted on first use, with no visible jump.
+    version: int = 3
 
 
 @dataclass
