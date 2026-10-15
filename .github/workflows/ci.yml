@@ -42,13 +42,11 @@ concurrency:
 
 jobs:
   lint-test:
-    # Pinned deliberately, not out of caution about a specific break: GitHub
-    # migrates `ubuntu-latest` to 26.04 over 2026-10-19 → 2026-11-19, and during
-    # that window the label is non-deterministic — some runs land on 24.04, some
-    # on 26.04. A failure would look like flakiness rather than an OS change.
-    # Bump to `ubuntu-26.04` deliberately once it's out (#158); the bench runs
-    # 26.04, so that's the target, not something to avoid.
-    runs-on: ubuntu-24.04
+    # The bench's OS (#158), pinned rather than `ubuntu-latest`: that label
+    # moves to a new LTS on GitHub's schedule, and during a rollout it lands on
+    # either image at random, so a break looks like flakiness. Bump this on
+    # purpose at the next LTS.
+    runs-on: ubuntu-26.04
     env:
       # PySide6 uses the offscreen Qt platform plugin in CI (no display).
       QT_QPA_PLATFORM: offscreen
@@ -87,7 +85,7 @@ jobs:
   # to install on the bench's 26.04 (Python 3.14). The container also keeps this
   # independent of the ubuntu-latest migration (#158).
   deb:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     container: ubuntu:26.04
     steps:
       - name: Install build tooling
@@ -134,7 +132,7 @@ jobs:
   # apt can resolve every dependency and that the app actually starts.
   deb-verify:
     needs: deb
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     container: ubuntu:26.04
     env:
       QT_QPA_PLATFORM: offscreen
