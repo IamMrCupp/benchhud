@@ -167,6 +167,12 @@ extensions = ["obv", "brd", "bdv"]     # board-view formats
 schematic_extensions = ["pdf"]         # schematic formats filed alongside
 viewer = "auto"                        # auto | openboardview | flexbv
 
+[minipro]
+# The T48 panel: read, back up and write chips on an XGecu T48 / TL866 with
+# minipro. Backups are two reads that must match, filed with the selected job.
+command = "minipro"   # on PATH, or an absolute path
+last_chip = ""        # the panel remembers the last part, e.g. "W25Q64BV@SOIC8"
+
 [now_playing]
 # The now-playing banner (/panel/nowplaying): the track playing on the bench box,
 # from any player that publishes it on the desktop (Chrome playing SoundCloud,

@@ -251,6 +251,14 @@ class BoardsConfig:
 
 
 @dataclass
+class MiniproConfig:
+    """The T48 panel (#253): which minipro, and the last chip used."""
+
+    command: str = "minipro"
+    last_chip: str = ""  # e.g. W25Q64BV@SOIC8; the panel looks it up on start
+
+
+@dataclass
 class NowPlayingConfig:
     """The now-playing banner, an OBS Browser source (#251). Linux: it reads the
     desktop's media players (MPRIS), so Chrome playing SoundCloud just works."""
@@ -285,6 +293,7 @@ class Config:
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
     flash: FlashConfig = field(default_factory=FlashConfig)
+    minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     tools: list[ToolConfig] = field(default_factory=list)
 
@@ -392,6 +401,7 @@ class Config:
             ("library_dir", "extensions", "schematic_extensions", "viewer"),
         )
         _apply(cfg.flash, data.get("flash", {}), ("command", "programmer"))
+        _apply(cfg.minipro, data.get("minipro", {}), ("command", "last_chip"))
         _apply(
             cfg.now_playing,
             data.get("now_playing", {}),
