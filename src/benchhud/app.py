@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     window.start_telemetry()  # no-op unless [panels.telemetry] enabled and present
     window.start_output()  # no-op unless [output] enabled
     window.start_browser_sources()  # no-op unless [browser_sources] or [terminal] enabled
+
+    from benchhud.shell import quit_signals
+
+    # A signal closes the window the normal way: output off, then save (#291).
+    quit_signals.install(window.close, app)
     return app.exec()
 
 
