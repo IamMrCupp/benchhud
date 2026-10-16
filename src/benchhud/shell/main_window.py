@@ -70,7 +70,13 @@ from benchhud.media import now_playing
 from benchhud.media.now_playing import NowPlayingWatcher
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
-from benchhud.overlay.composite import RangeTracker, colorize, compose
+from benchhud.overlay.composite import (
+    MarkerTracker,
+    OverlayMode,
+    RangeTracker,
+    colorize,
+    compose,
+)
 from benchhud.overlay.graph import draw_graph_overlay
 from benchhud.overlay.reference import compare as compare_reference
 from benchhud.overlay.telemetry import Footprint, MeterReadout, draw_telemetry_overlay_sized
@@ -279,6 +285,7 @@ class MainWindow(QMainWindow):
         # Two-point thermal calibration (#243).
         self._calibration: list[Pair] | None = None
         self._thermal_range = RangeTracker()  # the overlay's auto range (#244)
+        self._marker = MarkerTracker()  # a steady hot-spot marker (#271)
         # The known-good board's reference image for the selected job (#256).
         self._reference: np.ndarray | None = None
         self.choose_reference_file = self._ask_reference_file
@@ -764,7 +771,8 @@ class MainWindow(QMainWindow):
             transform = transform.migrated(src, dst)
             self.controls_panel.set_transform(transform)
             log.info("thermal registration converted to the centred placement: %s", transform)
-        self._show_composite(compose(scope, temps, transform, settings))
+        marker = self._marker.update(temps) if settings.mode is OverlayMode.MARKER else None
+        self._show_composite(compose(scope, temps, transform, settings, marker))
 
     # --- thermal calibration (#243) --------------------------------------------
 

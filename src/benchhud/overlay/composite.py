@@ -90,23 +90,82 @@ def draw_marker(
     y: int,
     label: str | None = None,
     color: tuple[int, int, int] = (0, 255, 255),
-    radius: int = 8,
+    radius: int | None = None,
 ) -> np.ndarray:
-    """Draw a ring (and optional label) at ``(x, y)`` on a copy of ``scope``."""
+    """Mark ``(x, y)`` on a copy of ``scope``: a ring, a crosshair and a label.
+
+    Sized to the frame (#271): a fixed 8 px ring was a speck on a 1080p scope.
+    Every stroke has a dark edge and the label a dark box, so it reads on any
+    board, bright or yellow.
+    """
     out = scope.copy()
-    cv2.circle(out, (x, y), radius, color, 2)
+    unit = max(1.0, scope.shape[1] / 640)
+    r = radius if radius is not None else round(10 * unit)
+    thick = max(2, round(2 * unit))
+    edge = (0, 0, 0)
+    tick = r + round(6 * unit)
+    for colour, width in ((edge, thick + max(2, round(unit))), (color, thick)):
+        cv2.circle(out, (x, y), r, colour, width, cv2.LINE_AA)
+        # Crosshair: four ticks outside the ring, pointing at the exact pixel.
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            start = (x + dx * (r - round(3 * unit)), y + dy * (r - round(3 * unit)))
+            end = (x + dx * tick, y + dy * tick)
+            cv2.line(out, start, end, colour, width, cv2.LINE_AA)
     if label:
-        cv2.putText(
-            out,
-            label,
-            (x + radius + 2, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            color,
-            1,
-            cv2.LINE_AA,
-        )
+        font, scale = cv2.FONT_HERSHEY_SIMPLEX, 0.55 * unit
+        weight = max(1, round(1.5 * unit))
+        (tw, th), base = cv2.getTextSize(label, font, scale, weight)
+        pad = round(4 * unit)
+        lx = min(x + tick + pad, out.shape[1] - tw - 2 * pad)
+        ly = max(y - pad, th + 2 * pad)
+        box_tl = (max(0, lx - pad), ly - th - pad)
+        box_br = (min(out.shape[1] - 1, lx + tw + pad), ly + base + pad)
+        region = out[box_tl[1] : box_br[1], box_tl[0] : box_br[0]]
+        if region.size:  # a translucent dark box, so the board shows faintly behind
+            out[box_tl[1] : box_br[1], box_tl[0] : box_br[0]] = (region * 0.35).astype(out.dtype)
+        cv2.putText(out, label, (lx, ly), font, scale, color, weight, cv2.LINE_AA)
     return out
+
+
+#: How much hotter a new spot must read before the marker moves to it.
+MARKER_HYSTERESIS_C = 0.5
+
+
+class MarkerTracker:
+    """A steady hot-spot marker (#271), in thermal pixels.
+
+    Following the single hottest pixel every frame made the marker hop between
+    two spots within a fraction of a degree, or with sensor noise. This holds
+    its spot until another is clearly hotter, or it cools away, and glides
+    rather than jumps.
+    """
+
+    def __init__(self, hysteresis: float = MARKER_HYSTERESIS_C, smoothing: float = 0.5) -> None:
+        self._hysteresis = hysteresis
+        self._smoothing = smoothing
+        self._target: tuple[int, int] | None = None
+        self._pos: tuple[float, float] | None = None
+        self._value: float | None = None
+
+    def update(self, temps: np.ndarray) -> tuple[float, float, float]:
+        """(x, y, °C) to mark this frame."""
+        spot = hottest(temps)
+        if self._target is None:
+            self._target = (spot.x, spot.y)
+        else:
+            held = float(temps[self._target[1], self._target[0]])
+            if spot.value > held + self._hysteresis:
+                self._target = (spot.x, spot.y)
+        tx, ty = self._target
+        here = float(temps[ty, tx])
+        k = self._smoothing
+        if self._pos is None:
+            self._pos, self._value = (float(tx), float(ty)), here
+        else:
+            px, py = self._pos
+            self._pos = (px + k * (tx - px), py + k * (ty - py))
+            self._value = (self._value or here) + k * (here - (self._value or here))
+        return self._pos[0], self._pos[1], float(self._value)
 
 
 def auto_range(temps: np.ndarray) -> tuple[float, float]:
@@ -217,6 +276,7 @@ def compose(
     temps: np.ndarray,
     transform: RegistrationTransform,
     settings: OverlaySettings,
+    marker: tuple[float, float, float] | None = None,
 ) -> np.ndarray:
     """Register the thermal °C array to the scope and apply the overlay mode.
 
@@ -234,8 +294,16 @@ def compose(
     elif settings.mode is OverlayMode.TINT:
         return tint_above(scope, warped, settings.threshold, settings.tint_color, settings.alpha)
     elif settings.mode is OverlayMode.MARKER:
-        spot = hottest(warped)
-        return draw_marker(scope, spot.x, spot.y, f"{spot.value:.1f}C", settings.marker_color)
+        if marker is not None:
+            # A tracked spot (MarkerTracker), in thermal pixels: map it through
+            # the registration so calibration still applies.
+            src = (temps.shape[1], temps.shape[0])
+            mx, my = transform.map_point(marker[0], marker[1], src, dst_size)
+            x, y, value = round(mx), round(my), marker[2]
+        else:
+            spot = hottest(warped)
+            x, y, value = spot.x, spot.y, spot.value
+        return draw_marker(scope, x, y, f"{value:.1f}C", settings.marker_color)
     else:
         raise ValueError(f"unknown overlay mode: {settings.mode!r}")
     return draw_scale_bar(out, lo, hi, settings.colormap) if settings.scale_bar else out
