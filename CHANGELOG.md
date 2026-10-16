@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.2](https://github.com/IamMrCupp/benchhud/compare/v0.10.1...v0.10.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **instruments:** space OWON commands so none are dropped, and drop the DMM mode picker it ignores ([f3e1bee](https://github.com/IamMrCupp/benchhud/commit/f3e1bee1d904de2c34273e7455616aa3915677e4))
+* **thermal:** ride out shutter pauses, back off reconnects, and reset a hung camera's port ([c0a1d8e](https://github.com/IamMrCupp/benchhud/commit/c0a1d8ee9262fde3aab53f813166973817deb207))
+* **thermal:** steady panel colours and no marker on a board at room temperature ([1380a5b](https://github.com/IamMrCupp/benchhud/commit/1380a5b13eb76218d357fd14f8d32a956d0aecc4))
+
 ## [0.10.1](https://github.com/IamMrCupp/benchhud/compare/v0.10.0...v0.10.1) (2026-10-16)
 
 
