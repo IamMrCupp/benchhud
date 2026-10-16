@@ -35,6 +35,14 @@ class InstrumentLimitError(Exception):
     """
 
 
+class SetpointNotAppliedError(Exception):
+    """The supply reports something other than what was just set (#289).
+
+    The OWON has dropped commands without an error (#280), so a write isn't
+    trusted until it's read back.
+    """
+
+
 class NotAQueryError(Exception):
     """A console line that isn't a single SCPI query was refused (#174).
 
@@ -203,6 +211,47 @@ class OwonSpm8104:
         to drop it, and shutdown paths must not depend on a config flag.
         """
         self._inst.command("OUTP OFF")
+
+    # --- verified writes (#289): set, read back, and say so if it didn't take --
+
+    #: How far a read-back may differ from what was set (the supply rounds to mV/mA).
+    READBACK_TOLERANCE = 0.002
+
+    def apply_voltage(self, volts: float) -> None:
+        """Set the voltage and confirm the supply took it."""
+        self.set_voltage(volts)
+        self._confirm_value("VOLT?", volts, "V", "voltage")
+
+    def apply_current_limit(self, amps: float) -> None:
+        """Set the current limit and confirm the supply took it."""
+        self.set_current_limit(amps)
+        self._confirm_value("CURR?", amps, "A", "current limit")
+
+    def apply_output(self, on: bool) -> None:
+        """Turn the output on or off and confirm it."""
+        if on:
+            self.output_on()
+        else:
+            self.output_off()
+        want = "ON" if on else "OFF"
+        got = self._inst.query("OUTP?").strip().upper()
+        if got != want:
+            raise SetpointNotAppliedError(
+                f"asked for output {want}, the supply reports {got or 'nothing'}"
+            )
+
+    def _confirm_value(self, query: str, want: float, unit: str, what: str) -> None:
+        reply = self._inst.query(query).strip()
+        try:
+            got = float(reply)
+        except ValueError:
+            raise SetpointNotAppliedError(
+                f"asked for {want:.3f} {unit}, the supply's {what} reads {reply or 'nothing'}"
+            ) from None
+        if abs(got - want) > self.READBACK_TOLERANCE:
+            raise SetpointNotAppliedError(
+                f"asked for {want:.3f} {unit}, the supply's {what} is {got:.3f} {unit}"
+            )
 
     def set_dmm_mode(self, mode: str) -> None:
         """Switch the DMM mode, by the token the meter reports (e.g. ``VOLT:DC``).

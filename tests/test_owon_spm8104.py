@@ -10,6 +10,7 @@ from benchhud.instruments.owon_spm8104 import (
     DmmReading,
     InstrumentLimitError,
     InstrumentLimits,
+    SetpointNotAppliedError,
     from_serial_port,
     parse_dmm_config,
 )
@@ -201,3 +202,40 @@ def test_reads_are_unaffected_by_the_control_gate(fake_owon_serial) -> None:
     owon = from_serial_port(fake_owon_serial)
     assert owon.measure_voltage() == 3.300
     assert owon.read_dmm().mode == "CONT"
+
+
+# --- verified writes (#289) ------------------------------------------------
+
+
+def test_applied_setpoints_are_read_back(fake_owon_serial) -> None:
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
+    owon.apply_voltage(3.3)
+    owon.apply_current_limit(0.25)
+    owon.apply_output(True)
+    owon.apply_output(False)
+    assert fake_owon_serial.written == [
+        "VOLT 3.300", "VOLT?", "CURR 0.250", "CURR?", "OUTP ON", "OUTP?", "OUTP OFF", "OUTP?",
+    ]  # fmt: skip
+
+
+def test_a_dropped_setpoint_is_reported_not_trusted(fake_owon_serial) -> None:
+    """The OWON ignored writes without an error (#280): say so, with both values."""
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
+    owon.apply_current_limit(0.8)
+    fake_owon_serial.drop.add("CURR")
+    with pytest.raises(SetpointNotAppliedError, match=r"asked for 0\.250 A.*is 0\.800 A"):
+        owon.apply_current_limit(0.25)
+
+
+def test_an_output_that_stays_on_is_reported(fake_owon_serial) -> None:
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
+    owon.apply_output(True)
+    fake_owon_serial.drop.add("OUTP")
+    with pytest.raises(SetpointNotAppliedError, match="output OFF, the supply reports ON"):
+        owon.apply_output(False)
+
+
+def test_an_unreadable_read_back_is_a_failure(make_fake_serial) -> None:
+    owon = from_serial_port(make_fake_serial({}), control_enabled=True)
+    with pytest.raises(SetpointNotAppliedError, match="reads nothing"):
+        owon.apply_voltage(5.0)
