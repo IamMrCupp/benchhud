@@ -78,3 +78,26 @@ def test_compose_maps_the_tracked_spot_through_the_registration() -> None:
     cx, cy = transform.map_point(128, 96, (256, 192), (1280, 720))
     ys, xs = np.nonzero(out.any(axis=2))
     assert abs(np.median(xs) - cx) < 40 and abs(np.median(ys) - cy) < 40
+
+
+def noisy_board(seed: int) -> np.ndarray:
+    """A board at room temperature: a degree of sensor noise, nothing hot."""
+    rng = np.random.default_rng(seed)
+    return (30.0 + rng.normal(0.0, 0.5, (192, 256))).astype(np.float32)
+
+
+def test_no_marker_when_nothing_stands_out() -> None:
+    """On a flat board the hottest pixel is noise; marking it made the marker hop (#278)."""
+    tracker = MarkerTracker()
+    for seed in range(5):
+        assert tracker.update(noisy_board(seed)) is None
+    temps = noisy_board(9)
+    temps[100, 120] = 45.0  # the iron touches down
+    assert tracker.update(temps)[:2] == (120, 100)
+
+
+def test_compose_marks_nothing_on_a_flat_board() -> None:
+    scope = np.full((192, 256, 3), 80, dtype=np.uint8)
+    settings = OverlaySettings(mode=OverlayMode.MARKER, scale_bar=False)
+    out = compose(scope, noisy_board(1), RegistrationTransform(), settings)
+    assert np.array_equal(out, scope)

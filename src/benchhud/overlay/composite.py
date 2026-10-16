@@ -29,7 +29,8 @@ class OverlayMode(Enum):
 
 
 #: The auto range spans at least this much, so a cold board isn't all noise.
-MIN_SPAN_C = 5.0
+#: Sensor noise is about a degree; at 5 °C it still swept the palette (#278).
+MIN_SPAN_C = 10.0
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,14 @@ def draw_marker(
 
 #: How much hotter a new spot must read before the marker moves to it.
 MARKER_HYSTERESIS_C = 0.5
+#: How far above the board (the median) a spot must read to be marked at all.
+#: Below this the "hottest" pixel is just noise, and the marker hopped (#278).
+MARKER_MIN_CONTRAST_C = 3.0
+
+
+def stands_out(temps: np.ndarray, value: float) -> bool:
+    """Whether ``value`` is clearly warmer than the board, not noise."""
+    return value - float(np.median(temps)) >= MARKER_MIN_CONTRAST_C
 
 
 class MarkerTracker:
@@ -147,9 +156,12 @@ class MarkerTracker:
         self._pos: tuple[float, float] | None = None
         self._value: float | None = None
 
-    def update(self, temps: np.ndarray) -> tuple[float, float, float]:
-        """(x, y, °C) to mark this frame."""
+    def update(self, temps: np.ndarray) -> tuple[float, float, float] | None:
+        """(x, y, °C) to mark this frame, or None when nothing stands out."""
         spot = hottest(temps)
+        if not stands_out(temps, spot.value):
+            self._target = self._pos = self._value = None
+            return None
         if self._target is None:
             self._target = (spot.x, spot.y)
         else:
@@ -168,21 +180,27 @@ class MarkerTracker:
         return self._pos[0], self._pos[1], float(self._value)
 
 
-def auto_range(temps: np.ndarray) -> tuple[float, float]:
-    """Ambient (the median) to the hottest point, at least MIN_SPAN_C wide."""
-    low = float(np.median(temps))
+def auto_range(temps: np.ndarray, low_percentile: float = 50.0) -> tuple[float, float]:
+    """Ambient (the median) to the hottest point, at least MIN_SPAN_C wide.
+
+    The overlay starts at the median so only what's warmer than the board is
+    coloured. A full heat map wants a lower floor (``low_percentile=1``): starting
+    at the median, half its pixels flickered between black and colour (#278).
+    """
+    low = float(np.percentile(temps, low_percentile))
     return low, max(float(temps.max()), low + MIN_SPAN_C)
 
 
 class RangeTracker:
     """Smooths the auto range over frames, so the palette doesn't flicker."""
 
-    def __init__(self, smoothing: float = 0.15) -> None:
+    def __init__(self, smoothing: float = 0.15, low_percentile: float = 50.0) -> None:
         self._smoothing = smoothing
+        self._low_percentile = low_percentile
         self._range: tuple[float, float] | None = None
 
     def update(self, temps: np.ndarray) -> tuple[float, float]:
-        low, high = auto_range(temps)
+        low, high = auto_range(temps, self._low_percentile)
         if self._range is not None:
             k = self._smoothing
             low = self._range[0] + k * (low - self._range[0])
@@ -302,6 +320,8 @@ def compose(
             x, y, value = round(mx), round(my), marker[2]
         else:
             spot = hottest(warped)
+            if not stands_out(warped, spot.value):
+                return scope.copy()  # nothing warmer than the board
             x, y, value = spot.x, spot.y, spot.value
         return draw_marker(scope, x, y, f"{value:.1f}C", settings.marker_color)
     else:
