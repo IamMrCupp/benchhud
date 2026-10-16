@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QDoubleSpinBox,
     QGridLayout,
     QGroupBox,
@@ -30,6 +31,18 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QWidget,
+)
+
+#: DMM modes offered, as (label, the meter's mode token) (#283).
+DMM_MODES = (
+    ("DC volts", "VOLT:DC"),
+    ("AC volts", "VOLT:AC"),
+    ("DC amps", "CURR:DC"),
+    ("AC amps", "CURR:AC"),
+    ("Resistance", "RES"),
+    ("Continuity", "CONT"),
+    ("Diode", "DIOD"),
+    ("Capacitance", "CAP"),
 )
 
 #: Asks the operator to confirm turning the output on; True means go ahead.
@@ -55,6 +68,7 @@ class SupplyControls(QGroupBox):
     set_current_requested = Signal(float)
     output_on_requested = Signal()
     output_off_requested = Signal()
+    dmm_mode_requested = Signal(str)
 
     def __init__(
         self, confirm: ConfirmOutputOn = confirm_output_on, parent: QWidget | None = None
@@ -83,14 +97,16 @@ class SupplyControls(QGroupBox):
         self.off_button = QPushButton("Output OFF")
         self.off_button.setToolTip("Always available: dropping a rail never needs control on")
         self.off_button.clicked.connect(self.output_off_requested)
+        self.dmm_mode = QComboBox()
+        for label, token in DMM_MODES:
+            self.dmm_mode.addItem(label, token)
+        self.dmm_mode.activated.connect(
+            lambda _i: self.dmm_mode_requested.emit(self.dmm_mode.currentData())
+        )
 
         self.status = QLabel()
         self.status.setObjectName("SupplyStatus")
         self.status.setWordWrap(True)
-        # The SPM8104 takes no DMM mode change over SCPI (#280): it's the dial.
-        note = QLabel("Set the DMM mode on the meter itself.")
-        note.setObjectName("SupplyNote")
-        note.setWordWrap(True)
 
         # The output buttons get a row of their own: sharing the Set column
         # made that column as wide as "Output OFF", and the meter dock too
@@ -109,8 +125,9 @@ class SupplyControls(QGroupBox):
         grid.addWidget(self.current, 1, 1)
         grid.addWidget(self.set_current_button, 1, 2)
         grid.addLayout(output_row, 2, 0, 1, 3)
-        grid.addWidget(self.status, 3, 0, 1, 3)
-        grid.addWidget(note, 4, 0, 1, 3)
+        grid.addWidget(QLabel("DMM"), 3, 0)
+        grid.addWidget(self.dmm_mode, 3, 1, 1, 2)
+        grid.addWidget(self.status, 4, 0, 1, 3)
         self.set_available(connected=False, control=False, max_voltage=5.5, max_current=1.0)
 
     def set_available(
@@ -126,6 +143,7 @@ class SupplyControls(QGroupBox):
             self.current,
             self.set_current_button,
             self.on_button,
+            self.dmm_mode,
         ):
             widget.setEnabled(writes)
         self.off_button.setEnabled(connected)

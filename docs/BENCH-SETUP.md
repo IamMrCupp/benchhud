@@ -298,10 +298,9 @@ max_current = 1.0
 - benchhud turns the output off when it connects, disconnects and quits, and
   never inherits a live rail.
 
-Voltage, current limit and output on/off were verified on the reference bench
-(#164). The DMM mode can't be changed remotely: the SPM8104 accepts the commands
-without an error and ignores them, so set it on the meter. benchhud still reads
-whichever mode the meter is in.
+Voltage, current limit, output on/off and the DMM mode were verified on the
+reference bench (#164, #283). The SPM8104's DMM has eight modes: DC and AC
+volts, DC and AC amps, resistance, continuity, diode and capacitance.
 
 ## Troubleshooting
 
