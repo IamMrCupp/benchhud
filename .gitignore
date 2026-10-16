@@ -33,3 +33,6 @@ logs/
 
 # Output of scripts/check_camera.py — a real camera frame, never commit it
 camera-check.png
+
+# Stray AI-session output folder — nothing in it belongs to benchhud
+Claude outputs/
