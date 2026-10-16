@@ -463,7 +463,7 @@ class PreferencesDialog(QDialog):
     def _build_inventory_tab(self) -> QWidget:
         inventory = self._config.inventory
         self.inventory_base_url = QLineEdit(inventory.base_url)
-        self.inventory_base_url.setPlaceholderText("http://192.168.7.204:8000")
+        self.inventory_base_url.setPlaceholderText("http://bench-parts.local:8000")
         self.inventory_token = QLineEdit(inventory.token)
         self.inventory_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.inventory_token.setPlaceholderText("bench-parts API token")
