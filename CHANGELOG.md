@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.5](https://github.com/IamMrCupp/benchhud/compare/v0.10.4...v0.10.5) (2026-10-16)
+
+
+### Bug Fixes
+
+* **instruments:** read supply setpoints back and report any the supply didn't take ([530771c](https://github.com/IamMrCupp/benchhud/commit/530771c607835687277ca69e5e93dbeab9f96437))
+* **shell:** close cleanly on SIGTERM and SIGINT, so the output goes off and settings save ([b19a375](https://github.com/IamMrCupp/benchhud/commit/b19a3750f145f7f0a2cc468c3df2b801dd78e34b))
+
 ## [0.10.4](https://github.com/IamMrCupp/benchhud/compare/v0.10.3...v0.10.4) (2026-10-16)
 
 
