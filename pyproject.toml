@@ -5,7 +5,7 @@ description = "A microsoldering / board-repair bench HUD: fuses scope + thermal 
 readme = "README.md"
 requires-python = ">=3.12"
 license = "PolyForm-Small-Business-1.0.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICES"]
 authors = [{ name = "Aaron Cupp", email = "mrcupp@mrcupp.com" }]
 keywords = ["microsoldering", "board-repair", "thermal", "hud", "obs", "opencv"]
 
