@@ -13,14 +13,14 @@ import cv2
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap, QResizeEvent
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from benchhud.overlay.composite import RangeTracker, colorize
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_image import bgr_to_qimage
 from benchhud.thermal.analyze import hottest
 
-PAUSED_SUFFIX = "   (paused)"
+PAUSED_SUFFIX = "  (paused)"
 
 
 def _dimmed(pixmap: QPixmap) -> QPixmap:
@@ -62,6 +62,12 @@ class ThermalPanel(Panel):
         self._view.setMinimumSize(160, 120)
         self._readout = QLabel("max: —")
         self._readout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Neither label may size the panel (#294). The readout's width changes
+        # as the hot spot moves, and the image's size hint is whatever it was
+        # last scaled to: either one let the dock reflow, and the image jump,
+        # every frame.
+        self._view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self._readout.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -94,7 +100,9 @@ class ThermalPanel(Panel):
 
         spot = hottest(temps)
         self._readout.setText(
-            f"max: {spot.value:.1f}°C @ ({spot.x}, {spot.y})   scale {low:.0f} to {high:.0f}°C"
+            # Two short lines, so the readout fits the narrow dock it can no
+            # longer widen (#294).
+            f"max: {spot.value:.1f}°C @ ({spot.x}, {spot.y})\nscale {low:.0f} to {high:.0f}°C"
         )
 
     def set_style(self, *, auto_range: bool, tmin: float, tmax: float, colormap: int) -> None:

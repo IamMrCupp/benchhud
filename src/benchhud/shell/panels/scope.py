@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QResizeEvent
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_image import bgr_to_qimage
@@ -26,6 +26,9 @@ class ScopePanel(Panel):
         self._view = QLabel("No signal")
         self._view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._view.setMinimumSize(160, 120)
+        # The image's size hint is whatever it was last scaled to; don't let it
+        # size the panel (#294).
+        self._view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._source_pixmap: QPixmap | None = None
         self._last_frame: np.ndarray | None = None
 
