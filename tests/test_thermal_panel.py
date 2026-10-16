@@ -54,3 +54,20 @@ def test_shell_hosts_thermal_panel(qtbot) -> None:
     window = MainWindow()
     qtbot.addWidget(window)
     assert "thermal" in window.panels.panel_ids()
+
+
+def test_a_pause_dims_the_last_frame_rather_than_blanking(qtbot) -> None:
+    """The T256s pauses to recalibrate; flashing "No signal" each time flickered (#276)."""
+    from benchhud.shell.panels.thermal import PAUSED_SUFFIX
+
+    panel = ThermalPanel()
+    qtbot.addWidget(panel)
+    panel.update_temps(np.full((48, 64), 30.0, dtype=np.float32))
+    panel.set_paused(True)
+    assert panel.paused and panel.has_frame
+    assert panel.readout_text.endswith(PAUSED_SUFFIX)
+    panel.set_paused(True)
+    assert panel.readout_text.count(PAUSED_SUFFIX) == 1
+    panel.update_temps(np.full((48, 64), 31.0, dtype=np.float32))
+    assert not panel.paused
+    assert PAUSED_SUFFIX not in panel.readout_text

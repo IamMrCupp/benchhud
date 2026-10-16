@@ -66,6 +66,10 @@ class ScopePanelConfig:
 class ThermalPanelConfig:
     enabled: bool = False
     device: str = "/dev/video6"
+    # The camera's hub port as "hub:port" (e.g. "1-4:4", from `uhubctl`). When
+    # set, a camera that's been gone 30 s gets its port reset once (#276). Needs
+    # uhubctl and passwordless sudo for it. Empty: never.
+    reset_port: str = ""
 
 
 @dataclass
@@ -321,7 +325,7 @@ class Config:
         _apply(
             cfg.panels.scope, panels_d.get("scope", {}), ("enabled", "device", "width", "height")
         )
-        _apply(cfg.panels.thermal, panels_d.get("thermal", {}), ("enabled", "device"))
+        _apply(cfg.panels.thermal, panels_d.get("thermal", {}), ("enabled", "device", "reset_port"))
         _apply(
             cfg.panels.telemetry,
             panels_d.get("telemetry", {}),

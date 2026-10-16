@@ -12,13 +12,25 @@ from __future__ import annotations
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QResizeEvent
+from PySide6.QtGui import QPainter, QPixmap, QResizeEvent
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from benchhud.overlay.composite import RangeTracker, colorize
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_image import bgr_to_qimage
 from benchhud.thermal.analyze import hottest
+
+PAUSED_SUFFIX = "   (paused)"
+
+
+def _dimmed(pixmap: QPixmap) -> QPixmap:
+    out = QPixmap(pixmap.size())
+    out.fill(Qt.GlobalColor.black)
+    painter = QPainter(out)
+    painter.setOpacity(0.45)
+    painter.drawPixmap(0, 0, pixmap)
+    painter.end()
+    return out
 
 
 class ThermalPanel(Panel):
@@ -42,6 +54,7 @@ class ThermalPanel(Panel):
         self._range = RangeTracker()
         self._source_pixmap: QPixmap | None = None
         self._last_temps: np.ndarray | None = None
+        self._paused = False
 
         self._view = QLabel("No signal")
         self._view.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -72,6 +85,7 @@ class ThermalPanel(Panel):
         if temps is None:
             return
         self._last_temps = temps
+        self._paused = False
         low, high = self._range.update(temps) if self._auto else (self._tmin, self._tmax)
         heat = colorize(temps, low, high, self._colormap)
         self._source_pixmap = QPixmap.fromImage(bgr_to_qimage(heat))
@@ -102,15 +116,36 @@ class ThermalPanel(Panel):
         self._view.setText("No signal")
         self._readout.setText("max: —")
 
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    def set_paused(self, paused: bool) -> None:
+        """Show the last frame dimmed while the camera pauses (#276).
+
+        Thermal cameras stop sending frames while the shutter recalibrates. Blanking
+        to "No signal" for each pause made the panel flicker.
+        """
+        if paused == self._paused:
+            return
+        self._paused = paused
+        if self._source_pixmap is not None:
+            text = self._readout.text().removesuffix(PAUSED_SUFFIX)
+            self._readout.setText(text + (PAUSED_SUFFIX if paused else ""))
+            self._render()
+
     def _render(self) -> None:
         if self._source_pixmap is None:
             return
+        pixmap = self._source_pixmap
+        if self._paused:
+            pixmap = _dimmed(pixmap)
         target = self._view.size()
         if target.isEmpty():
-            self._view.setPixmap(self._source_pixmap)
+            self._view.setPixmap(pixmap)
         else:
             self._view.setPixmap(
-                self._source_pixmap.scaled(
+                pixmap.scaled(
                     target,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
