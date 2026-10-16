@@ -121,3 +121,10 @@ def test_instruments_survives_a_round_trip() -> None:
     c.instruments.control = True
     c.instruments.max_voltage = 12.0
     assert cfg.Config.from_dict(c.to_dict()).instruments == c.instruments
+
+
+def test_thermal_reset_port_round_trips() -> None:
+    c = cfg.Config()
+    assert c.panels.thermal.reset_port == ""
+    c.panels.thermal.reset_port = "1-4:4"
+    assert cfg.Config.from_dict(c.to_dict()).panels.thermal.reset_port == "1-4:4"

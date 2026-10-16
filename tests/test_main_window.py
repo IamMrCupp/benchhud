@@ -236,3 +236,31 @@ def test_reconfigure_thermal_starts_and_stops_with_preferences(qtbot) -> None:
     config.panels.thermal.enabled = False
     window.reconfigure_thermal()
     assert window.thermal_status() is None  # stopped
+
+
+def test_a_lost_thermal_gets_its_port_reset_once(qtbot) -> None:
+    """With reset_port set, a camera gone 30 s has its hub port cycled, once per outage (#276)."""
+    config = Config()
+    config.panels.thermal.reset_port = "1-4:4"
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    ran: list[list[str]] = []
+    window.reset_runner = ran.append
+    window._maybe_reset_thermal_port(10.0)
+    window._maybe_reset_thermal_port(31.0)
+    window._maybe_reset_thermal_port(45.0)
+    qtbot.waitUntil(lambda: len(ran) == 1, timeout=2000)
+    assert ran[0] == ["sudo", "-n", "uhubctl", "-l", "1-4", "-p", "4", "-a", "cycle", "-d", "3"]
+    window._maybe_reset_thermal_port(0.0)  # back: the next outage may reset again
+    window._maybe_reset_thermal_port(31.0)
+    qtbot.waitUntil(lambda: len(ran) == 2, timeout=2000)
+
+
+def test_no_port_reset_without_a_port(qtbot) -> None:
+    window = MainWindow(Config())
+    qtbot.addWidget(window)
+    ran: list[list[str]] = []
+    window.reset_runner = ran.append
+    window._maybe_reset_thermal_port(120.0)
+    qtbot.wait(50)
+    assert ran == []

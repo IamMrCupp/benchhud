@@ -108,6 +108,27 @@ Check how often it has dropped since boot with
 `journalctl -k -b | grep -c "USB disconnect"`. For a different camera, take its
 `idVendor:idProduct` from `lsusb`.
 
+The T256s also pauses for a second or two while its shutter recalibrates, and
+it crashes if it's restarted during one. benchhud holds the last frame (dimmed,
+marked "paused") through a pause, and waits 10 s before deciding the camera's
+gone. Reconnect attempts then back off from 5 s to a minute.
+
+If your hub can switch its ports (`uhubctl` lists it with `ppps`), benchhud can
+reset a camera that stays gone. Find the hub and port with `sudo uhubctl`, let
+your account run it without a password, and set it in the config:
+
+```bash
+echo "$USER ALL=(root) NOPASSWD: /usr/sbin/uhubctl" | sudo tee /etc/sudoers.d/benchhud-uhubctl
+```
+
+```toml
+[panels.thermal]
+reset_port = "1-4:4"
+```
+
+After 30 s gone, the port is cycled once. Some hubs advertise switching but
+only cut the data lines; that's still enough to reset a hung camera.
+
 ## 3. Create the virtual-camera output
 
 benchhud writes its composite to a **v4l2loopback** node that OBS then reads as a

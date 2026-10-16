@@ -40,6 +40,10 @@ height = 0
 # Sipeed T256s. Analysis uses the raw Y16 192x256 @ 25 fps stream.
 enabled = false
 device = "/dev/video6"
+# Optional: the camera's hub port as "hub:port" (from `uhubctl`). If the camera
+# is gone for 30 s its port is reset once. Needs uhubctl and passwordless sudo
+# for it; see BENCH-SETUP.md. Empty: never.
+reset_port = ""
 
 [panels.telemetry]
 # OWON SPM8104 (PSU + DMM) over SCPI. Live DMM readout is a hard requirement.

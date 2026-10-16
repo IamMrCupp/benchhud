@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
@@ -185,3 +187,60 @@ def test_close_closes_the_camera():
     source = _source(camera, Clock())
     source.close()
     assert camera.closed
+
+
+def test_failed_reopens_back_off_and_reset_on_a_frame():
+    """A camera that crashes if restarted mid-pause gets ever longer to recover (#276)."""
+    clock = Clock()
+    camera = FakeCamera()
+    source = _source(camera, clock, stall_timeout=1.0, retry_interval=5.0, max_retry_interval=20.0)
+    source.read()
+    camera.frames = False
+    clock.now = 1.5
+    source.read()  # given up on: released, retry at 6.5
+    camera.openable = False
+    opens = camera.open_calls
+    attempts = []
+    for tick in range(0, 800):
+        clock.now = 1.5 + tick * 0.1
+        source.read()
+        if camera.open_calls != opens:
+            opens = camera.open_calls
+            attempts.append(round(clock.now, 1))
+    gaps = [round(b - a, 1) for a, b in itertools.pairwise(attempts)]
+    assert gaps[:3] == [10.0, 20.0, 20.0]  # doubled, then capped
+
+    camera.openable = True
+    camera.frames = True
+    clock.now += 30
+    source.read()
+    assert source.status.live
+    camera.frames = False
+    clock.now += 1.5
+    source.read()  # stalls again: back to the short wait
+    camera.openable = False
+    start = clock.now
+    while camera.open_calls == opens + 1:
+        clock.now += 0.1
+        source.read()
+    assert 5.0 <= clock.now - start < 5.2
+
+
+def test_stalled_for_and_lost_for():
+    clock = Clock()
+    camera = FakeCamera()
+    source = _source(camera, clock, stall_timeout=3.0)
+    source.read()
+    assert source.stalled_for == 0.0 and source.lost_for == 0.0
+    camera.frames = False
+    clock.now = 2.0
+    source.read()
+    assert source.stalled_for == 2.0
+    clock.now = 3.5
+    source.read()  # given up on
+    assert source.stalled_for == 0.0
+    clock.now = 10.0
+    assert source.lost_for == 6.5
+    camera.frames = True
+    source.read()
+    assert source.lost_for == 0.0

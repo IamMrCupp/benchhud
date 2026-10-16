@@ -80,6 +80,7 @@ class FallbackFrameSource:
         name: str = "camera",
         open_hint: str = "",
         retry_interval: float = 3.0,
+        max_retry_interval: float | None = None,
         stall_timeout: float = 3.0,
         fallback_fps: float = 15.0,
         clock: Callable[[], float] = time.monotonic,
@@ -90,6 +91,11 @@ class FallbackFrameSource:
         self._name = name
         self._open_hint = open_hint
         self._retry_interval = retry_interval
+        # Each failed open doubles the wait, up to this (#276): a thermal camera
+        # that's mid-recalibration crashes if asked to restart too soon.
+        self._max_retry_interval = max_retry_interval or retry_interval
+        self._retry_delay = retry_interval
+        self._lost_at: float | None = None
         self._stall_timeout = stall_timeout
         self._frame_period = 1.0 / fallback_fps
         self._clock = clock
@@ -111,6 +117,18 @@ class FallbackFrameSource:
     def camera(self) -> Camera | None:
         """The real camera behind the fallback, or None (for its size note, #247)."""
         return self._camera
+
+    @property
+    def stalled_for(self) -> float:
+        """Seconds since the last frame while the camera is still open (a pause)."""
+        if self._camera is None or not self._camera.is_open or not self._status.live:
+            return 0.0
+        return max(0.0, self._clock() - self._last_frame_at)
+
+    @property
+    def lost_for(self) -> float:
+        """Seconds since the camera was given up on after a stall (0 if it hasn't been)."""
+        return 0.0 if self._lost_at is None else max(0.0, self._clock() - self._lost_at)
 
     @property
     def status(self) -> SourceStatus:
@@ -139,16 +157,19 @@ class FallbackFrameSource:
         if camera is not None:
             now = self._clock()
             if not camera.is_open and now >= self._next_retry and not self._fatal():
-                self._next_retry = now + self._retry_interval
                 if camera.open():
                     self._last_frame_at = now
                 else:
                     self._status = SourceStatus(False, self._open_failed())
+                    self._retry_delay = min(self._retry_delay * 2, self._max_retry_interval)
+                self._next_retry = now + self._retry_delay
             if camera.is_open:
                 frame = camera.read()
                 if frame is not None:
                     self._last_frame_at = now
                     self._status = SourceStatus(True)
+                    self._retry_delay = self._retry_interval
+                    self._lost_at = None
                     return frame
                 if self._fatal():
                     # The first frame proved it's the wrong kind of camera.
@@ -163,7 +184,8 @@ class FallbackFrameSource:
                     # OpenCV keeps an unplugged camera "open" forever; let it go
                     # and start retrying.
                     camera.release()
-                    self._next_retry = now + self._retry_interval
+                    self._next_retry = now + self._retry_delay
+                    self._lost_at = now
                     self._status = SourceStatus(
                         False, f"{self._name} stopped sending frames, reconnecting…"
                     )

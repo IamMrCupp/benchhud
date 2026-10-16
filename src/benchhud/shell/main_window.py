@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import replace
@@ -172,12 +174,28 @@ def thermal_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> Fal
     if not device.strip():
         return FallbackFrameSource(None, None)
     camera = Y16Camera(resolve_capture_device(device, cameras))
+    # The T256s pauses while its shutter recalibrates, and crashes if it's
+    # restarted mid-pause (#276): ride a pause out, then back off before reopening.
     return FallbackFrameSource(
         camera,
         None,
         name=camera_label(device, cameras),
         open_hint=camera_open_hint(),
+        stall_timeout=THERMAL_STALL_S,
+        retry_interval=THERMAL_RETRY_S,
+        max_retry_interval=THERMAL_MAX_RETRY_S,
     )
+
+
+#: How long the thermal may pause before it's given up on, and how long to wait
+#: before reopening it, doubling to the cap while it keeps failing (#276).
+THERMAL_STALL_S = 10.0
+THERMAL_RETRY_S = 5.0
+THERMAL_MAX_RETRY_S = 60.0
+#: A paused feed is shown dimmed after this long.
+THERMAL_PAUSED_S = 1.5
+#: With a reset port configured, reset it once after the camera's been gone this long.
+THERMAL_RESET_AFTER_S = 30.0
 
 
 class MainWindow(QMainWindow):
@@ -215,6 +233,9 @@ class MainWindow(QMainWindow):
         self._thermal_timer: QTimer | None = None
         self._thermal_source: FrameSource | None = None
         self._thermal_status: SourceStatus | None = None
+        self._thermal_port_reset = False
+        #: Runs the port reset (a seam so tests don't call sudo).
+        self.reset_runner: Callable[[list[str]], None] = self._run_reset
         self._thermal_device: str | None = None
         self._last_temps = None
         self._cameras: list[CameraDevice] = []
@@ -1144,6 +1165,11 @@ class MainWindow(QMainWindow):
         if self._thermal_pump is None:
             return
         self._thermal_pump.tick()
+        source = self._thermal_source
+        if source is not None and not self.demo_active:
+            # A pause shows the last frame dimmed rather than blanking (#276).
+            self.thermal_panel.set_paused(getattr(source, "stalled_for", 0.0) > THERMAL_PAUSED_S)
+            self._maybe_reset_thermal_port(getattr(source, "lost_for", 0.0))
         status = self.thermal_status()
         if status != self._thermal_status:
             was_live = self._thermal_status is not None and self._thermal_status.live
@@ -1152,6 +1178,31 @@ class MainWindow(QMainWindow):
                 self.thermal_panel.clear()
                 self.render_composite()
             self._refresh_status()
+
+    def _maybe_reset_thermal_port(self, lost_for: float) -> None:
+        """Reset the thermal's hub port once per outage, if one is configured (#276)."""
+        if lost_for == 0.0:
+            self._thermal_port_reset = False
+            return
+        spec = self._config.panels.thermal.reset_port.strip()
+        if not spec or self._thermal_port_reset or lost_for < THERMAL_RESET_AFTER_S:
+            return
+        self._thermal_port_reset = True
+        hub, _, port = spec.partition(":")
+        argv = ["sudo", "-n", "uhubctl", "-l", hub, "-p", port, "-a", "cycle", "-d", "3"]
+        log.warning("thermal gone %.0f s: resetting hub port %s", lost_for, spec)
+        self.statusBar().showMessage(f"Thermal camera not answering: resetting its port ({spec})")
+        threading.Thread(target=self.reset_runner, args=(argv,), daemon=True).start()
+
+    @staticmethod
+    def _run_reset(argv: list[str]) -> None:
+        try:
+            done = subprocess.run(argv, capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("port reset failed: %s", exc)
+            return
+        if done.returncode != 0:
+            log.warning("port reset failed (%s): %s", done.returncode, done.stderr.strip())
 
     def stop_thermal(self) -> None:
         """Stop reading the thermal camera (idempotent)."""
