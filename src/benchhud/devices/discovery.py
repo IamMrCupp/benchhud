@@ -142,10 +142,49 @@ def same_device(a: str, b: str) -> bool:
         return False
 
 
+#: VIDIOC_QUERYCAP, and the capability bits it reports (linux/videodev2.h).
+_VIDIOC_QUERYCAP = 0x80685600
+_CAP_VIDEO_CAPTURE = 0x00000001
+_CAP_DEVICE_CAPS = 0x80000000
+
+
+def can_capture(path: str) -> bool | None:
+    """Whether a /dev/video node can capture a picture; None if it can't be asked.
+
+    A UVC camera makes two nodes, and the second is a metadata stream: picking
+    it gets no picture, only "Failed to set UVC probe control" from the kernel
+    (#269). Asking doesn't start a stream, so a camera in use answers too.
+    """
+    import fcntl
+    import struct
+
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        raw = fcntl.ioctl(fd, _VIDIOC_QUERYCAP, bytes(104))
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    capabilities, device_caps = struct.unpack_from("<II", raw, 84)
+    caps = device_caps if capabilities & _CAP_DEVICE_CAPS else capabilities
+    return bool(caps & _CAP_VIDEO_CAPTURE)
+
+
+def is_virtual(path: str) -> bool:
+    """A v4l2loopback node, such as benchhud's own output: not a camera to read."""
+    sysfs = os.path.realpath(f"/sys/class/video4linux/{os.path.basename(os.path.realpath(path))}")
+    return "/devices/virtual/" in sysfs
+
+
 def list_cameras_v4l2(
     glob_fn: Callable[[str], list[str]] = glob_module.glob,
     name_fn: Callable[[str], str | None] | None = None,
     stable_fn: Callable[[str], str | None] = stable_path,
+    capture_fn: Callable[[str], bool | None] = can_capture,
+    virtual_fn: Callable[[str], bool] = is_virtual,
 ) -> list[CameraDevice]:
     """Linux: enumerate /dev/video* with names (deps injectable for tests).
 
@@ -157,6 +196,10 @@ def list_cameras_v4l2(
     read = name_fn or _read_sysfs_name
     cameras = []
     for index, path in enumerate(sorted(glob_fn("/dev/video*"))):
+        if capture_fn(path) is False or virtual_fn(path):
+            # A metadata node (no picture), or a loopback output: reading
+            # benchhud's own output back would be a loop (#269).
+            continue
         # Identified by the stable link where there is one (#257); named from
         # the node it points at today.
         identifier = stable_fn(path) or path

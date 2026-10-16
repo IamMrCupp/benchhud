@@ -607,7 +607,7 @@ def _fill_camera_combo(combo: QComboBox, cameras: list[CameraDevice], current: s
         if same_device(cam.identifier, current):
             selected = combo.count() - 1
     if current and selected < 0:
-        combo.addItem(f"{current} (configured, not detected)", current)
+        combo.addItem(f"{current} (not connected right now)", current)
         selected = combo.count() - 1
     if selected >= 0:
         combo.setCurrentIndex(selected)
@@ -622,7 +622,7 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
         if same_device(port.device, current):
             selected = combo.count() - 1
     if current and selected < 0:
-        combo.addItem(f"{current} (configured, not detected)", current)
+        combo.addItem(f"{current} (not connected right now)", current)
         selected = combo.count() - 1
     if selected >= 0:
         combo.setCurrentIndex(selected)

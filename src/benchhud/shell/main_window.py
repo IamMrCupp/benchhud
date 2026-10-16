@@ -47,6 +47,7 @@ from benchhud.devices.discovery import (
     CameraDevice,
     DeviceScanner,
     SystemDeviceScanner,
+    can_capture,
     resolve_capture_device,
     same_device,
     stable_path,
@@ -272,6 +273,9 @@ class MainWindow(QMainWindow):
         launcher_dock = self.panels.add_panel(self.launcher_panel, left)
         self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
         self.controls_panel.changed.connect(self.render_composite)
+        # The thermal panel colours like the overlay: same range, same colormap.
+        self.controls_panel.changed.connect(self._style_thermal_panel)
+        self._style_thermal_panel()
         # Two-point thermal calibration (#243).
         self._calibration: list[Pair] | None = None
         self._thermal_range = RangeTracker()  # the overlay's auto range (#244)
@@ -372,7 +376,9 @@ class MainWindow(QMainWindow):
             device = panel.device.strip()
             if device.startswith("/") and os.path.basename(device).startswith("video"):
                 link = stable(device)
-                if link:
+                # Never onto a node with no picture: after a reboot an old number
+                # can land on a camera's metadata node (#269).
+                if link and can_capture(device) is not False:
                     log.info("camera %s is now configured by its stable name %s", device, link)
                     panel.device = link
 
@@ -761,6 +767,15 @@ class MainWindow(QMainWindow):
         self._show_composite(compose(scope, temps, transform, settings))
 
     # --- thermal calibration (#243) --------------------------------------------
+
+    def _style_thermal_panel(self) -> None:
+        settings = self.controls_panel.current_settings()
+        self.thermal_panel.set_style(
+            auto_range=settings.auto_range,
+            tmin=settings.tmin,
+            tmax=settings.tmax,
+            colormap=settings.colormap,
+        )
 
     # --- known-good reference (#256) ---------------------------------------------
 
