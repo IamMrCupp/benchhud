@@ -9,6 +9,8 @@ the SCPI-style "write a line, read a line" convention used by the OWON SPM8104
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 
@@ -39,6 +41,11 @@ class LineInstrument:
     Commands are newline-terminated; responses are read a line at a time and
     stripped. This matches the OWON SPM8104 (115200 baud, newline-terminated —
     see ``research.md`` §4).
+
+    ``command_gap`` holds the next write back until that long after a command
+    with no response. The OWON drops a command that arrives right behind
+    another: ``VOLT`` then ``CURR`` at once set the voltage and lost the current
+    limit (#280). A query needs no gap, because its reply shows it was handled.
     """
 
     def __init__(
@@ -47,18 +54,32 @@ class LineInstrument:
         *,
         encoding: str = "ascii",
         terminator: str = "\n",
+        command_gap: float = 0.0,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._port = port
         self._encoding = encoding
         self._terminator = terminator
+        self._command_gap = command_gap
+        self._clock = clock
+        self._sleep = sleep
+        self._ready_at = 0.0
+
+    def _write(self, command: str) -> None:
+        wait = self._ready_at - self._clock()
+        if wait > 0:
+            self._sleep(wait)
+        self._port.write((command + self._terminator).encode(self._encoding))
 
     def command(self, command: str) -> None:
         """Send a command with no expected response."""
-        self._port.write((command + self._terminator).encode(self._encoding))
+        self._write(command)
+        self._ready_at = self._clock() + self._command_gap
 
     def query(self, command: str) -> str:
         """Send ``command`` and return the stripped response line."""
-        self.command(command)
+        self._write(command)
         return self._port.readline().decode(self._encoding, errors="replace").strip()
 
     def close(self) -> None:

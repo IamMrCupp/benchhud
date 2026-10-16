@@ -178,24 +178,24 @@ class OwonSpm8104:
             )
 
     def set_voltage(self, volts: float) -> None:
-        """Set the PSU output voltage. UNVERIFIED command."""
+        """Set the PSU output voltage. Verified on the bench (#164)."""
         self._require_control("setting voltage")
         self._check_setpoint(volts, self._limits.max_voltage, "V")
         self._inst.command(f"VOLT {volts:.3f}")
 
     def set_current_limit(self, amps: float) -> None:
-        """Set the PSU current limit. UNVERIFIED command."""
+        """Set the PSU current limit. Verified on the bench (#164)."""
         self._require_control("setting current limit")
         self._check_setpoint(amps, self._limits.max_current, "A")
         self._inst.command(f"CURR {amps:.3f}")
 
     def output_on(self) -> None:
-        """Enable the PSU output. UNVERIFIED command."""
+        """Enable the PSU output. Verified on the bench (#164)."""
         self._require_control("enabling the output")
         self._inst.command("OUTP ON")
 
     def output_off(self) -> None:
-        """Disable the PSU output. UNVERIFIED command.
+        """Disable the PSU output. Verified on the bench (#164).
 
         **Deliberately exempt from the control gate.** The gate exists to stop
         the HUD energizing a rail, never to stop it de-energizing one — a
@@ -204,23 +204,13 @@ class OwonSpm8104:
         """
         self._inst.command("OUTP OFF")
 
-    def set_dmm_mode(self, mode: str) -> None:
-        """Switch the DMM measurement mode (e.g. ``VDC``, ``CONT``). UNVERIFIED.
-
-        The mode is interpolated into a command line, so a newline in it would
-        smuggle a second command onto the wire — rejected rather than stripped,
-        because a caller passing one is confused about something.
-        """
-        self._require_control("switching DMM mode")
-        token = mode.strip()
-        if not token:
-            raise ValueError("DMM mode must not be empty")
-        if "\r" in token or "\n" in token:
-            raise ValueError(f"DMM mode must be a single line, got {mode!r}")
-        self._inst.command(f"CONFigure:{token}")
-
     def close(self) -> None:
         self._inst.close()
+
+
+#: The pause the OWON needs after a command before it takes the next (#280).
+#: Measured on the bench: back to back loses the second; 100 ms is enough.
+COMMAND_GAP_S = 0.1
 
 
 def from_serial_port(
@@ -228,9 +218,12 @@ def from_serial_port(
     limits: InstrumentLimits = DEFAULT_LIMITS,
     *,
     control_enabled: bool = False,
+    command_gap: float = 0.0,
 ) -> OwonSpm8104:
     """Build a driver over an existing :class:`SerialPort` (test seam)."""
-    return OwonSpm8104(LineInstrument(port), limits, control_enabled=control_enabled)
+    return OwonSpm8104(
+        LineInstrument(port, command_gap=command_gap), limits, control_enabled=control_enabled
+    )
 
 
 def open_device(
@@ -249,4 +242,6 @@ def open_device(
     import serial
 
     port = serial.Serial(device, baudrate=baud, timeout=timeout)
-    return from_serial_port(port, limits, control_enabled=control_enabled)
+    return from_serial_port(
+        port, limits, control_enabled=control_enabled, command_gap=COMMAND_GAP_S
+    )

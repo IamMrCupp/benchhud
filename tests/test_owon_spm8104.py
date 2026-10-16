@@ -96,12 +96,6 @@ def test_output_on_off_write_commands(fake_owon_serial) -> None:
     assert fake_owon_serial.written == ["OUTP ON", "OUTP OFF"]
 
 
-def test_set_dmm_mode_writes_command(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial, control_enabled=True)
-    owon.set_dmm_mode("VDC")
-    assert fake_owon_serial.written == ["CONFigure:VDC"]
-
-
 def test_voltage_above_ceiling_never_reaches_the_wire(fake_owon_serial) -> None:
     """The point of the ceiling: refused setpoints are not sent, not clamped."""
     owon = from_serial_port(fake_owon_serial, InstrumentLimits(5.5, 1.0), control_enabled=True)
@@ -155,22 +149,6 @@ def test_limits_are_readable(fake_owon_serial) -> None:
     assert from_serial_port(fake_owon_serial, limits).limits == limits
 
 
-@pytest.mark.parametrize("mode", ["VDC\nOUTP ON", "VDC\r\nOUTP ON"])
-def test_dmm_mode_rejects_a_smuggled_second_command(fake_owon_serial, mode) -> None:
-    """A newline in the mode would put a second command on the wire."""
-    owon = from_serial_port(fake_owon_serial, control_enabled=True)
-    with pytest.raises(ValueError, match="single line"):
-        owon.set_dmm_mode(mode)
-    assert fake_owon_serial.written == []
-
-
-def test_dmm_mode_rejects_empty(fake_owon_serial) -> None:
-    owon = from_serial_port(fake_owon_serial, control_enabled=True)
-    with pytest.raises(ValueError, match="must not be empty"):
-        owon.set_dmm_mode("   ")
-    assert fake_owon_serial.written == []
-
-
 # --- the control gate ----------------------------------------------------
 
 
@@ -185,9 +163,8 @@ def test_control_is_off_by_default(fake_owon_serial) -> None:
         lambda d: d.set_voltage(3.3),
         lambda d: d.set_current_limit(0.5),
         lambda d: d.output_on(),
-        lambda d: d.set_dmm_mode("VDC"),
     ],
-    ids=["set_voltage", "set_current_limit", "output_on", "set_dmm_mode"],
+    ids=["set_voltage", "set_current_limit", "output_on"],
 )
 def test_state_changing_commands_refused_when_control_is_off(fake_owon_serial, action) -> None:
     owon = from_serial_port(fake_owon_serial)

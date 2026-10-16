@@ -277,9 +277,10 @@ max_current = 1.0
 - benchhud turns the output off when it connects, disconnects and quits, and
   never inherits a live rail.
 
-**The write commands haven't been verified on the bench yet** (#164). The
-Supply section says so too. Before trusting them with a board, try each one with
-nothing connected and watch the OWON's own display.
+Voltage, current limit and output on/off were verified on the reference bench
+(#164). The DMM mode can't be changed remotely: the SPM8104 accepts the commands
+without an error and ignores them, so set it on the meter. benchhud still reads
+whichever mode the meter is in.
 
 ## Troubleshooting
 
