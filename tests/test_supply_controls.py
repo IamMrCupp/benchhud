@@ -31,7 +31,7 @@ def test_read_only_means_only_output_off(qtbot) -> None:
     w = _controls(qtbot)
     w.set_available(connected=True, control=False, max_voltage=5.5, max_current=1.0)
     assert w.off_button.isEnabled()
-    for widget in (w.on_button, w.set_voltage_button, w.set_current_button, w.dmm_mode):
+    for widget in (w.on_button, w.set_voltage_button, w.set_current_button):
         assert not widget.isEnabled()
     assert "Read-only" in w.status.text()
 

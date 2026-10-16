@@ -43,3 +43,37 @@ def test_close_propagates(fake_owon_serial) -> None:
     inst = LineInstrument(fake_owon_serial)
     inst.close()
     assert fake_owon_serial.closed is True
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(round(seconds, 3))
+        self.now += seconds
+
+
+def test_commands_are_spaced_so_the_second_isnt_dropped(fake_owon_serial) -> None:
+    """The OWON lost CURR when it came right behind VOLT (#280)."""
+    clock = _Clock()
+    inst = LineInstrument(fake_owon_serial, command_gap=0.1, clock=clock, sleep=clock.sleep)
+    inst.command("VOLT 3.300")
+    inst.command("CURR 0.250")
+    assert clock.slept == [0.1]
+    assert fake_owon_serial.written == ["VOLT 3.300", "CURR 0.250"]
+
+
+def test_no_wait_once_the_gap_has_passed_or_after_a_query(fake_owon_serial) -> None:
+    clock = _Clock()
+    inst = LineInstrument(fake_owon_serial, command_gap=0.1, clock=clock, sleep=clock.sleep)
+    inst.command("VOLT 3.300")
+    clock.now += 0.5
+    inst.command("CURR 0.250")
+    inst.query("MEAS:VOLT?")  # waits for the command before it
+    inst.query("MEAS:CURR?")  # but a query leaves nothing to wait for
+    assert clock.slept == [0.1]
