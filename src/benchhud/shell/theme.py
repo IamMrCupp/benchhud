@@ -8,6 +8,8 @@ screen glowing against dark equipment.
 
 from __future__ import annotations
 
+from importlib.resources import files
+
 from PySide6.QtWidgets import QApplication
 
 DARK_QSS = """
@@ -96,6 +98,44 @@ QSlider::handle:horizontal {
 """
 
 
+#: Check boxes and radio buttons, drawn here: the native indicator was painted
+#: over by the window colour and couldn't be seen at all (#286).
+INDICATOR_QSS = """
+QCheckBox, QRadioButton { spacing: 7px; }
+QCheckBox::indicator, QRadioButton::indicator,
+QGroupBox::indicator, QAbstractItemView::indicator {
+    width: 14px; height: 14px; background-color: #1b1e24;
+    border: 1px solid #8a94a3;
+}
+QCheckBox::indicator, QGroupBox::indicator, QAbstractItemView::indicator {
+    border-radius: 3px;
+}
+QRadioButton::indicator { border-radius: 8px; }
+QCheckBox::indicator:hover, QRadioButton::indicator:hover,
+QGroupBox::indicator:hover { border-color: #4a9db5; }
+QCheckBox::indicator:checked, QGroupBox::indicator:checked,
+QAbstractItemView::indicator:checked {
+    background-color: #4a9db5; border-color: #4a9db5; image: url("{check}");
+}
+QRadioButton::indicator:checked {
+    background-color: qradialgradient(cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
+        stop: 0 #10151a, stop: 0.45 #10151a, stop: 0.5 #4a9db5, stop: 1 #4a9db5);
+    border-color: #4a9db5;
+}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {
+    border-color: #4a505c; background-color: #292d34;
+}
+QCheckBox::indicator:checked:disabled { background-color: #3a5560; }
+QCheckBox:disabled, QRadioButton:disabled { color: #6b7280; }
+"""
+
+
+def stylesheet() -> str:
+    """The whole stylesheet, with the check mark's path filled in."""
+    check = str(files("benchhud.resources").joinpath("check.svg")).replace("\\", "/")
+    return DARK_QSS + INDICATOR_QSS.replace("{check}", check)
+
+
 def apply_theme(app: QApplication) -> None:
     """Apply the dark theme to the application."""
-    app.setStyleSheet(DARK_QSS)
+    app.setStyleSheet(stylesheet())
