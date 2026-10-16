@@ -56,11 +56,11 @@ def test_configured_but_undetected_device_preserved(qtbot) -> None:
     dialog = PreferencesDialog(config, _scanner())
     qtbot.addWidget(dialog)
     assert dialog.scope_combo.currentData() == "/dev/video99"
-    assert "not detected" in dialog.scope_combo.currentText()
+    assert "not connected right now" in dialog.scope_combo.currentText()
 
 
 def test_rescan_repopulates(qtbot) -> None:
-    # Empty device fields so there's no "configured but not detected" fallback entry.
+    # Empty device fields so there's no "configured but not connected right now" fallback entry.
     config = Config()
     config.panels.scope.device = ""
     config.panels.thermal.device = ""

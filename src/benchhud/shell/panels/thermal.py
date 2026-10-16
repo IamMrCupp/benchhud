@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QResizeEvent
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from benchhud.overlay.composite import colorize
+from benchhud.overlay.composite import RangeTracker, colorize
 from benchhud.shell.panel import Panel
 from benchhud.shell.qt_image import bgr_to_qimage
 from benchhud.thermal.analyze import hottest
@@ -36,6 +36,10 @@ class ThermalPanel(Panel):
         self._tmin = tmin
         self._tmax = tmax
         self._colormap = colormap
+        # Follow the board by default (#269): a fixed 20-100 °C scale left a
+        # 30 °C board nearly black.
+        self._auto = True
+        self._range = RangeTracker()
         self._source_pixmap: QPixmap | None = None
         self._last_temps: np.ndarray | None = None
 
@@ -68,12 +72,23 @@ class ThermalPanel(Panel):
         if temps is None:
             return
         self._last_temps = temps
-        heat = colorize(temps, self._tmin, self._tmax, self._colormap)
+        low, high = self._range.update(temps) if self._auto else (self._tmin, self._tmax)
+        heat = colorize(temps, low, high, self._colormap)
         self._source_pixmap = QPixmap.fromImage(bgr_to_qimage(heat))
         self._render()
 
         spot = hottest(temps)
-        self._readout.setText(f"max: {spot.value:.1f}°C @ ({spot.x}, {spot.y})")
+        self._readout.setText(
+            f"max: {spot.value:.1f}°C @ ({spot.x}, {spot.y})   scale {low:.0f} to {high:.0f}°C"
+        )
+
+    def set_style(self, *, auto_range: bool, tmin: float, tmax: float, colormap: int) -> None:
+        """Match the Controls panel: its colour range and colormap (#269)."""
+        self._auto = auto_range
+        self._tmin, self._tmax = tmin, tmax
+        self._colormap = colormap
+        if self._last_temps is not None:
+            self.update_temps(self._last_temps)
 
     def clear(self) -> None:
         """Drop the last reading and go back to 'No signal'.
