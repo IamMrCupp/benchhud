@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/IamMrCupp/benchhud/compare/v0.10.3...v0.10.4) (2026-10-16)
+
+
+### Bug Fixes
+
+* **theme:** visible check boxes and radio buttons ([d6f77f1](https://github.com/IamMrCupp/benchhud/commit/d6f77f109f2eb8d2c4eb49c59feb9466e8c1761b))
+
 ## [0.10.3](https://github.com/IamMrCupp/benchhud/compare/v0.10.2...v0.10.3) (2026-10-16)
 
 
