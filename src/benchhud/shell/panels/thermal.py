@@ -51,7 +51,8 @@ class ThermalPanel(Panel):
         # Follow the board by default (#269): a fixed 20-100 °C scale left a
         # 30 °C board nearly black.
         self._auto = True
-        self._range = RangeTracker()
+        # The panel is a full heat map: start the range at the cool end (#278).
+        self._range = RangeTracker(low_percentile=1.0)
         self._source_pixmap: QPixmap | None = None
         self._last_temps: np.ndarray | None = None
         self._paused = False

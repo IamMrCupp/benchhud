@@ -104,3 +104,13 @@ def test_controls_show_the_manual_range_only_when_manual(qtbot) -> None:
     assert panel._range_row.isVisible()
     assert not config.overlay.auto_range and config.overlay.tmin == 30.0
     assert "outline" in [panel.mode_combo.itemText(i) for i in range(panel.mode_combo.count())]
+
+
+def test_a_heat_map_range_starts_at_the_cool_end() -> None:
+    """Starting at the median, half a flat board flickered black and colour (#278)."""
+    rng = np.random.default_rng(0)
+    temps = (30.0 + rng.normal(0.0, 0.5, (192, 256))).astype(np.float32)
+    low, high = auto_range(temps, low_percentile=1.0)
+    assert low < 29.0 and high - low >= MIN_SPAN_C
+    # Frame-to-frame noise moves a pixel only a sliver of the palette.
+    assert 1.0 / (high - low) < 0.15
