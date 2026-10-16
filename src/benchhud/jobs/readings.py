@@ -37,8 +37,17 @@ _BY_KEY = {m.key: m for m in MODES}
 #: How far from the reference a reading may be: 10%, or the mode's floor.
 TOLERANCE = 0.10
 
-#: The OWON's DMM mode tokens, mapped to the modes above.
-_DMM_MODES = {"DIODE": "diode", "RES": "ohm", "OHM": "ohm", "CONT": "ohm", "VDC": "vdc"}
+#: The OWON's DMM mode tokens, mapped to the modes above. The SPM8104 reports
+#: ``VOLT:DC`` and ``DIOD`` (#283); the short forms are kept for older records.
+_DMM_MODES = {
+    "DIOD": "diode",
+    "DIODE": "diode",
+    "RES": "ohm",
+    "OHM": "ohm",
+    "CONT": "ohm",
+    "VOLT:DC": "vdc",
+    "VDC": "vdc",
+}
 
 
 def mode_from_dmm(token: str) -> str | None:

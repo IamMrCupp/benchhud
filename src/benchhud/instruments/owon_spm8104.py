@@ -204,9 +204,34 @@ class OwonSpm8104:
         """
         self._inst.command("OUTP OFF")
 
+    def set_dmm_mode(self, mode: str) -> None:
+        """Switch the DMM mode, by the token the meter reports (e.g. ``VOLT:DC``).
+
+        Verified on the bench (#283): ``FUNCtion:<mode>`` works, where
+        ``CONFigure:<mode>`` is accepted and ignored. Only the meter's own modes
+        are sent, so nothing else can reach the wire through this.
+        """
+        self._require_control("switching DMM mode")
+        function = DMM_FUNCTIONS.get(mode.strip().upper())
+        if function is None:
+            raise ValueError(f"unknown DMM mode {mode!r}")
+        self._inst.command(f"FUNCtion:{function}")
+
     def close(self) -> None:
         self._inst.close()
 
+
+#: The SPM8104's DMM modes: the token it reports, and the function to send for it.
+DMM_FUNCTIONS = {
+    "VOLT:DC": "VOLTage:DC",
+    "VOLT:AC": "VOLTage:AC",
+    "CURR:DC": "CURRent:DC",
+    "CURR:AC": "CURRent:AC",
+    "RES": "RESistance",
+    "CAP": "CAPacitance",
+    "DIOD": "DIODe",
+    "CONT": "CONTinuity",
+}
 
 #: The pause the OWON needs after a command before it takes the next (#280).
 #: Measured on the bench: back to back loses the second; 100 ms is enough.

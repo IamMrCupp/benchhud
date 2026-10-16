@@ -96,6 +96,22 @@ def test_output_on_off_write_commands(fake_owon_serial) -> None:
     assert fake_owon_serial.written == ["OUTP ON", "OUTP OFF"]
 
 
+def test_set_dmm_mode_sends_the_function_form(fake_owon_serial) -> None:
+    """CONFigure:<mode> was ignored; FUNCtion:<mode> switches it (#283)."""
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
+    owon.set_dmm_mode("VOLT:DC")
+    owon.set_dmm_mode("diod")
+    assert fake_owon_serial.written == ["FUNCtion:VOLTage:DC", "FUNCtion:DIODe"]
+
+
+@pytest.mark.parametrize("mode", ["FREQ", "", "VOLT:DC\nOUTP ON"])
+def test_only_the_meters_modes_reach_the_wire(fake_owon_serial, mode) -> None:
+    owon = from_serial_port(fake_owon_serial, control_enabled=True)
+    with pytest.raises(ValueError, match="unknown DMM mode"):
+        owon.set_dmm_mode(mode)
+    assert fake_owon_serial.written == []
+
+
 def test_voltage_above_ceiling_never_reaches_the_wire(fake_owon_serial) -> None:
     """The point of the ceiling: refused setpoints are not sent, not clamped."""
     owon = from_serial_port(fake_owon_serial, InstrumentLimits(5.5, 1.0), control_enabled=True)
@@ -163,8 +179,9 @@ def test_control_is_off_by_default(fake_owon_serial) -> None:
         lambda d: d.set_voltage(3.3),
         lambda d: d.set_current_limit(0.5),
         lambda d: d.output_on(),
+        lambda d: d.set_dmm_mode("VOLT:DC"),
     ],
-    ids=["set_voltage", "set_current_limit", "output_on"],
+    ids=["set_voltage", "set_current_limit", "output_on", "set_dmm_mode"],
 )
 def test_state_changing_commands_refused_when_control_is_off(fake_owon_serial, action) -> None:
     owon = from_serial_port(fake_owon_serial)

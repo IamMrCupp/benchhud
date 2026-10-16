@@ -305,3 +305,9 @@ def test_the_window_feeds_the_meter_and_follows_the_job(qtbot) -> None:
     panel.point_edit.setText("TP7")
     panel.record()
     assert store.list_readings(job)[0].value == 0.512
+
+
+def test_the_meters_own_mode_tokens_map() -> None:
+    """The SPM8104 reports VOLT:DC and DIOD, not VDC and DIODE (#283)."""
+    assert mode_from_dmm("VOLT:DC") == "vdc" and mode_from_dmm("DIOD") == "diode"
+    assert mode_from_dmm("VOLT:AC") is None

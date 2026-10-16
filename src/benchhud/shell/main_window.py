@@ -1323,6 +1323,9 @@ class MainWindow(QMainWindow):
         supply.output_off_requested.connect(
             lambda: self.run_supply_command("Output OFF", lambda d: d.output_off())
         )
+        supply.dmm_mode_requested.connect(
+            lambda mode: self.run_supply_command(f"DMM to {mode}", lambda d: d.set_dmm_mode(mode))
+        )
         self.control_done.connect(self._supply_command_done)
         self._refresh_supply()
 
