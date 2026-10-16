@@ -170,3 +170,14 @@ def test_no_instrument_means_nothing_is_sent(qtbot) -> None:
     qtbot.addWidget(window)
     window.run_supply_command("Output ON", lambda d: d.output_on())
     assert "no instrument is connected" in window.power_panel.supply.status.text()
+
+
+def test_a_dropped_setpoint_shows_as_not_done(qtbot, window_with, fake_owon_serial) -> None:
+    """A write the supply ignored must not read "done" (#289)."""
+    window, _written = window_with(control=True)
+    fake_owon_serial.drop.add("VOLT")
+    supply = window.power_panel.supply
+    supply.voltage.setValue(3.3)
+    supply.set_voltage_button.click()
+    qtbot.waitUntil(lambda: "not done" in supply.status.text(), timeout=5000)
+    assert "3.300 V" in supply.status.text()

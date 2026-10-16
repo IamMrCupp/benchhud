@@ -35,8 +35,16 @@ class FakeSerialPort:
         *,
         terminator: str = "\n",
         encoding: str = "ascii",
+        supply_state: bool = False,
     ) -> None:
         self._responses = dict(responses or {})
+        # With supply_state, it remembers VOLT/CURR/OUTP and answers their
+        # queries, as the real supply does (#289). Commands whose first word is
+        # in ``drop`` are ignored, as the OWON did with back-to-back writes (#280).
+        self.state: dict[str, str] | None = (
+            {"VOLT": "0.000", "CURR": "0.000", "OUTP": "OFF"} if supply_state else None
+        )
+        self.drop: set[str] = set()
         self._terminator = terminator
         self._encoding = encoding
         self._rx = bytearray()
@@ -46,10 +54,24 @@ class FakeSerialPort:
     def write(self, data: bytes) -> int:
         text = data.decode(self._encoding).rstrip(self._terminator)
         self.written.append(text)
+        if self.state is not None and self._supply(text):
+            return len(data)
         if text in self._responses:
             reply = self._responses[text] + self._terminator
             self._rx += reply.encode(self._encoding)
         return len(data)
+
+    def _supply(self, text: str) -> bool:
+        assert self.state is not None
+        key, _, value = text.partition(" ")
+        if key.endswith("?") and key[:-1] in self.state:
+            self._rx += (self.state[key[:-1]] + self._terminator).encode(self._encoding)
+            return True
+        if key in self.state and value:
+            if key not in self.drop:
+                self.state[key] = value
+            return True
+        return False
 
     def readline(self) -> bytes:
         term = self._terminator.encode(self._encoding)
@@ -86,4 +108,4 @@ def make_fake_serial() -> Callable[[Mapping[str, str]], FakeSerialPort]:
 @pytest.fixture
 def fake_owon_serial() -> FakeSerialPort:
     """A fake port that answers like the bench's OWON SPM8104."""
-    return FakeSerialPort(OWON_SPM8104_RESPONSES)
+    return FakeSerialPort(OWON_SPM8104_RESPONSES, supply_state=True)

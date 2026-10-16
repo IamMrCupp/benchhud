@@ -1310,18 +1310,18 @@ class MainWindow(QMainWindow):
     def _wire_supply_controls(self) -> None:
         supply = self.power_panel.supply
         supply.set_voltage_requested.connect(
-            lambda v: self.run_supply_command(f"Set {v:.2f} V", lambda d: d.set_voltage(v))
+            lambda v: self.run_supply_command(f"Set {v:.2f} V", lambda d: d.apply_voltage(v))
         )
         supply.set_current_requested.connect(
             lambda a: self.run_supply_command(
-                f"Set the limit to {a:.3f} A", lambda d: d.set_current_limit(a)
+                f"Set the limit to {a:.3f} A", lambda d: d.apply_current_limit(a)
             )
         )
         supply.output_on_requested.connect(
-            lambda: self.run_supply_command("Output ON", lambda d: d.output_on())
+            lambda: self.run_supply_command("Output ON", lambda d: d.apply_output(True))
         )
         supply.output_off_requested.connect(
-            lambda: self.run_supply_command("Output OFF", lambda d: d.output_off())
+            lambda: self.run_supply_command("Output OFF", lambda d: d.apply_output(False))
         )
         supply.dmm_mode_requested.connect(
             lambda mode: self.run_supply_command(f"DMM to {mode}", lambda d: d.set_dmm_mode(mode))
