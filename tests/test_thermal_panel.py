@@ -71,3 +71,32 @@ def test_a_pause_dims_the_last_frame_rather_than_blanking(qtbot) -> None:
     panel.update_temps(np.full((48, 64), 31.0, dtype=np.float32))
     assert not panel.paused
     assert PAUSED_SUFFIX not in panel.readout_text
+
+
+def test_the_readout_never_resizes_the_panel(qtbot) -> None:
+    """The readout's width moved with the hot spot, and the dock with it (#294)."""
+    panel = ThermalPanel()
+    qtbot.addWidget(panel)
+    widths, heights = set(), set()
+    for x, y in [(1, 236), (191, 251), (138, 248), (144, 200)]:
+        temps = np.full((256, 192), 23.0, dtype=np.float32)
+        temps[y, x] = 30.1
+        panel.update_temps(temps)
+        widths.add(panel.minimumSizeHint().width())
+        heights.add(panel.minimumSizeHint().height())
+    panel.set_paused(True)
+    widths.add(panel.minimumSizeHint().width())
+    heights.add(panel.minimumSizeHint().height())
+    assert len(widths) == 1 and len(heights) == 1
+
+
+def test_the_image_doesnt_size_the_panel(qtbot) -> None:
+    """A pixmap scaled to the view became its size hint, so the view could only grow."""
+    panel = ThermalPanel()
+    qtbot.addWidget(panel)
+    frame = np.full((256, 192), 25.0, dtype=np.float32)
+    panel.update_temps(frame)
+    before = panel.sizeHint()
+    panel.resize(900, 1200)
+    panel.update_temps(frame)
+    assert panel.sizeHint() == before
