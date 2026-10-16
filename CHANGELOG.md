@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.6](https://github.com/IamMrCupp/benchhud/compare/v0.10.5...v0.10.6) (2026-10-16)
+
+
+### Bug Fixes
+
+* **thermal:** stop the readout and image from resizing the panel every frame ([fed7b8e](https://github.com/IamMrCupp/benchhud/commit/fed7b8e2e3878d42f2b691e702e495e99e1b354e))
+
 ## [0.10.5](https://github.com/IamMrCupp/benchhud/compare/v0.10.4...v0.10.5) (2026-10-16)
 
 
