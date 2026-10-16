@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/IamMrCupp/benchhud/compare/v0.10.2...v0.10.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **instruments:** set the DMM mode with FUNCtion:, and match the meter's own mode names in readings ([8751e68](https://github.com/IamMrCupp/benchhud/commit/8751e68f3089edd634253d14accf510ca48523d1))
+
 ## [0.10.2](https://github.com/IamMrCupp/benchhud/compare/v0.10.1...v0.10.2) (2026-10-16)
 
 
