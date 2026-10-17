@@ -42,6 +42,7 @@ from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
+from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
 from benchhud.config import Config, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import (
@@ -234,6 +235,9 @@ class MainWindow(QMainWindow):
         self._thermal_source: FrameSource | None = None
         self._thermal_status: SourceStatus | None = None
         self._thermal_port_reset = False
+        #: Whether the camera driver passes torn frames on (a seam for tests, #297).
+        self.uvc_passes_torn_frames: Callable[[], bool] = passes_torn_frames
+        self._uvc_warning: str | None = None
         #: Runs the port reset (a seam so tests don't call sudo).
         self.reset_runner: Callable[[list[str]], None] = self._run_reset
         self._thermal_device: str | None = None
@@ -1059,6 +1063,8 @@ class MainWindow(QMainWindow):
         prefix = "◉ DEMO MODE   ·   " if self.demo_active else ""
         warning = self.output_warning()
         suffix = f"   ·   ⚠ virtual cam inactive — {warning}" if warning else ""
+        if self._uvc_warning and self._thermal_pump is not None:
+            suffix += f"   ·   ⚠ {self._uvc_warning}"
         if self.browser_sources_warning():
             suffix += f"   ·   ⚠ local server off — {self._browser_warning}"
         self.statusBar().showMessage(
@@ -1144,6 +1150,10 @@ class MainWindow(QMainWindow):
                 return thermal_source_for(device, cameras)
 
         self._thermal_device = thermal.device
+        self._uvc_warning = None
+        if self.uvc_passes_torn_frames():
+            self._uvc_warning = TORN_FRAMES_WARNING
+            log.warning("uvcvideo passes incomplete frames on (nodrop=1): the thermal may tear")
         self._thermal_source = source_factory()
         reader = LatestFrameReader(self._thermal_source)
         self._thermal_pump = FramePump(reader, consumers=[self._on_thermal_frame])

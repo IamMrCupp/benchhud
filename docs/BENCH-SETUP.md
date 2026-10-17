@@ -129,6 +129,24 @@ reset_port = "1-4:4"
 After 30 s gone, the port is cycled once. Some hubs advertise switching but
 only cut the data lines; that's still enough to reset a hung camera.
 
+### Drop torn frames
+
+When part of a frame goes missing on USB, Linux's camera driver (`uvcvideo`)
+can drop the frame or hand it over incomplete. Some kernels (7.0 on the
+reference bench) hand it over: the thermal image then tears, with a band of
+rows shifted out of place, most often while the OWON is being read on the same
+hub. Have the driver drop them instead:
+
+```bash
+echo "options uvcvideo nodrop=0" | sudo tee /etc/modprobe.d/uvcvideo-nodrop.conf
+echo 0 | sudo tee /sys/module/uvcvideo/parameters/nodrop
+```
+
+The first line keeps it across reboots; the second applies it now. Restart
+benchhud so the cameras reopen with it. A dropped frame just holds the last one
+on screen a moment longer. benchhud says so in the status bar while the driver
+still passes torn frames on.
+
 ## 3. Create the virtual-camera output
 
 benchhud writes its composite to a **v4l2loopback** node that OBS then reads as a
