@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.7](https://github.com/IamMrCupp/benchhud/compare/v0.10.6...v0.10.7) (2026-10-17)
+
+
+### Bug Fixes
+
+* **thermal:** warn when the camera driver passes torn frames on, and document the fix ([c193eab](https://github.com/IamMrCupp/benchhud/commit/c193eaba167864a9136838e53c1a1c29f5aa46f0))
+
 ## [0.10.6](https://github.com/IamMrCupp/benchhud/compare/v0.10.5...v0.10.6) (2026-10-16)
 
 
