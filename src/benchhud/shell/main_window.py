@@ -84,6 +84,13 @@ from benchhud.overlay.graph import draw_graph_overlay
 from benchhud.overlay.reference import compare as compare_reference
 from benchhud.overlay.telemetry import Footprint, MeterReadout, draw_telemetry_overlay_sized
 from benchhud.overlay.transform import RegistrationTransform
+from benchhud.recon import (
+    Engagement,
+    HttpReconSource,
+    NullReconSource,
+    ReconSource,
+    resolve_engagement,
+)
 from benchhud.shell.about import about_html
 from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
@@ -264,6 +271,11 @@ class MainWindow(QMainWindow):
         self._telemetry_t: float | None = None
         self._ticket_source: TicketSource = self._make_ticket_source()
         self._inventory_source: InventorySource = self._make_inventory_source()
+        self._recon_source: ReconSource = self._make_recon_source()
+        #: The engagement benchhud is working against (a ref only — the record
+        #: and its sensitive detail stay in bench-recon). Set by "Import from
+        #: engagement…"; the recon panels read the ref-safe projection live.
+        self._active_engagement: str | None = None
         self._board_library = self._make_board_library()
 
         self._stabilise_camera_paths()
@@ -595,6 +607,34 @@ class MainWindow(QMainWindow):
         """Rebuild the inventory source after a Preferences change."""
         self._inventory_source = self._make_inventory_source()
         self.inventory_panel.refresh()
+
+    def _make_recon_source(self) -> ReconSource:
+        """Build the recon source from config: bench-recon when set, else standalone."""
+        recon = self._config.recon
+        if recon.base_url.strip():
+            return HttpReconSource(recon.base_url, recon.token)
+        return NullReconSource()
+
+    def reconfigure_recon_source(self) -> None:
+        """Rebuild the recon source after a Preferences change."""
+        self._recon_source = self._make_recon_source()
+
+    @property
+    def active_engagement(self) -> str | None:
+        """The ref of the engagement benchhud is working against, if any."""
+        return self._active_engagement
+
+    def import_engagement(self, ref: str) -> Engagement | None:
+        """Make ``ref`` the active engagement, if the source can resolve it.
+
+        "Import from engagement…" — benchhud stores only the ref; the recon
+        panels read the ref-safe projection live. A ref the source can't resolve
+        leaves the active engagement unchanged and returns ``None``.
+        """
+        engagement = resolve_engagement(self._recon_source, ref)
+        if engagement is not None:
+            self._active_engagement = engagement.ref
+        return engagement
 
     def selected_job_ref(self) -> str | None:
         """The selected job's shop-ticket ref — what consumption is billed to.
