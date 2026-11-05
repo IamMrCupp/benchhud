@@ -35,7 +35,9 @@ ticket system is a protocol with a fake, not a dependency.
   stream through Apple's public CoreMediaIO API via `ctypes` — no PyObjC, no
   compiled extension) on macOS, and `SoftcamSink` (`softcam.py`: sends BGR24
   straight into softcam's DirectShow filter DLL via `ctypes` — the one backend
-  that converts nothing) on Windows.
+  that converts nothing) on Windows. `onair.py` holds the tagged-sensitive
+  model (`Layer` + `compose_on_air`/`compose_preview`) that keeps sensitive
+  surfaces out of the published frame — see the stream-safety design rule below.
 - **`browser_sources/`** — the data panels as OBS Browser sources: `hub`
   (`TopicHub`, the latest payload per panel, handed from the GUI thread to the
   server's), `payloads` (meter / graph / job-card dicts built from the same
@@ -158,6 +160,14 @@ When the workspace is on the Linux box:
 - **Nothing off-bench raises into the HUD.** An unreachable intake, a bad token, a
   malformed payload — each degrades to an empty queue plus a log line. A flaky LAN
   can't take the bench down mid-repair.
-- **PII never reaches the composite.** The output is a stream surface, so customer
-  fields render only in docks and dialogs. Board and device identifiers carry no
-  personal data and are safe anywhere.
+- **Sensitive surfaces never reach the composite.** The output is a stream surface,
+  so anything tagged sensitive — the ticket customer, and the recon set (target
+  identity, client, credentials, findings, raw console text) — renders only in docks
+  and dialogs, never in the frame handed to the sink. The rule is a tag, not a special
+  case: a surface offered to the compositor is a `Layer` with a `sensitive` flag
+  (`benchhud.output.onair`), and panels carry `Panel.sensitive`. `_show_composite`
+  draws every layer on the local preview but `compose_on_air` drops the sensitive ones
+  from the published frame. The default is safe for the bench panels and sensitive for
+  recon panels, so a new recon panel is off air until someone decides it is stream-safe;
+  `tests/test_onair.py` asserts a tagged surface's bytes never reach the output sink.
+  Board and device identifiers carry no personal data and are safe anywhere.

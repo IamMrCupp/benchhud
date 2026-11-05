@@ -71,6 +71,7 @@ from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.media import now_playing
 from benchhud.media.now_playing import NowPlayingWatcher
+from benchhud.output.onair import Layer, compose_on_air, compose_preview, excluded
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
 from benchhud.overlay.composite import (
@@ -958,16 +959,32 @@ class MainWindow(QMainWindow):
         self.controls_panel.undo_button.setEnabled(False)
         self.controls_panel.show_calibration("Back to the previous alignment.")
 
-    def _show_composite(self, frame) -> None:
+    def _show_composite(self, frame, layers: Sequence[Layer] = ()) -> None:
         """Put one composed frame on screen and, if open, out to the sink.
 
         The telemetry overlay is applied here — the single point every composite
         path (scope-only, thermal-only, fused) flows through — so the on-screen
-        preview and the virtual-cam output stay identical (WYSIWYG).
+        preview and the virtual-cam output stay identical (WYSIWYG) *for the
+        surfaces that may go on air*.
+
+        ``layers`` are extra tagged surfaces offered to the compositor (recon
+        panels, Track C). The split is the whole stream-safety guarantee: every
+        layer is drawn onto the local preview, but :func:`compose_on_air` drops
+        the sensitive ones from the frame handed to the sink, so a sensitive
+        surface's bytes never reach the virtual camera. With no layers (the
+        bench default today) preview and output are the same frame.
         """
-        frame = self._apply_overlays(frame)
-        self.composite_view.show_frame(frame)
-        self._publish_frame(frame)
+        base = self._apply_overlays(frame)
+        on_air = compose_on_air(base, layers)
+        if excluded(layers):
+            # Sensitive layers go on the preview only; copy first so drawing them
+            # can never mutate the frame already chosen for the sink.
+            preview = compose_preview(on_air.copy(), [ly for ly in layers if ly.sensitive])
+            log.debug("kept off air: %s", ", ".join(excluded(layers)))
+        else:
+            preview = on_air
+        self.composite_view.show_frame(preview)
+        self._publish_frame(on_air)
 
     def _apply_overlays(self, frame):
         """Burn the on-stream overlays onto the frame: meter readout, then power graph.
