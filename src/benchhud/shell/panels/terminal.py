@@ -75,6 +75,13 @@ class TerminalPanel(Panel):
         self.on_air.setObjectName("TerminalOnAir")
         self.on_air.setStyleSheet("color: #ff5a5a; font-weight: bold;")
         self.on_air.setToolTip("The read-only terminal view is live in OBS")
+        # A raw serial console is sensitive: it can never be shared to the stream,
+        # so instead of the ON STREAM / Pause controls it shows why (#174).
+        self.off_air = QLabel("● OFF AIR — serial console (sensitive)")
+        self.off_air.setObjectName("TerminalOffAir")
+        self.off_air.setStyleSheet("color: #8aa0b6; font-weight: bold;")
+        self.off_air.setToolTip("A raw serial console can leak secrets, so it never goes on air")
+        self.off_air.setVisible(False)
         self.pause_button = QPushButton("Pause stream")
         self.pause_button.setCheckable(True)
         self.pause_button.setToolTip(
@@ -155,6 +162,7 @@ class TerminalPanel(Panel):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 0)  # the terminal runs to the bottom edge
         layout.addWidget(self.on_air)
+        layout.addWidget(self.off_air)
         layout.addLayout(bar)
         layout.addWidget(self._target_box)
         layout.addWidget(self._stack, stretch=1)
@@ -265,6 +273,14 @@ class TerminalPanel(Panel):
         self.restart_button.setEnabled(True)
         self._target_box.setVisible(True)
         self.restart_button.setVisible(True)
+
+    def set_off_air(self, sensitive: bool) -> None:
+        """Mark the console off-air (a raw serial target), or clear it.
+
+        A sensitive console can't be shared, so it hides the stream controls and
+        shows why instead; the share state is forced off upstream regardless.
+        """
+        self.off_air.setVisible(sensitive)
 
     def set_share_state(self, *, sharing: bool, paused: bool) -> None:
         """Reflect the stream view: the Pause button only means something while sharing."""

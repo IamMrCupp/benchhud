@@ -464,6 +464,50 @@ def test_share_and_pause_reach_the_host_and_the_panel(qtbot, store) -> None:
         window.close()
 
 
+def test_a_raw_serial_console_is_never_shared_even_when_share_is_on(qtbot, store) -> None:
+    """todo 15: a raw serial console is sensitive — off air despite share=True."""
+    window = _window(qtbot, store, enabled=True, share=True, target="/dev/ttyACM0")
+    window.start_browser_sources()
+    try:
+        assert window._raw_serial_console() is True
+        assert window.terminal.state().sharing is False  # forced off: it can leak secrets
+    finally:
+        window.close()
+
+
+def test_the_shell_console_still_shares(qtbot, store) -> None:
+    """The operator's own shell is not sensitive — sharing it stays their choice."""
+    window = _window(qtbot, store, enabled=True, share=True)  # target defaults to shell
+    window.start_browser_sources()
+    try:
+        assert window._raw_serial_console() is False
+        assert window.terminal.state().sharing is True
+    finally:
+        window.close()
+
+
+def test_the_owon_query_console_is_not_treated_as_a_raw_serial_target(qtbot, store) -> None:
+    """The OWON console is query-only telemetry, not a secret-bearing raw console."""
+    window = _window(qtbot, store, enabled=True, share=True, target="owon")
+    window.start_browser_sources()
+    try:
+        assert window._raw_serial_console() is False
+        assert window.terminal.state().sharing is True
+    finally:
+        window.close()
+
+
+def test_panel_off_air_notice_toggles(qtbot) -> None:
+    from benchhud.shell.panels.terminal import TerminalPanel
+
+    panel = TerminalPanel(view_factory=FakeView)
+    qtbot.addWidget(panel)
+    panel.set_off_air(True)
+    assert panel.off_air.isHidden() is False
+    panel.set_off_air(False)
+    assert panel.off_air.isHidden() is True
+
+
 class _NoDevices:
     def cameras(self):
         return []

@@ -187,4 +187,8 @@ When the workspace is on the Linux box:
   from the published frame. The default is safe for the bench panels and sensitive for
   recon panels, so a new recon panel is off air until someone decides it is stream-safe;
   `tests/test_onair.py` asserts a tagged surface's bytes never reach the output sink.
-  Board and device identifiers carry no personal data and are safe anywhere.
+  Board and device identifiers carry no personal data and are safe anywhere. The
+  terminal has a second on-air path — its read-only view can be *shared* to OBS — so
+  the same rule applies there: a raw serial console (a device-under-test UART) is
+  sensitive and is never shared, even with the share switch on; only the operator's
+  shell and the query-only OWON console may go on air.

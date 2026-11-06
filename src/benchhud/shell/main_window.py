@@ -1746,7 +1746,11 @@ class MainWindow(QMainWindow):
             self._terminal = TerminalHost(argv, share_token=cfg.share_token, **kwargs)
             self._terminal.start()
         self._terminal.share_token = cfg.share_token
-        self._terminal.set_sharing(cfg.share)
+        # A raw serial console is sensitive by default: its scrollback can carry
+        # creds, keys or a dumped secret, so it is never put on the stream even if
+        # sharing is ticked (#174). The shell and the query-only OWON console
+        # stay operator-controlled. This is the terminal's Track D exclusion.
+        self._terminal.set_sharing(cfg.share and not self._raw_serial_console())
 
     def _terminal_target(self):
         """``(identity, session factory)`` for what the terminal attaches to (#174).
@@ -1775,6 +1779,20 @@ class MainWindow(QMainWindow):
             local_echo=cfg.local_echo,
             **kw,
         )
+
+    def _raw_serial_console(self) -> bool:
+        """Whether the terminal is attached to a raw serial port (a device under test).
+
+        True for any serial target except the shell and the query-only OWON
+        console — those are operator-owned and may be shared; a raw UART/serial
+        console is sensitive and stays off air.
+        """
+        cfg = self._config.terminal
+        target = cfg.target or "shell"
+        if target in ("shell", "owon"):
+            return False
+        owon_port = self._config.panels.telemetry.port
+        return not (owon_port and same_device(target, owon_port))
 
     def terminal_targets(self) -> list[tuple[str, str]]:
         """What the panel offers: the shell, the OWON console, and other serial ports."""
@@ -1841,6 +1859,7 @@ class MainWindow(QMainWindow):
         else:
             panel.show_terminal(self._browser_server.terminal_url(terminal.write_token))
         state = terminal.state() if terminal is not None else None
+        panel.set_off_air(self._raw_serial_console())
         panel.set_share_state(
             sharing=bool(state and state.sharing), paused=bool(state and state.paused)
         )
