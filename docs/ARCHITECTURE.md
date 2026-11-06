@@ -19,11 +19,12 @@ ticket system is a protocol with a fake, not a dependency.
   the `Panel` base, `CompositeView` (the centre pane's live composite),
   `Preferences` (device dropdowns, tools editor, intake + boards settings),
   `qt_image` (BGR→QImage), `theme` / `fonts` / `icon` / `about`, the dialogs
-  `ticket_picker` and `board_dialogs` (Find board / Boards to source), and the
-  panels: `scope`, `thermal`, `power` (the styled meter), `controls`,
-  `launcher`, `jobs`, `inventory`, `terminal` (hosts the xterm.js page in
-  QtWebEngine, created only when the terminal is on), plus `telemetry`
-  (superseded by `power`, class retained).
+  `ticket_picker`, `engagement_picker` and `board_dialogs` (Find board / Boards
+  to source), and the panels: `scope`, `thermal`, `power` (the styled meter),
+  `controls`, `launcher`, `jobs`, `inventory`, `terminal` (hosts the xterm.js
+  page in QtWebEngine, created only when the terminal is on), `engagement` (the
+  active bench-recon engagement, off air), plus `telemetry` (superseded by
+  `power`, class retained).
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`,
   `CameraFrameSource` (cv2), threaded `LatestFrameReader` (latest-frame buffer),
   `FramePump` (Qt-free dispatch).
