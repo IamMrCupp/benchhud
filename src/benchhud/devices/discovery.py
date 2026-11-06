@@ -34,6 +34,33 @@ class CameraDevice:
     index: int  # the index cv2.VideoCapture opens this camera by (see list_cameras_qt)
 
 
+@dataclass(frozen=True)
+class UsbInterface:
+    """A connected serial/USB interface — a debug probe, UART adapter, CAN dongle.
+
+    Richer than :class:`SerialDevice` because the connected-interfaces monitor
+    cross-maps these against bench-parts assets. ``serial_number`` is the one
+    field worth trusting for identity: two identical J-Links share a VID:PID but
+    (usually) not a serial, so the monitor matches on serial and otherwise asks
+    the operator to bind the port to an asset by hand.
+    """
+
+    device: str  # e.g. /dev/ttyACM0 (or a by-id link)
+    description: str  # human label
+    vid: int | None = None
+    pid: int | None = None
+    serial_number: str | None = None
+    manufacturer: str | None = None
+    product: str | None = None
+
+    @property
+    def vid_pid(self) -> str | None:
+        """``"1366:0105"`` when both are known, else ``None``."""
+        if self.vid is None or self.pid is None:
+            return None
+        return f"{self.vid:04x}:{self.pid:04x}"
+
+
 #: OBS's virtual camera (the device benchhud *publishes* to on macOS). Reading it
 #: back as a capture camera is a feedback loop, so it's never offered as one.
 #: Same UID as ``output.cmio.OBS_DEVICE_UID``, kept here so discovery stays
@@ -95,6 +122,52 @@ def list_serial_ports(
             description = f"{description} ({os.path.basename(port.device)})"
         devices.append(SerialDevice(device=link or port.device, description=description))
     return devices
+
+
+def list_usb_interfaces(
+    comports: Callable[[], list] | None = None,
+    stable_fn: Callable[[str], str | None] | None = None,
+) -> list[UsbInterface]:
+    """Enumerate connected serial/USB interfaces with their USB identity.
+
+    Like :func:`list_serial_ports` but keeps the VID:PID, serial number and
+    USB strings ``pyserial`` reports, which the interface monitor needs to
+    cross-map a port to a bench-parts asset. ``comports`` is injectable so the
+    scan runs without hardware in tests.
+    """
+    if comports is None:
+        from serial.tools import list_ports
+
+        comports = list_ports.comports
+    if stable_fn is None:
+        if sys.platform.startswith("linux"):
+
+            def stable_fn(path: str) -> str | None:
+                return stable_path(path, SERIAL_BY_ID_DIR)
+
+        else:
+
+            def stable_fn(_path: str) -> str | None:
+                return None
+
+    interfaces = []
+    for port in comports():
+        description = port.description or port.device
+        link = stable_fn(port.device)
+        if link:
+            description = f"{description} ({os.path.basename(port.device)})"
+        interfaces.append(
+            UsbInterface(
+                device=link or port.device,
+                description=description,
+                vid=getattr(port, "vid", None),
+                pid=getattr(port, "pid", None),
+                serial_number=getattr(port, "serial_number", None),
+                manufacturer=getattr(port, "manufacturer", None),
+                product=getattr(port, "product", None),
+            )
+        )
+    return interfaces
 
 
 def _read_sysfs_name(path: str) -> str | None:
