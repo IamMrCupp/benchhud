@@ -25,6 +25,13 @@ class Panel(QWidget):
     panel_id: str = ""
     panel_title: str = "Panel"
 
+    #: Whether this panel's content is sensitive — must never reach a stream
+    #: surface. The compositor and the browser-source whitelist exclude a
+    #: sensitive panel (see :mod:`benchhud.output.onair`). It defaults safe for
+    #: the bench panels; recon panels override it to ``True``, so a surface is
+    #: off air unless someone has decided it is safe to show.
+    sensitive: bool = False
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         if not self.panel_id:
