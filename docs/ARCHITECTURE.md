@@ -74,6 +74,11 @@ ticket system is a protocol with a fake, not a dependency.
   `TicketSource`, null / in-memory), `http_source` (the intake API over stdlib
   `urllib`), `importer` (idempotent ticket → job, backfills `board_id`). See
   [INTAKE.md](INTAKE.md).
+- **`assets/`** — the bench-parts durable-asset read client (gear you assign to
+  an engagement, not consumables): `source` (`Asset`, `AssetSource`, null /
+  in-memory), `http_source` (`/api/assets` over stdlib `urllib`, reads degrade,
+  read-only). Shares the bench-parts connection with `inventory/`; the recon
+  interface monitor cross-maps attached ports to assets by `assigned_ref`.
 - **`recon/`** — the bench-recon client seam, same shape as `tickets/`: `source`
   (`Engagement` / `Artifact` ref-safe projection types, `ReconSource`, null /
   in-memory), `http_source` (the bench-recon API over stdlib `urllib`, reads

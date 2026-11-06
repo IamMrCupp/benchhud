@@ -31,6 +31,7 @@ from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, Q
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabBar, QWidget
 
 from benchhud import __version__
+from benchhud.assets import AssetSource, HttpAssetSource, NullAssetSource
 from benchhud.boards.library import BoardLibrary
 from benchhud.boards.opener import open_board, open_schematic
 from benchhud.boards.worklist import boards_to_source
@@ -273,6 +274,7 @@ class MainWindow(QMainWindow):
         self._telemetry_t: float | None = None
         self._ticket_source: TicketSource = self._make_ticket_source()
         self._inventory_source: InventorySource = self._make_inventory_source()
+        self._asset_source: AssetSource = self._make_asset_source()
         self._recon_source: ReconSource = self._make_recon_source()
         #: The engagement benchhud is working against (a ref only — the record
         #: and its sensitive detail stay in bench-recon). Set by "Import from
@@ -616,6 +618,21 @@ class MainWindow(QMainWindow):
         """Rebuild the inventory source after a Preferences change."""
         self._inventory_source = self._make_inventory_source()
         self.inventory_panel.refresh()
+
+    def _make_asset_source(self) -> AssetSource:
+        """Build the asset source from the bench-parts (inventory) connection.
+
+        Durable assets live on the same bench-parts service as consumable parts,
+        so they share its base URL and token — there is no separate asset config.
+        """
+        inventory = self._config.inventory
+        if inventory.base_url.strip():
+            return HttpAssetSource(inventory.base_url, inventory.token)
+        return NullAssetSource()
+
+    def reconfigure_asset_source(self) -> None:
+        """Rebuild the asset source after a Preferences change."""
+        self._asset_source = self._make_asset_source()
 
     def _make_recon_source(self) -> ReconSource:
         """Build the recon source from config: bench-recon when set, else standalone."""
