@@ -98,6 +98,7 @@ from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
+from benchhud.shell.panels.capture import CapturePanel
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.engagement import EngagementPanel
 from benchhud.shell.panels.flash import FlashPanel
@@ -127,7 +128,7 @@ _PREVIEW_FPS = 30
 # Bump when the default dock arrangement changes. The shell auto-saves the
 # layout on close, so without this a layout from an older build would silently
 # override a newer default (and the user never knowingly saved one).
-LAYOUT_VERSION = 7
+LAYOUT_VERSION = 8
 
 SourceFactory = Callable[[], FrameSource]
 #: Takes ``(device, width, height)`` and returns an open :class:`OutputSink`.
@@ -387,6 +388,12 @@ class MainWindow(QMainWindow):
         self.pinout_panel = PinoutPanel(active_ref=lambda: self._active_engagement)
         pinout_dock = self.panels.add_panel(self.pinout_panel, left)
         self.tabifyDockWidget(interface_dock, pinout_dock)  # …and the pinout/protocol crib (#312)
+        self.capture_panel = CapturePanel(
+            lambda: self._recon_source,
+            active_ref=lambda: self._active_engagement,
+        )
+        capture_dock = self.panels.add_panel(self.capture_panel, left)
+        self.tabifyDockWidget(pinout_dock, capture_dock)  # …and the capture/dump status (#314)
         self.readings_panel = ReadingsPanel(self._job_store, self.jobs_panel.selected_job_id)
         self.jobs_panel.job_changed.connect(self.readings_panel.refresh)
         self.jobs_panel.job_changed.connect(self._reference_for_job)
