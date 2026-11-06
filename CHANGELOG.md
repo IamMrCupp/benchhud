@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0](https://github.com/IamMrCupp/benchhud/compare/v0.10.7...v0.11.0) (2026-11-06)
+
+
+### Features
+
+* **assets:** add the AssetSource seam reading bench-parts' asset registry ([9ac3e19](https://github.com/IamMrCupp/benchhud/commit/9ac3e197dee723c3e3943fe72dbc2d06531a43e9))
+* **assets:** AssetSource seam for bench-parts' asset registry ([cfe4f80](https://github.com/IamMrCupp/benchhud/commit/cfe4f804d8c1facc08657841f7b18b7a7f89cc7e))
+* **output:** add a tagged-sensitive surface model the compositor enforces ([536b563](https://github.com/IamMrCupp/benchhud/commit/536b56396d96fb555166139cd6573fbab850104c))
+* **output:** tagged-sensitive surface model the compositor enforces ([8660136](https://github.com/IamMrCupp/benchhud/commit/86601369e4da7e11a291237bebc2509fd11f12e0))
+* **recon:** add the capture/firmware-dump status panel (sensitive) ([1c6590c](https://github.com/IamMrCupp/benchhud/commit/1c6590c2d074645ba384c121b127856c30e9825b))
+* **recon:** add the connected-interfaces monitor panel ([69b92d1](https://github.com/IamMrCupp/benchhud/commit/69b92d12dfea7293ad42b133d0cc39110e8243e4))
+* **recon:** add the engagement panel (ref-safe projection, off air) ([33da363](https://github.com/IamMrCupp/benchhud/commit/33da363fc28de2b6aa14dd3c3634fca434682dcc))
+* **recon:** add the pinout/protocol reference panel (stream-safe) ([2a8ebf3](https://github.com/IamMrCupp/benchhud/commit/2a8ebf39bc4c38ba6db965fcce227f3c71c6bdf2))
+* **recon:** add the ReconSource seam mirroring TicketSource ([d942bb9](https://github.com/IamMrCupp/benchhud/commit/d942bb9a3610291c91f95f70712f52891241ee39))
+* **recon:** capture/firmware-dump status panel (sensitive) ([537b89c](https://github.com/IamMrCupp/benchhud/commit/537b89c1fb364717af6509540438ca10eb956307))
+* **recon:** connected-interfaces monitor panel ([1a10c2c](https://github.com/IamMrCupp/benchhud/commit/1a10c2c2a80e7f09390130bda8737d45b6598e57))
+* **recon:** engagement panel (ref-safe projection, off air) ([ab27494](https://github.com/IamMrCupp/benchhud/commit/ab274944bf4dfc11f4d808bcdcd482778545e405))
+* **recon:** keep a raw serial console off air (sensitive by default) ([8f7ee89](https://github.com/IamMrCupp/benchhud/commit/8f7ee89c7b03929fd69e6eced9e43ddffbbb0ee8))
+* **recon:** keep a raw serial console off air (sensitive by default) ([cd6eaea](https://github.com/IamMrCupp/benchhud/commit/cd6eaea26a9ab0b803cc58557cf8fb5962ea58d2))
+* **recon:** pinout/protocol reference panel (stream-safe) ([244f604](https://github.com/IamMrCupp/benchhud/commit/244f604184958b4b5bdca824320d1c93aa1de7f1))
+* **recon:** ReconSource seam mirroring TicketSource ([d89e87b](https://github.com/IamMrCupp/benchhud/commit/d89e87bbc14c69e7fe09d2b651098d5ab6ff20ca))
+
 ## [0.10.7](https://github.com/IamMrCupp/benchhud/compare/v0.10.6...v0.10.7) (2026-10-17)
 
 
