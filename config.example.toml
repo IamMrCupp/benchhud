@@ -146,6 +146,14 @@ token = ""
 base_url = "" # e.g. "http://192.168.7.204:8000"
 token = ""
 
+[recon]
+# bench-recon engagement API (LAN-only, read-only). Leave base_url empty to run
+# standalone with no recon panels. token is bench-recon's bearer token. benchhud
+# reads only the ref-safe projection; sensitive engagement detail stays in
+# bench-recon and the recon panels are off air by default (see output/onair.py).
+base_url = "" # e.g. "http://recon.repair-bench:8000"
+token = ""
+
 [instruments]
 # Control policy for the bench instrument (#164). The serial device itself lives
 # on [panels.telemetry] — it is not repeated here.

@@ -221,6 +221,14 @@ class InventoryConfig:
 
 
 @dataclass
+class ReconConfig:
+    """Connection to a bench-recon engagement API (empty base URL → disabled)."""
+
+    base_url: str = ""
+    token: str = ""
+
+
+@dataclass
 class InstrumentsConfig:
     """Control policy for the bench instrument (#164).
 
@@ -295,6 +303,7 @@ class Config:
     terminal: TerminalConfig = field(default_factory=TerminalConfig)
     intake: IntakeConfig = field(default_factory=IntakeConfig)
     inventory: InventoryConfig = field(default_factory=InventoryConfig)
+    recon: ReconConfig = field(default_factory=ReconConfig)
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
     flash: FlashConfig = field(default_factory=FlashConfig)
@@ -392,6 +401,11 @@ class Config:
         _apply(
             cfg.inventory,
             data.get("inventory", {}),
+            ("base_url", "token"),
+        )
+        _apply(
+            cfg.recon,
+            data.get("recon", {}),
             ("base_url", "token"),
         )
 

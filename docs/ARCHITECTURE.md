@@ -73,6 +73,12 @@ ticket system is a protocol with a fake, not a dependency.
   `TicketSource`, null / in-memory), `http_source` (the intake API over stdlib
   `urllib`), `importer` (idempotent ticket → job, backfills `board_id`). See
   [INTAKE.md](INTAKE.md).
+- **`recon/`** — the bench-recon client seam, same shape as `tickets/`: `source`
+  (`Engagement` / `Artifact` ref-safe projection types, `ReconSource`, null /
+  in-memory), `http_source` (the bench-recon API over stdlib `urllib`, reads
+  degrade), `importer` (`resolve_engagement` — "Import from engagement…" makes a
+  ref the active engagement; benchhud stores only the ref). Sensitive detail
+  stays in bench-recon; the recon panels are off air by default (`output.onair`).
 - **`boards/`** — the local board-doc library: `library` (`BoardLibrary` —
   recursive scan keyed by filename stem, resolve / search / missing, schematics
   kept distinct from board views), `opener` (`find_board_viewer` from the Tools
@@ -95,6 +101,7 @@ implementing the real side of each — no consumer changes.
 | Thermal frames | `FrameSource` (raw Y16) | synthetic °C arrays | Y16 capture → `thermal.convert.y16_to_celsius` |
 | Device discovery | `devices.DeviceScanner` | canned `/sys` + `list_ports` fakes | `SystemDeviceScanner` over real `/dev` nodes |
 | Ticket queue | `tickets.TicketSource` | `InMemoryTicketSource`, injected opener | `HttpTicketSource` against the intake API |
+| Recon engagements | `recon.ReconSource` | `InMemoryReconSource`, injected opener | `HttpReconSource` against the bench-recon API |
 | Board library | `boards.BoardLibrary` + injected `os_open` | `tmp_path` libraries, fake opener | A real `library_dir`; viewer via the Tools entries or the OS handler |
 
 ## Bench bring-up checklist
