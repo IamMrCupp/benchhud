@@ -28,14 +28,18 @@ class RegistrationTransform:
     scope view), ``rotation_deg`` turns about the centre, and the offsets nudge
     it in scope pixels.
 
-    ``rotated_fit`` (#259): the cover fit uses the *rotated* thermal's bounding
-    box, so a portrait thermal turned 90° fills a landscape scope at scale 1.0.
+    ``quarter_fit`` (#318): the cover fit uses the thermal turned to the
+    *nearest quarter turn*, so a portrait thermal turned 90° fills a landscape
+    scope at scale 1.0, and fine rotation never changes the size. Following the
+    exact rotation (#259) shrank the thermal 2.5% for a 2° tweak, so rotation
+    and scale had to be chased against each other.
 
     Older placements are kept so a saved transform keeps working until
     :meth:`migrated` converts it. ``fit=False`` is the original: native size,
     scale and rotation about the thermal frame's own centre, absolute offsets,
     which left the thermal in the scope frame's top-left corner.
     ``rotated_fit=False`` is #242's, which fitted the unrotated thermal.
+    ``quarter_fit=False`` is #259's, which fitted the exact rotation.
     """
 
     scale: float = 1.0
@@ -44,6 +48,7 @@ class RegistrationTransform:
     rotation_deg: float = 0.0
     fit: bool = True
     rotated_fit: bool = True
+    quarter_fit: bool = True
 
     @staticmethod
     def cover(
@@ -56,14 +61,25 @@ class RegistrationTransform:
         height = src_size[0] * sin + src_size[1] * cos
         return max(dst_size[0] / width, dst_size[1] / height)
 
-    def _fit_scale(self, src_size: tuple[int, int], dst_size: tuple[int, int]) -> float:
-        rotation = self.rotation_deg if self.rotated_fit else 0.0
+    @staticmethod
+    def nearest_quarter(rotation_deg: float) -> float:
+        """``rotation_deg`` snapped to the nearest multiple of 90°."""
+        return 90.0 * round(rotation_deg / 90.0)
+
+    def fit_scale(self, src_size: tuple[int, int], dst_size: tuple[int, int]) -> float:
+        """What ``scale`` 1.0 multiplies by: the cover fit for this placement."""
+        if not self.rotated_fit:
+            rotation = 0.0
+        elif self.quarter_fit:
+            rotation = self.nearest_quarter(self.rotation_deg)
+        else:
+            rotation = self.rotation_deg
         return self.cover(src_size, dst_size, rotation)
 
     @property
     def current(self) -> bool:
         """Whether this is the current placement (no conversion needed)."""
-        return self.fit and self.rotated_fit
+        return self.fit and self.rotated_fit and self.quarter_fit
 
     def turned(self, quarter_turns: int) -> RegistrationTransform:
         """This transform turned by 90° steps (positive = counter-clockwise)."""
@@ -81,7 +97,7 @@ class RegistrationTransform:
             matrix[0, 2] += self.offset_x
             matrix[1, 2] += self.offset_y
             return matrix
-        k = self._fit_scale(src_size, dst_size)
+        k = self.fit_scale(src_size, dst_size)
         matrix = cv2.getRotationMatrix2D(center, self.rotation_deg, self.scale * k)
         # Move the thermal centre onto the scope centre, then nudge.
         matrix[0, 2] += dst_size[0] / 2.0 - center[0] + self.offset_x
@@ -104,7 +120,7 @@ class RegistrationTransform:
         """The current-placement transform that puts every pixel where this one does."""
         if self.current:
             return self
-        k = self.cover(src_size, dst_size, self.rotation_deg)
+        k = RegistrationTransform(rotation_deg=self.rotation_deg).fit_scale(src_size, dst_size)
         if not self.fit:
             # The original: native size, top-left (#242).
             return RegistrationTransform(
@@ -113,9 +129,9 @@ class RegistrationTransform:
                 offset_y=self.offset_y + src_size[1] / 2.0 - dst_size[1] / 2.0,
                 rotation_deg=self.rotation_deg,
             )
-        # #242's fit ignored the rotation; same centre, so only the scale changes.
-        k_old = self.cover(src_size, dst_size, 0.0)
-        return replace(self, scale=self.scale * k_old / k, rotated_fit=True)
+        # #242's and #259's fits differ only in size; same centre, so only the scale changes.
+        k_old = self.fit_scale(src_size, dst_size)
+        return replace(self, scale=self.scale * k_old / k, rotated_fit=True, quarter_fit=True)
 
     def warp(self, src: np.ndarray, dst_size: tuple[int, int]) -> np.ndarray:
         """Warp ``src`` into a ``dst_size`` = ``(width, height)`` frame."""

@@ -80,6 +80,7 @@ def transform_from_config(cfg: RegistrationConfig) -> RegistrationTransform:
         rotation_deg=cfg.rotation_deg,
         fit=cfg.version >= 2,
         rotated_fit=cfg.version >= 3,
+        quarter_fit=cfg.version >= 4,
     )
 
 
@@ -89,5 +90,13 @@ def config_from_transform(transform: RegistrationTransform) -> RegistrationConfi
         offset_x=transform.offset_x,
         offset_y=transform.offset_y,
         rotation_deg=transform.rotation_deg,
-        version=3 if transform.current else 2 if transform.fit else 1,
+        version=_version(transform),
     )
+
+
+def _version(transform: RegistrationTransform) -> int:
+    if not transform.fit:
+        return 1
+    if not transform.rotated_fit:
+        return 2
+    return 4 if transform.quarter_fit else 3

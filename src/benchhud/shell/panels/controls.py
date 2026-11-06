@@ -10,6 +10,7 @@ wiring itself is bench work — this panel is the control surface, testable now.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -84,11 +85,17 @@ class ControlsPanel(Panel):
         self.threshold_spin = _spin(0.0, 300.0, 1.0, settings.threshold, " °C")
         self._fit = transform.fit
         self._rotated_fit = transform.rotated_fit
-        self.scale_spin = _spin(0.05, 30.0, 0.05, transform.scale)
-        self.scale_spin.setToolTip("1.00 = the thermal fills the scope view; higher zooms it in")
+        self._quarter_fit = transform.quarter_fit
+        # Fine enough to line the thermal up (#318): a 0.005 scale step is ~5 px
+        # at the edge of a 1080p frame, a 0.1° turn ~2 px.
+        self.scale_spin = _spin(0.05, 30.0, 0.005, transform.scale, decimals=3)
+        self.scale_spin.setToolTip("1.000 = the thermal fills the scope view; higher zooms it in")
         self.offset_x_spin = _spin(-2000.0, 2000.0, 1.0, transform.offset_x, " px")
         self.offset_y_spin = _spin(-2000.0, 2000.0, 1.0, transform.offset_y, " px")
-        self.rotation_spin = _spin(-180.0, 180.0, 0.5, transform.rotation_deg, "°")
+        self.rotation_spin = _spin(-180.0, 180.0, 0.1, transform.rotation_deg, "°")
+        # A calibrated transform at full precision, until a control is changed:
+        # the spin boxes round what they show (#318).
+        self._precise: RegistrationTransform | None = transform
 
         form = QFormLayout(self)
         form.setContentsMargins(*PANEL_MARGINS)
@@ -205,13 +212,35 @@ class ControlsPanel(Panel):
         )
 
     def current_transform(self) -> RegistrationTransform:
-        return RegistrationTransform(
+        shown = RegistrationTransform(
             scale=self.scale_spin.value(),
             offset_x=self.offset_x_spin.value(),
             offset_y=self.offset_y_spin.value(),
             rotation_deg=self.rotation_spin.value(),
             fit=self._fit,
             rotated_fit=self._rotated_fit,
+            quarter_fit=self._quarter_fit,
+        )
+        if self._precise is not None and self._shows(self._precise):
+            return self._precise
+        self._precise = None  # a control was changed: what's shown is the value
+        return shown
+
+    def _shows(self, transform: RegistrationTransform) -> bool:
+        """Whether the spin boxes show ``transform``, as rounded as they display it."""
+        pairs = (
+            (self.scale_spin, transform.scale),
+            (self.offset_x_spin, transform.offset_x),
+            (self.offset_y_spin, transform.offset_y),
+            (self.rotation_spin, transform.rotation_deg),
+        )
+        same_fit = (transform.fit, transform.rotated_fit, transform.quarter_fit) == (
+            self._fit,
+            self._rotated_fit,
+            self._quarter_fit,
+        )
+        return same_fit and all(
+            round(value, spin.decimals()) == spin.value() for spin, value in pairs
         )
 
     def reference_settings(self) -> ReferenceSettings:
@@ -241,6 +270,8 @@ class ControlsPanel(Panel):
             spin.blockSignals(True)
         self._fit = transform.fit
         self._rotated_fit = transform.rotated_fit
+        self._quarter_fit = transform.quarter_fit
+        self._precise = transform
         self.scale_spin.setValue(transform.scale)
         self.offset_x_spin.setValue(transform.offset_x)
         self.offset_y_spin.setValue(transform.offset_y)
@@ -257,8 +288,29 @@ class ControlsPanel(Panel):
         self.changed.emit()
 
 
-def _spin(lo: float, hi: float, step: float, value: float, suffix: str = "") -> QDoubleSpinBox:
-    spin = QDoubleSpinBox()
+class _SpinBox(QDoubleSpinBox):
+    """A spin box the wheel only turns once it's been clicked into (#318).
+
+    The panel sits in a scroll area, and a plain spin box took the wheel
+    whenever the pointer passed over it: scrolling the dock nudged the scale.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()  # let the scroll area have it
+
+
+def _spin(
+    lo: float, hi: float, step: float, value: float, suffix: str = "", decimals: int = 2
+) -> QDoubleSpinBox:
+    spin = _SpinBox()
+    spin.setDecimals(decimals)
     spin.setRange(lo, hi)
     spin.setSingleStep(step)
     spin.setValue(value)

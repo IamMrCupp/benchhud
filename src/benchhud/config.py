@@ -120,10 +120,11 @@ class RegistrationConfig:
     offset_x: float = 0.0
     offset_y: float = 0.0
     rotation_deg: float = 0.0
-    # 3: fitted to the scope frame, centred, the fit following the rotation (#259).
+    # 4: fitted to the scope frame, centred, the fit following the nearest
+    # quarter turn (#318). 3: the fit following the exact rotation (#259).
     # 2: fitted ignoring the rotation (#242). 1: native size, top left.
     # Older versions are converted on first use, with no visible jump.
-    version: int = 3
+    version: int = 4
 
 
 @dataclass

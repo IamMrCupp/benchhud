@@ -50,7 +50,7 @@ def test_version_two_configs_are_the_242_fit() -> None:
     cfg = Config.from_dict({"registration": {"rotation_deg": 90.0, "version": 2}})
     t = transform_from_config(cfg.registration)
     assert t.fit and not t.rotated_fit and not t.current
-    assert config_from_transform(t.migrated(PORTRAIT, SCOPE)).version == 3
+    assert config_from_transform(t.migrated(PORTRAIT, SCOPE)).version == 4
 
 
 def test_calibration_solves_a_quarter_turn() -> None:
