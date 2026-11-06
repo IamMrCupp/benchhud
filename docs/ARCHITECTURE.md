@@ -23,7 +23,9 @@ ticket system is a protocol with a fake, not a dependency.
   to source), and the panels: `scope`, `thermal`, `power` (the styled meter),
   `controls`, `launcher`, `jobs`, `inventory`, `terminal` (hosts the xterm.js
   page in QtWebEngine, created only when the terminal is on), `engagement` (the
-  active bench-recon engagement, off air), plus `telemetry` (superseded by
+  active bench-recon engagement, off air), `interfaces` (connected probes/
+  adapters cross-mapped to assigned assets, with a manual port→asset bind), plus
+  `telemetry` (superseded by
   `power`, class retained).
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`,
   `CameraFrameSource` (cv2), threaded `LatestFrameReader` (latest-frame buffer),
@@ -60,7 +62,9 @@ ticket system is a protocol with a fake, not a dependency.
   the trend chart).
 - **`devices/`** — camera + serial enumeration behind a `DeviceScanner` protocol
   (`/dev/video*` + `/sys` names on Linux, Qt fallback, pyserial `list_ports`),
-  and `resolve_capture_device` (Qt device id → OpenCV index).
+  `resolve_capture_device` (Qt device id → OpenCV index), and
+  `list_usb_interfaces` (`UsbInterface` with VID:PID / serial for the interface
+  monitor's asset cross-map).
 - **`thermal/`** — `convert` (Y16→°C, Sipeed spec), `analyze` (hotspot / threshold
   / stats).
 - **`overlay/`** — `RegistrationTransform` (affine warp), `composite`

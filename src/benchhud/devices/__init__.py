@@ -5,7 +5,9 @@ from benchhud.devices.discovery import (
     DeviceScanner,
     SerialDevice,
     SystemDeviceScanner,
+    UsbInterface,
     list_serial_ports,
+    list_usb_interfaces,
 )
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "DeviceScanner",
     "SerialDevice",
     "SystemDeviceScanner",
+    "UsbInterface",
     "list_serial_ports",
+    "list_usb_interfaces",
 ]
