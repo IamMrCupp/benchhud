@@ -76,7 +76,7 @@ def solve(
     rotation = math.degrees(math.atan2(beta, alpha))
 
     cx, cy = src_size[0] / 2.0, src_size[1] / 2.0
-    k = RegistrationTransform.cover(src_size, dst_size, rotation)
+    k = RegistrationTransform(rotation_deg=rotation).fit_scale(src_size, dst_size)
     # Where the first thermal point lands with no offset, then the offset that
     # moves it onto its click.
     rx, ry = first.thermal[0] - cx, first.thermal[1] - cy

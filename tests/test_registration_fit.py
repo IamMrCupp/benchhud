@@ -46,7 +46,7 @@ def test_migration_puts_every_pixel_where_it_was() -> None:
     """The bench's saved values: no jump when they're converted."""
     old = RegistrationTransform(scale=3.0, offset_x=800, offset_y=400, rotation_deg=4.0, fit=False)
     new = old.migrated(THERMAL, SCOPE)
-    k = RegistrationTransform.cover(THERMAL, SCOPE, 4.0)  # the fit follows the turn (#259)
+    k = RegistrationTransform.cover(THERMAL, SCOPE, 0.0)  # the nearest quarter turn (#318)
     assert new.current and new.scale == pytest.approx(3.0 / k)
     for point in [(0, 0), (256, 0), (128, 96), (37, 150)]:
         assert new.map_point(*point, THERMAL, SCOPE) == pytest.approx(
@@ -59,9 +59,9 @@ def test_config_without_a_version_is_the_old_placement() -> None:
     old = Config.from_dict({"registration": {"scale": 1.0, "offset_x": 800.0, "offset_y": 400.0}})
     assert old.registration.version == 1
     assert not transform_from_config(old.registration).fit
-    assert Config().registration.version == 3  # a fresh install
-    assert Config.from_dict({}).registration.version == 3
-    assert config_from_transform(RegistrationTransform()).version == 3
+    assert Config().registration.version == 4  # a fresh install
+    assert Config.from_dict({}).registration.version == 4
+    assert config_from_transform(RegistrationTransform()).version == 4
 
 
 def test_the_window_converts_an_old_transform_once(qtbot) -> None:
@@ -71,7 +71,7 @@ def test_the_window_converts_an_old_transform_once(qtbot) -> None:
     window.scope_panel.update_frame(np.zeros((SCOPE[1], SCOPE[0], 3), dtype=np.uint8))
     window.thermal_panel.update_temps(np.full((THERMAL[1], THERMAL[0]), 25.0, np.float32))
     window.render_composite()
-    assert config.registration.version == 3
+    assert config.registration.version == 4
     assert config.registration.offset_x == pytest.approx(800 + 128 - 640)
     assert config.registration.scale == pytest.approx(1 / 5)
     assert window.controls_panel.current_transform().fit

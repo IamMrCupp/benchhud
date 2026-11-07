@@ -284,8 +284,12 @@ Bring-up checklist:
      working distance, and calibrate again after fitting or removing it.
    - **A portrait thermal on a landscape scope** (the T256s is 192×256): use ⟲
      / ⟳ beside Rotation to turn it 90° at a time. The fit follows the turn, so
-     it still fills the view at Scale 1.00. Calibrate… works out the turn by
+     it still fills the view at Scale 1.000. Calibrate… works out the turn by
      itself.
+   - **Fine-tuning by hand:** Scale steps 0.005 and Rotation 0.1°. A small
+     rotation tweak doesn't change the size, so set rotation and scale
+     independently. Click into a box before using the mouse wheel on it;
+     scrolling past the Controls panel leaves the values alone.
 
 Once the hardware's up, the bench-workflow docs take over: [JOBS.md](JOBS.md)
 for the repair log (captures, automatic fault logging, reports) and
