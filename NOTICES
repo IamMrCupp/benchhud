@@ -1,0 +1,45 @@
+benchhud — third-party notices
+
+benchhud itself is licensed under the PolyForm Small Business License 1.0.0
+(see LICENSE). It is built on, and its packaged builds include, the following
+third-party components. Each remains under its own license, listed below.
+
+-------------------------------------------------------------------------------
+
+PySide6 (Qt for Python) and Qt
+  https://www.qt.io/qt-for-python
+  License: GNU Lesser General Public License v3.0 (LGPLv3)
+
+  PySide6, shiboken6 and the Qt libraries they ship are used as dynamically
+  linked shared libraries. benchhud does not modify them, and you may replace
+  them with your own build of a compatible version. Source code is available
+  from the Qt Project (https://download.qt.io/official_releases/) and as the
+  PySide6 source distribution on PyPI (https://pypi.org/project/PySide6/).
+  The LGPLv3 text: https://www.gnu.org/licenses/lgpl-3.0.html
+
+DSEG font (DSEG7 Classic)
+  Copyright (c) 2017, keshikan (http://www.keshikan.net),
+  with Reserved Font Name "DSEG".
+  https://github.com/keshikan/DSEG
+  License: SIL Open Font License 1.1
+  Full text: src/benchhud/resources/fonts/OFL.txt (installed alongside the font)
+
+NumPy
+  https://numpy.org/
+  License: BSD 3-Clause
+
+opencv-python (OpenCV)
+  https://github.com/opencv/opencv-python
+  License: Apache License 2.0
+
+  The opencv-python wheels bundle FFmpeg, which is licensed under the GNU
+  Lesser General Public License v2.1 (LGPL-2.1) and is likewise dynamically
+  linked. FFmpeg source: https://ffmpeg.org/download.html
+
+pySerial
+  https://github.com/pyserial/pyserial
+  License: BSD 3-Clause
+
+tomlkit
+  https://github.com/python-poetry/tomlkit
+  License: MIT
