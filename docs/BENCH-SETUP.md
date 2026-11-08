@@ -324,6 +324,38 @@ Voltage, current limit, output on/off and the DMM mode were verified on the
 reference bench (#164, #283). The SPM8104's DMM has eight modes: DC and AC
 volts, DC and AC amps, resistance, continuity, diode and capacitance.
 
+## 7. Aiming the stream cameras (optional)
+
+The **Cameras** panel moves a USB camera's pan, tilt and zoom, and saves shots
+(Face, Desk, Reflow) you can jump back to with **Go**. OBS keeps the picture:
+Linux lets benchhud change a camera's controls while another program streams
+it, so nothing in OBS changes.
+
+1. **Add…** lists the cameras benchhud finds; pick one and name it. It's saved
+   by its `/dev/v4l/by-id` link, so a USB drop doesn't lose it.
+2. The sliders are whatever the camera reports. A camera without pan, tilt or
+   zoom gets none.
+3. Point the camera, then **Save shot…** and name it.
+
+What a camera offers, before you add it:
+
+```bash
+v4l2-ctl -d /dev/v4l/by-id/<camera> --list-ctrls | grep -E 'pan|tilt|zoom'
+```
+
+- Pan and tilt show in degrees; zoom shows as a factor of the camera's minimum.
+- Dragging moves the camera when you let go; a click or an arrow key moves it
+  at once.
+- benchhud only sends absolute positions, never "keep moving", so a crash can't
+  leave a motor running to its end stop.
+- Turn the camera's own face tracking off before using shots, or it pulls the
+  framing back.
+
+Not yet verified on the reference bench (#330): whether the EMEET PIXY zooms at
+4K (other PIXY tools report zoom only works below 4K), and whether its pan
+follows these controls while tracking is on. Network cameras such as the Mevo
+aren't covered here yet.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
