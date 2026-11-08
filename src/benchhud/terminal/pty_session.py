@@ -44,6 +44,15 @@ def shell_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def _max_fd() -> int:
+    """One past the highest fd this process can hold (resolved before fork)."""
+    try:
+        limit = os.sysconf("SC_OPEN_MAX")
+    except (OSError, ValueError):
+        limit = -1
+    return limit if limit > 0 else 65536
+
+
 def set_winsize(fd: int, cols: int, rows: int) -> None:
     """Tell the terminal its size. The kernel sends the shell SIGWINCH."""
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -90,12 +99,17 @@ class PtySession:
         if program is None:
             raise FileNotFoundError(f"{self._argv[0]}: not found")
         argv, env, cwd = self._argv, self._env, self._cwd
+        max_fd = _max_fd()
         with warnings.catch_warnings():
             # Forking a threaded process warns because the child could deadlock
             # on a lock another thread held. This child only calls execve.
             warnings.simplefilter("ignore", DeprecationWarning)
             pid, fd = pty.fork()
         if pid == 0:  # pragma: no cover - the child; it never returns
+            # Drop everything but the pty (0-2). C libraries open fds without
+            # O_CLOEXEC — OpenCV's V4L2 cameras among them — and a shell job
+            # that outlives the app would otherwise keep those cameras locked.
+            os.closerange(3, max_fd)
             with contextlib.suppress(OSError):
                 os.chdir(cwd)
             try:
