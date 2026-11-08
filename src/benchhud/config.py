@@ -12,6 +12,7 @@ the documented example file in the repo.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import tomllib
@@ -475,10 +476,19 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
 
 
 def save(config: Config, path: str | os.PathLike[str] | None = None) -> Path:
-    """Persist ``config`` to ``path`` (or the default). Returns the path written."""
+    """Persist ``config`` to ``path`` (or the default). Returns the path written.
+
+    The file is owner-only (``0600``): it holds the intake, bench-parts and
+    bench-recon tokens. An existing file is tightened too.
+    """
     target = Path(path) if path is not None else default_config_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(tomlkit.dumps(config.to_dict()), "utf-8")
+    text = tomlkit.dumps(config.to_dict())
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    with contextlib.suppress(OSError):
+        os.chmod(target, 0o600)  # O_CREAT's mode only applies to a new file
     return target
 
 
