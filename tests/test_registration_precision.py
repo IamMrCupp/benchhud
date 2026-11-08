@@ -5,13 +5,14 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLineEdit, QScrollArea, QVBoxLayout, QWidget
 
 from benchhud.config import Config
 from benchhud.overlay.calibration import Pair, solve
 from benchhud.overlay.config_adapter import config_from_transform, transform_from_config
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.panels.controls import ControlsPanel
+from benchhud.shell.wheel_guard import WheelGuard
 
 THERMAL = (256, 192)
 PORTRAIT = (192, 256)  # the bench's T256s
@@ -118,13 +119,31 @@ def _wheel(widget) -> None:
 
 
 def test_the_wheel_only_turns_a_focused_spin_box(qtbot, monkeypatch) -> None:
-    panel = ControlsPanel(Config())
-    qtbot.addWidget(panel)
-    spin = panel.scale_spin
-    assert spin.focusPolicy() == Qt.FocusPolicy.StrongFocus  # the wheel can't focus it
-    _wheel(spin)
-    assert spin.value() == pytest.approx(1.0)  # scrolled past: untouched
-    # Offscreen Qt has no active window to give focus to, so stand in for a click.
-    monkeypatch.setattr(spin, "hasFocus", lambda: True)
-    _wheel(spin)
-    assert spin.value() == pytest.approx(1.005)
+    # The app-wide wheel guard (#320) covers the Controls panel's fine steps (#318).
+    guard = WheelGuard()
+    QApplication.instance().installEventFilter(guard)
+    try:
+        elsewhere = QLineEdit()  # holds the focus, or Qt gives it to the first control
+        panel = ControlsPanel(Config())
+        holder = QWidget()
+        layout = QVBoxLayout(holder)
+        layout.addWidget(elsewhere)
+        layout.addWidget(panel)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(holder)
+        scroll.resize(300, 200)
+        qtbot.addWidget(scroll)
+        scroll.show()
+        qtbot.waitExposed(scroll)
+        elsewhere.setFocus()
+        spin = panel.scale_spin
+        assert not spin.focusPolicy().value & 0x4  # no wheel bit: the wheel can't focus it
+        _wheel(spin)
+        assert spin.value() == pytest.approx(1.0)  # scrolled past: untouched
+        # Offscreen Qt has no active window to give focus to, so stand in for a click.
+        monkeypatch.setattr(spin, "hasFocus", lambda: True)
+        _wheel(spin)
+        assert spin.value() == pytest.approx(1.005)
+    finally:
+        QApplication.instance().removeEventFilter(guard)

@@ -10,7 +10,6 @@ wiring itself is bench work — this panel is the control surface, testable now.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -288,28 +287,10 @@ class ControlsPanel(Panel):
         self.changed.emit()
 
 
-class _SpinBox(QDoubleSpinBox):
-    """A spin box the wheel only turns once it's been clicked into (#318).
-
-    The panel sits in a scroll area, and a plain spin box took the wheel
-    whenever the pointer passed over it: scrolling the dock nudged the scale.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()  # let the scroll area have it
-
-
 def _spin(
     lo: float, hi: float, step: float, value: float, suffix: str = "", decimals: int = 2
 ) -> QDoubleSpinBox:
-    spin = _SpinBox()
+    spin = QDoubleSpinBox()  # the wheel guard keeps it from taking a dock's scroll (#320)
     spin.setDecimals(decimals)
     spin.setRange(lo, hi)
     spin.setSingleStep(step)
