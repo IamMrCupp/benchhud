@@ -79,6 +79,7 @@ class FallbackFrameSource:
         *,
         name: str = "camera",
         open_hint: str = "",
+        held_by: Callable[[], str | None] | None = None,
         retry_interval: float = 3.0,
         max_retry_interval: float | None = None,
         stall_timeout: float = 3.0,
@@ -90,6 +91,8 @@ class FallbackFrameSource:
         self._fallback = fallback
         self._name = name
         self._open_hint = open_hint
+        # Names the process holding the camera when an open fails (#325).
+        self._held_by = held_by
         self._retry_interval = retry_interval
         # Each failed open doubles the wait, up to this (#276): a thermal camera
         # that's mid-recalibration crashes if asked to restart too soon.
@@ -148,6 +151,9 @@ class FallbackFrameSource:
         if fatal:
             return f"{self._name} {fatal}"
         reason = f"couldn't open {self._name}"
+        holder = self._held_by() if self._held_by is not None else None
+        if holder:
+            return f"{reason} — {holder}"
         return f"{reason} — {self._open_hint}" if self._open_hint else reason
 
     # --- frames ----------------------------------------------------------

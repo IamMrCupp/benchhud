@@ -20,6 +20,11 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] in {"-V", "--version"}:
         print(f"benchhud {__version__}")
         return 0
+    if argv and argv[0] == "udev-rules":
+        # Fixed /dev/cam-* names for OBS (#325); Qt-free, like --version.
+        from benchhud.devices.camnames import udev_rules_main
+
+        return udev_rules_main()
 
     # Import Qt + shell lazily so ``--version`` stays display-free.
     from PySide6.QtCore import QCoreApplication, Qt

@@ -56,6 +56,7 @@ from benchhud.devices.discovery import (
     same_device,
     stable_path,
 )
+from benchhud.devices.holders import held_by
 from benchhud.instruments.owon_spm8104 import InstrumentLimits, open_device
 from benchhud.instruments.session import InstrumentSession
 from benchhud.instruments.signature import Signature, SignatureRecorder, compare, reference_at
@@ -157,6 +158,16 @@ def camera_label(device: str, cameras: Sequence[CameraDevice] = ()) -> str:
     return text
 
 
+def camera_holder_check(
+    device: str, platform: str = sys.platform
+) -> Callable[[], str | None] | None:
+    """Names who holds ``device`` when it won't open (#325); None where we can't tell."""
+    if not platform.startswith("linux") or not device.strip().startswith("/"):
+        return None
+    path = device.strip()
+    return lambda: held_by(path)
+
+
 def scope_source_for(
     device: str, cameras: Sequence[CameraDevice] = (), size: tuple[int, int] | None = None
 ) -> FallbackFrameSource:
@@ -176,6 +187,7 @@ def scope_source_for(
         fallback,
         name=camera_label(device, cameras),
         open_hint=camera_open_hint(),
+        held_by=camera_holder_check(device),
     )
 
 
@@ -195,6 +207,7 @@ def thermal_source_for(device: str, cameras: Sequence[CameraDevice] = ()) -> Fal
         None,
         name=camera_label(device, cameras),
         open_hint=camera_open_hint(),
+        held_by=camera_holder_check(device),
         stall_timeout=THERMAL_STALL_S,
         retry_interval=THERMAL_RETRY_S,
         max_retry_interval=THERMAL_MAX_RETRY_S,

@@ -92,6 +92,34 @@ That name follows the camera, so after a drop the scope or thermal reconnects by
 itself within a few seconds. The status bar says *reconnecting* meanwhile.
 Configs with a plain `/dev/videoN` are converted on start.
 
+### Give OBS names that don't move
+
+OBS's Video Capture Device sources save `/dev/videoN`, so they don't follow a
+camera. After the thermal camera drops off and comes back, the number OBS saved
+for a webcam can belong to the thermal camera. OBS then opens it, and since a
+camera allows one reader, the HUD can't. Give each camera a fixed name with udev:
+
+```bash
+benchhud udev-rules | sudo tee /etc/udev/rules.d/70-benchhud-cameras.rules
+sudo udevadm control --reload && sudo udevadm trigger
+ls -l /dev/cam-*
+```
+
+From a checkout, use `uv run benchhud udev-rules`. Run it with every camera
+plugged in. The scope and thermal cameras from your config become
+`/dev/cam-scope` and `/dev/cam-thermal`. The others are named after their model, for example `/dev/cam-c922-pro-stream-webcam`. Run it again after
+adding a camera.
+
+Then, in each of OBS's Video Capture Device sources, set the device to the
+camera's `/dev/cam-*` name. If the device list doesn't offer it, close OBS and
+edit `device_id` for that source in the scene collection
+(`~/.config/obs-studio/basic/scenes/<collection>.json`). No OBS source should
+use the scope or thermal camera; OBS gets those through the `benchhud` output.
+
+When a camera won't open because something else has it, the status bar names
+the program, for example *couldn't open Thermal Camera (UVC) — held by obs
+(pid 1234)*.
+
 ### Keep the thermal camera awake
 
 Linux suspends idle USB devices after two seconds, and some thermal cameras
@@ -328,7 +356,8 @@ volts, DC and AC amps, resistance, continuity, diode and capacitance.
 
 | Symptom | Cause / fix |
 |---|---|
-| Scope/thermal dock shows the animated placeholder | Device didn't open — wrong `/dev/videoN`, another reader holds it (UVC single-access), or not in the `video` group. |
+| Scope/thermal dock shows the animated placeholder | Device didn't open — wrong `/dev/videoN`, another reader holds it (UVC single-access), or not in the `video` group. The status bar names the holder. |
+| Status bar says the camera is *held by obs* | An OBS source has a saved `/dev/videoN` that now belongs to this camera. Point OBS at the `/dev/cam-*` names ([Give OBS names that don't move](#give-obs-names-that-dont-move)). |
 | OBS doesn't list `benchhud` | Module loaded without `exclusive_caps=1`. Re-`modprobe` with it. |
 | Output logs "unavailable" and falls back | Loopback node missing/wrong path, or another writer holds it. benchhud keeps running without the OBS feed — fix `output.device`. |
 | Output logs the driver "adjusted the format" | `output.width`/`height` don't match what the loopback grants. Set them to the granted size. |
