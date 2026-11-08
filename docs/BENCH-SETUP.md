@@ -147,6 +147,40 @@ benchhud so the cameras reopen with it. A dropped frame just holds the last one
 on screen a moment longer. benchhud says so in the status bar while the driver
 still passes torn frames on.
 
+### Wired and Wi-Fi on one subnet
+
+If the bench has Ethernet and Wi-Fi both up on the same subnet, it can boot with
+no IPv4 routes at all. Network sources (a Mevo over SRT, say) go dark: OBS logs
+`Failed to open media: 'srt://…'` and the box reports `Network is unreachable`.
+SSH over IPv6 keeps working, which hides the problem. Some boots are fine; it's
+a race each time a connection comes up.
+
+Linux's default `arp_ignore=0` lets each card answer ARP for the other's
+address. NetworkManager's address-conflict probes then get answered by the
+bench's own other card, it logs `conflict detected for IP address 192.168.x.y
+with host <your own MAC>`, holds the address as not ready and installs no
+routes. Tell each card to answer only for its own addresses:
+
+```bash
+sudo tee /etc/sysctl.d/60-arp-multihome.conf <<'EOF'
+net.ipv4.conf.all.arp_ignore = 1
+net.ipv4.conf.all.arp_announce = 2
+net.ipv4.conf.default.arp_ignore = 1
+net.ipv4.conf.default.arp_announce = 2
+EOF
+sudo sysctl --system
+```
+
+`sysctl --system` applies it now; the file keeps it across reboots. Then
+reconnect both cards (`nmcli connection down <name>; nmcli connection up <name>`)
+and check:
+
+```bash
+sysctl net.ipv4.conf.all.arp_ignore net.ipv4.conf.all.arp_announce   # 1 and 2
+ip route                                                              # a default route per card
+journalctl -b -u NetworkManager | grep -c "conflict detected"         # 0
+```
+
 ## 3. Create the virtual-camera output
 
 benchhud writes its composite to a **v4l2loopback** node that OBS then reads as a
@@ -333,5 +367,6 @@ volts, DC and AC amps, resistance, continuity, diode and capacitance.
 | Output logs "unavailable" and falls back | Loopback node missing/wrong path, or another writer holds it. benchhud keeps running without the OBS feed — fix `output.device`. |
 | Output logs the driver "adjusted the format" | `output.width`/`height` don't match what the loopback grants. Set them to the granted size. |
 | Thermal image briefly freezes | The Sipeed's periodic **NUC shutter** — normal, not an error. |
+| Mevo/SRT source won't connect, `Network is unreachable`, no IPv4 routes | Wired and Wi-Fi on one subnet; NetworkManager sees an ARP conflict with itself. See [Wired and Wi-Fi on one subnet](#wired-and-wi-fi-on-one-subnet). |
 | No `/dev/ttyUSB0` | CH34x driver/permissions — check `dmesg | grep ch34` and `dialout` membership. |
 | Frames stutter under load | All cams share one USB 2.0 bus (480M) on the reference bench — isochronous bandwidth is finite. Prefer the small 192×256 Y16 thermal; consider moving the scope cam to a USB 3 port. |
