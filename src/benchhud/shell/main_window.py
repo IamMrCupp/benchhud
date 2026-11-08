@@ -117,6 +117,7 @@ from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 from benchhud.shell.qt_util import unelide_tabs
 from benchhud.shell.signature_image import render_signature
+from benchhud.shell.wheel_guard import install as install_wheel_guard
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
@@ -301,6 +302,8 @@ class MainWindow(QMainWindow):
         # left, composite preview in the centre. A saved layout (config) wins on
         # later launches; this is just the first-run arrangement.
         self.panels = PanelManager(self)
+        # The wheel scrolls a dock rather than the controls it passes over (#320).
+        self._wheel_guard = install_wheel_guard(self)
         right = Qt.DockWidgetArea.RightDockWidgetArea
         left = Qt.DockWidgetArea.LeftDockWidgetArea
 
