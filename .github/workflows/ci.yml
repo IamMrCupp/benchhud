@@ -239,6 +239,17 @@ jobs:
           briefcase create macOS app --no-input
           briefcase build  macOS app --no-input
 
+      - name: LICENSE and NOTICES are in the bundle
+        run: |
+          # Briefcase only copies license-files into a .pkg; the zip carries
+          # them because pyproject.toml lists them as macOS sources (#338).
+          res=build/benchhud/macos/app/benchhud.app/Contents/Resources/app
+          for f in LICENSE NOTICES; do
+            test -s "$res/$f" || { echo "$f missing from $res"; ls -la "$res"; exit 1; }
+            cmp "$f" "$res/$f"
+          done
+          echo "LICENSE and NOTICES present"
+
       - name: It starts (headless)
         run: |
           # No camera chosen, so a runner can never sit on a camera prompt.
@@ -259,6 +270,15 @@ jobs:
 
       - name: Package (ad-hoc signed)
         run: briefcase package macOS app --adhoc-sign -p zip --no-input
+
+      - name: The zip carries LICENSE and NOTICES
+        run: |
+          zip=$(ls dist/*.zip | head -1)
+          for f in LICENSE NOTICES; do
+            unzip -l "$zip" | grep -q "benchhud.app/Contents/Resources/app/$f\$" \
+              || { echo "$f missing from $zip"; exit 1; }
+          done
+          echo "both files in $zip"
 
       - uses: actions/upload-artifact@v4
         with:
