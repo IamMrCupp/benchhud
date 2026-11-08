@@ -50,6 +50,15 @@ def test_parse_by_id() -> None:
     assert parse_by_id("not-a-link") is None
 
 
+def test_model_name_drops_the_uvc_interface() -> None:
+    # Real sysfs names from repair-bench (2026-11-08).
+    a = CameraId("/a", "usb", "EMEET_EMEET_PIXY_A2604", "EMEET PIXY: EMEET PIXY")
+    b = CameraId("/b", "usb", "MACROSILICON_ClearClick", "ClearClick: ClearClick")
+    c = CameraId("/c", "usb", "Sipeed_Thermal", "Thermal Camera (UVC): UVC Camer")
+    names = [n.name for n in name_cameras([a, b, c], {})]
+    assert names == ["emeet-pixy", "clearclick", "thermal-camera-uvc"]
+
+
 def test_slug() -> None:
     assert slug("C922 Pro Stream Webcam") == "c922-pro-stream-webcam"
     assert slug("Thermal Camera (UVC)") == "thermal-camera-uvc"

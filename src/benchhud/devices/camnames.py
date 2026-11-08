@@ -66,6 +66,15 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
+def model_name(label: str) -> str:
+    """The product part of a kernel camera name.
+
+    uvcvideo names a camera ``"<product>: <interface>"``, which repeats itself on
+    the bench: ``EMEET PIXY: EMEET PIXY``, ``Thermal Camera (UVC): UVC Camer``.
+    """
+    return label.split(": ", 1)[0]
+
+
 def usb_cameras(
     by_id_dir: str = BY_ID_DIR,
     label_of: Callable[[str], str | None] = _read_sysfs_name,
@@ -119,7 +128,7 @@ def name_cameras(
         else:
             rest.append(camera)
     for camera in rest:
-        base = slug(camera.label) or "camera"
+        base = slug(model_name(camera.label)) or "camera"
         name, n = base, 2
         while name in taken:
             name, n = f"{base}-{n}", n + 1
