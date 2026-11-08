@@ -290,6 +290,45 @@ class FlashConfig:
     programmer: str = "ch341a_spi"  # flashrom's -p value
 
 
+#: The axes a saved camera shot can hold (see benchhud.devices.camera_controls).
+CAMERA_AXES = ("pan", "tilt", "zoom")
+
+
+@dataclass
+class CameraConfig:
+    """A stream camera benchhud can aim (#330): its pan/tilt/zoom and saved shots.
+
+    benchhud only moves the camera; the picture stays with OBS. ``shots`` maps a
+    shot's name (Face, Desk, Reflow) to the raw control values to go back to.
+    """
+
+    name: str
+    device: str  # its /dev/v4l/by-id link, so a USB drop doesn't lose it
+    shots: dict[str, dict[str, int]] = field(default_factory=dict)
+
+
+def _camera_from_dict(data: Any) -> CameraConfig | None:
+    if not isinstance(data, Mapping):
+        return None
+    name, device = data.get("name"), data.get("device")
+    if not (isinstance(name, str) and name and isinstance(device, str) and device):
+        return None
+    shots: dict[str, dict[str, int]] = {}
+    raw_shots = data.get("shots", {})
+    if isinstance(raw_shots, Mapping):
+        for shot, values in raw_shots.items():
+            if not isinstance(values, Mapping):
+                continue
+            kept = {
+                axis: int(values[axis])
+                for axis in CAMERA_AXES
+                if isinstance(values.get(axis), int) and not isinstance(values[axis], bool)
+            }
+            if kept:
+                shots[str(shot)] = kept
+    return CameraConfig(name=name, device=device, shots=shots)
+
+
 @dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
@@ -311,6 +350,7 @@ class Config:
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     tools: list[ToolConfig] = field(default_factory=list)
+    cameras: list[CameraConfig] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Config:
@@ -435,6 +475,9 @@ class Config:
             for t in data.get("tools", [])
             if isinstance(t, Mapping) and "name" in t and "command" in t
         ]
+        raw_cameras = data.get("cameras", [])
+        if isinstance(raw_cameras, list):
+            cfg.cameras = [c for c in map(_camera_from_dict, raw_cameras) if c is not None]
         return cfg
 
     def to_dict(self) -> dict[str, Any]:

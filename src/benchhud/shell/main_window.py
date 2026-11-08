@@ -98,6 +98,7 @@ from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
+from benchhud.shell.panels.cameras import CamerasPanel
 from benchhud.shell.panels.capture import CapturePanel
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.engagement import EngagementPanel
@@ -405,6 +406,9 @@ class MainWindow(QMainWindow):
         minipro_dock = self.panels.add_panel(self.minipro_panel, left)
         self.tabifyDockWidget(flash_dock, minipro_dock)  # …and the T48 (#253)
         self.tabifyDockWidget(minipro_dock, readings_dock)  # …and readings (#235)
+        self.cameras_panel = CamerasPanel(self._config.cameras, scanner=self._scanner)
+        cameras_dock = self.panels.add_panel(self.cameras_panel, left)
+        self.tabifyDockWidget(readings_dock, cameras_dock)  # …and aiming the cameras (#330)
 
         scope_dock.raise_()
         controls_dock.raise_()
@@ -521,6 +525,7 @@ class MainWindow(QMainWindow):
             "jobs",
             "inventory",
             "terminal",
+            "cameras",
         ):
             dock = self.panels.dock(panel_id)
             if dock is not None:
