@@ -35,6 +35,18 @@ class LatestFrameReader:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._error: BaseException | None = None
+        # Decode on demand (#346): a source that can skip decoding asks this
+        # before each decode. True once a consumer has taken a frame since the
+        # last decode, so frames nobody would see aren't decoded.
+        self._wanted = True
+        setter = getattr(source, "set_decode_gate", None)
+        if setter is not None:
+            setter(self._take_wanted)
+
+    def _take_wanted(self) -> bool:
+        with self._lock:
+            wanted, self._wanted = self._wanted, False
+            return wanted
 
     def start(self) -> None:
         """Start the capture thread (idempotent)."""
@@ -62,6 +74,7 @@ class LatestFrameReader:
     def latest(self) -> np.ndarray | None:
         """Return the most recent frame, or ``None`` if none captured yet."""
         with self._lock:
+            self._wanted = True  # taken: decode the next one
             return self._latest
 
     @property
