@@ -227,11 +227,13 @@ def heat_blend(
     """
     if tmax <= tmin:
         return scope.copy()
-    weight = np.clip((temps - tmin) / (tmax - tmin), 0.0, 1.0) * alpha
-    heat = colorize(temps, tmin, tmax, colormap).astype(np.float32)
-    weight = weight[..., None]
-    out = scope.astype(np.float32) * (1.0 - weight) + heat * weight
-    return out.astype(np.uint8)
+    weight = np.clip((temps - tmin) * (alpha / (tmax - tmin)), 0.0, alpha)
+    weight = weight.astype(np.float32, copy=False)
+    heat = colorize(temps, tmin, tmax, colormap)
+    # One pass over uint8 pixels in OpenCV, not three float32 copies of the
+    # frame in numpy: about 5x faster at 1080p (#348). Rounds where the old
+    # blend truncated, so a pixel can differ by one level.
+    return cv2.blendLinear(np.ascontiguousarray(scope), heat, 1.0 - weight, weight)
 
 
 def _colormap_colour(fraction: float, colormap: int) -> tuple[int, int, int]:

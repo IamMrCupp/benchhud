@@ -264,6 +264,8 @@ class MainWindow(QMainWindow):
         self._last_temps = None
         self._cameras: list[CameraDevice] = []
         self._sink: OutputSink | None = None
+        # Composed frame size / scope frame size (#348); 1.0 = full size.
+        self._compose_scale = 1.0
         # The scope-only / thermal-only feeds (#344), by name; Linux only.
         self._feed_sinks: dict[str, OutputSink] = {}
         self._feed_factory: SinkFactory | None = None
@@ -878,6 +880,17 @@ class MainWindow(QMainWindow):
                 scope, self._reference, self.controls_panel.reference_settings(), time.monotonic()
             )
             self._publish_feed("scope", scope)
+        # Compose no bigger than anything shows it (#348): the output and the
+        # main view are usually well under the scope's 1080p, and every step
+        # after this costs per pixel. Snapshots still use the full frame.
+        full_size = (scope.shape[1], scope.shape[0]) if scope is not None else (0, 0)
+        self._compose_scale = 1.0
+        if scope is not None:
+            k = self._compose_scale_for(full_size)
+            if k < 1.0:
+                small = (max(1, round(full_size[0] * k)), max(1, round(full_size[1] * k)))
+                scope = cv2.resize(scope, small, interpolation=cv2.INTER_AREA)
+                self._compose_scale = k
         if temps is None:
             self._show_composite(scope)
             return
@@ -908,12 +921,29 @@ class MainWindow(QMainWindow):
             # A transform saved before #242 or #259: convert it to the current
             # placement now that both frame sizes are known. Same picture, new numbers.
             src = (temps.shape[1], temps.shape[0])
-            dst = (scope.shape[1], scope.shape[0])
-            transform = transform.migrated(src, dst)
+            transform = transform.migrated(src, full_size)
             self.controls_panel.set_transform(transform)
             log.info("thermal registration converted to the centred placement: %s", transform)
         marker = self._marker.update(temps) if settings.mode is OverlayMode.MARKER else None
-        self._show_composite(compose(scope, temps, transform, settings, marker))
+        # The registration is in full-frame pixels; carry it to the smaller frame.
+        placed = transform.for_scaled_frame(self._compose_scale)
+        self._show_composite(compose(scope, temps, placed, settings, marker))
+
+    def _compose_scale_for(self, scope_size: tuple[int, int]) -> float:
+        """How far the scope can shrink before composing: to the larger of the
+        virtual-camera output and the main view, never up. 1.0 = leave it."""
+        width, height = scope_size
+        if width <= 0 or height <= 0:
+            return 1.0
+        need = 0.0
+        if self._sink is not None:
+            out_w, out_h = self._sink.size
+            need = max(out_w / width, out_h / height)
+        if self.composite_view.isVisible():  # an unshown view has no real size
+            view = self.composite_view.size()
+            need = max(need, min(view.width() / width, view.height() / height))
+        # Not worth a resize for the last few percent.
+        return need if 0.0 < need < 0.9 else 1.0
 
     # --- thermal calibration (#243) --------------------------------------------
 
@@ -1031,6 +1061,9 @@ class MainWindow(QMainWindow):
         except CalibrationError as exc:
             panel.show_calibration(str(exc), error=True)
             return
+        # The click is on the composed frame, which may be smaller than the
+        # scope's (#348); calibration works in the scope's own pixels.
+        x, y = x / self._compose_scale, y / self._compose_scale
         self._calibration.append(Pair(tip, (x, y), celsius))
         if len(self._calibration) == 1:
             panel.show_calibration(

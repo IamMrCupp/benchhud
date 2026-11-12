@@ -86,6 +86,16 @@ class RegistrationTransform:
         rotation = (self.rotation_deg + 90.0 * quarter_turns + 180.0) % 360.0 - 180.0
         return replace(self, rotation_deg=rotation)
 
+    def for_scaled_frame(self, k: float) -> RegistrationTransform:
+        """This placement on a scope frame resized by ``k`` (#348): the same picture.
+
+        ``scale`` and the rotation are relative to the fit, so they carry over;
+        only the offsets are in scope pixels. For a current (fitted) transform.
+        """
+        if k == 1.0:
+            return self
+        return replace(self, offset_x=self.offset_x * k, offset_y=self.offset_y * k)
+
     def affine_matrix(
         self, src_size: tuple[int, int], dst_size: tuple[int, int] | None = None
     ) -> np.ndarray:
