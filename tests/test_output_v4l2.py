@@ -212,3 +212,13 @@ def test_loopback_fd_close_releases_the_descriptor() -> None:
 
     with pytest.raises(OSError):
         os.write(write_fd, b"x")
+
+
+def test_sink_takes_a_non_contiguous_frame() -> None:
+    """A cropped or strided frame still goes out as whole RGB rows (#347)."""
+    sink, device = _sink_with_fake(width=2, height=1)
+    wide = np.zeros((1, 4, 3), dtype=np.uint8)
+    wide[0, 0] = (1, 2, 3)
+    wide[0, 2] = (4, 5, 6)
+    sink.send(wide[:, ::2])
+    assert bytes(device.writes[0]) == bytes([3, 2, 1, 6, 5, 4])
