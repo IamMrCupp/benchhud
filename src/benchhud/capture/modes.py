@@ -49,6 +49,23 @@ def parse_formats(output: str) -> list[tuple[int, int]]:
     return sorted(sizes, key=lambda s: (s[0] * s[1], s[0]), reverse=True)
 
 
+def probed_modes(
+    device: str,
+    *,
+    platform: str = sys.platform,
+    run: Callable[[list[str]], str] | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+) -> list[tuple[int, int]]:
+    """The sizes ``device`` reports, or ``[]`` when it can't be asked."""
+    if not (platform.startswith("linux") and device.startswith("/dev/") and which("v4l2-ctl")):
+        return []
+    try:
+        output = (run or _run)(["v4l2-ctl", "-d", device, "--list-formats-ext"])
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return parse_formats(output)
+
+
 def camera_modes(
     device: str,
     *,
@@ -57,15 +74,27 @@ def camera_modes(
     which: Callable[[str], str | None] = shutil.which,
 ) -> list[tuple[int, int]]:
     """The sizes to offer for ``device``."""
-    if platform.startswith("linux") and device.startswith("/dev/") and which("v4l2-ctl"):
-        try:
-            output = (run or _run)(["v4l2-ctl", "-d", device, "--list-formats-ext"])
-        except (OSError, subprocess.SubprocessError):
-            output = ""
-        sizes = parse_formats(output)
-        if sizes:
-            return sizes
-    return list(COMMON_SIZES)
+    sizes = probed_modes(device, platform=platform, run=run, which=which)
+    return sizes or list(COMMON_SIZES)
+
+
+#: What "camera default" asks for when the camera's sizes are known (#342).
+AUTO_SIZE = (1920, 1080)
+
+
+def auto_size(sizes: list[tuple[int, int]]) -> tuple[int, int] | None:
+    """The size to ask for when none is configured, or None to leave it to the camera.
+
+    Left alone, OpenCV asks a V4L2 device for 640x480, and an HDMI capture card
+    will squash a 1080p picture into it (#342). So: 1920x1080 when offered, else
+    the largest size at or under it. 4K is skipped: on the bench (Ryzen R2514) a
+    4K30 MJPG read takes a whole core (~35 ms/frame vs ~19 at 1080p), and the
+    stream goes out at 720p anyway. Pick 4K by hand for sharper snapshots.
+    """
+    if AUTO_SIZE in sizes:
+        return AUTO_SIZE
+    fits = [s for s in sizes if s[0] <= AUTO_SIZE[0] and s[1] <= AUTO_SIZE[1]]
+    return max(fits, key=lambda s: (s[0] * s[1], s[0])) if fits else None
 
 
 def _run(argv: list[str]) -> str:
@@ -75,7 +104,7 @@ def _run(argv: list[str]) -> str:
 def describe(size: tuple[int, int]) -> str:
     width, height = size
     if width == 0 or height == 0:
-        return "Camera default"
+        return "Automatic (1080p when the camera offers it)"
     label = f"{width} x {height}"
     if width * height >= 3840 * 2160:
         label += " (4K, heavier on the CPU)"

@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from benchhud.capture.camera import CameraFrameSource
-from benchhud.capture.modes import COMMON_SIZES, camera_modes, describe, parse_formats
+from benchhud.capture.modes import (
+    COMMON_SIZES,
+    auto_size,
+    camera_modes,
+    describe,
+    parse_formats,
+    probed_modes,
+)
 from benchhud.config import Config
 from benchhud.devices.discovery import CameraDevice
 from benchhud.shell.preferences import PreferencesDialog
@@ -53,7 +60,7 @@ def test_elsewhere_or_without_v4l2_ctl_it_offers_common_sizes() -> None:
 
 
 def test_descriptions() -> None:
-    assert describe((0, 0)) == "Camera default"
+    assert describe((0, 0)) == "Automatic (1080p when the camera offers it)"
     assert describe((1920, 1080)) == "1920 x 1080"
     assert "heavier on the CPU" in describe((3840, 2160))
 
@@ -103,6 +110,64 @@ def test_camera_default_asks_for_nothing() -> None:
     assert capture.sets == [] and camera.size == (640, 480)
 
 
+# The Elgato Cam Link 4K, trimmed: MJPG up to 4K, 1080p in every format (#342).
+CAM_LINK = (
+    "\t[0]: 'YUYV' (YUYV 4:2:2)\n\t\tSize: Discrete 1920x1080\n\t\tSize: Discrete 640x480\n"
+    "\t[3]: 'MJPG' (Motion-JPEG, compressed)\n\t\tSize: Discrete 3840x2160\n"
+    "\t\tSize: Discrete 1920x1080\n\t\tSize: Discrete 1280x720\n\t\tSize: Discrete 640x480\n"
+)
+
+
+def test_automatic_prefers_1080p_over_4k() -> None:
+    assert auto_size(parse_formats(CAM_LINK)) == (1920, 1080)
+    assert auto_size(parse_formats(BTER)) == (1920, 1080)
+
+
+def test_automatic_without_1080p_takes_the_largest_under_it() -> None:
+    assert auto_size([(3840, 2160), (1280, 720), (640, 480)]) == (1280, 720)
+    assert auto_size([(3840, 2160)]) is None  # nothing it can afford: camera's call
+    assert auto_size([]) is None
+
+
+def test_probing_reports_nothing_when_it_cant_ask() -> None:
+    assert probed_modes("0x1234", platform="darwin") == []
+    assert probed_modes("/dev/video2", platform="linux", which=lambda _c: None) == []
+    found = probed_modes(
+        "/dev/video2", platform="linux", run=lambda _a: CAM_LINK, which=lambda _c: "/x"
+    )
+    assert found[0] == (3840, 2160)
+
+
+def _built_scope(monkeypatch, size, modes):
+    import benchhud.shell.main_window as mw
+
+    asked = {}
+
+    class Recorder:
+        def __init__(self, device, size=None):
+            asked.update(device=device, size=size)
+
+    monkeypatch.setattr(mw, "CameraFrameSource", Recorder)
+    monkeypatch.setattr(mw, "probed_modes", lambda _d: modes)
+    monkeypatch.setattr(mw, "FallbackFrameSource", lambda *a, **k: None)
+    mw.scope_source_for("/dev/v4l/by-id/usb-Elgato_Cam_Link_4K-video-index0", (), size)
+    return asked
+
+
+def test_an_unconfigured_scope_asks_a_capture_card_for_1080p(monkeypatch) -> None:
+    asked = _built_scope(monkeypatch, None, parse_formats(CAM_LINK))
+    assert asked["size"] == (1920, 1080)
+    assert _built_scope(monkeypatch, (0, 0), parse_formats(CAM_LINK))["size"] == (1920, 1080)
+
+
+def test_a_configured_size_is_left_alone(monkeypatch) -> None:
+    assert _built_scope(monkeypatch, (1280, 720), parse_formats(CAM_LINK))["size"] == (1280, 720)
+
+
+def test_unreadable_modes_leave_it_to_the_camera(monkeypatch) -> None:
+    assert _built_scope(monkeypatch, None, [])["size"] is None
+
+
 class Scanner:
     def cameras(self):
         return [CameraDevice(identifier="/dev/video2", label="YW3609A", index=2)]
@@ -117,7 +182,10 @@ def test_preferences_offer_the_cameras_sizes_and_save_the_choice(qtbot) -> None:
     dialog = PreferencesDialog(config, Scanner(), camera_modes=lambda _d: parse_formats(BTER))
     qtbot.addWidget(dialog)
     combo = dialog.scope_resolution
-    assert combo.itemText(0) == "Camera default" and combo.currentIndex() == 0
+    assert (
+        combo.itemText(0) == "Automatic (1080p when the camera offers it)"
+        and combo.currentIndex() == 0
+    )
     assert "3840 x 2160" in combo.itemText(1)
     combo.setCurrentIndex(combo.findData("1920x1080"))
     dialog.apply_to_config()

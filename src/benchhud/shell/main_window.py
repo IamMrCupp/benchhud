@@ -41,6 +41,7 @@ from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
+from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
@@ -172,7 +173,10 @@ def scope_source_for(
     fallback = SyntheticFrameSource(960, 540)
     if not device.strip():
         return FallbackFrameSource(None, fallback)
-    camera = CameraFrameSource(resolve_capture_device(device, cameras), size=size)
+    resolved = resolve_capture_device(device, cameras)
+    if not (size and size[0] > 0 and size[1] > 0) and isinstance(resolved, str):
+        size = auto_size(probed_modes(resolved))  # not OpenCV's 640x480 (#342)
+    camera = CameraFrameSource(resolved, size=size)
     return FallbackFrameSource(
         camera,
         fallback,
