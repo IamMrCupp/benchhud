@@ -87,7 +87,9 @@ def auto_size(sizes: list[tuple[int, int]]) -> tuple[int, int] | None:
 
     Left alone, OpenCV asks a V4L2 device for 640x480, and an HDMI capture card
     will squash a 1080p picture into it (#342). So: 1920x1080 when offered, else
-    the largest size at or under it. 4K is skipped — this box can't decode it.
+    the largest size at or under it. 4K is skipped: on the bench (Ryzen R2514) a
+    4K30 MJPG read takes a whole core (~35 ms/frame vs ~19 at 1080p), and the
+    stream goes out at 720p anyway. Pick 4K by hand for sharper snapshots.
     """
     if AUTO_SIZE in sizes:
         return AUTO_SIZE
