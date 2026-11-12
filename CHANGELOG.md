@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.12.0](https://github.com/IamMrCupp/benchhud/compare/v0.11.0...v0.12.0) (2026-11-12)
+
+
+### Features
+
+* **cameras:** aim USB cameras' pan/tilt/zoom and save shots ([a7dbb94](https://github.com/IamMrCupp/benchhud/commit/a7dbb949063891d7322a380947c54dabffa2f7bf))
+* **config:** scriptable 'benchhud config set' and an owner-only config file ([f42d048](https://github.com/IamMrCupp/benchhud/commit/f42d0483eb105b4d5aa5497b93f8896c8efa2466))
+* **config:** scriptable 'benchhud config set' and an owner-only config file ([ca83e88](https://github.com/IamMrCupp/benchhud/commit/ca83e8817188efe265620bb331eb36f8b9ad139e))
+* **output:** scope-only and thermal-only feeds beside the composite for OBS ([e725ac7](https://github.com/IamMrCupp/benchhud/commit/e725ac7d4e1c3740576e69ad8c834ccbcc7dbf8a))
+* **recon:** add the Track E live acceptance harness ([9d1e2df](https://github.com/IamMrCupp/benchhud/commit/9d1e2dff2286480bc84a8d788eee3adc2e340291))
+* **recon:** add the Track E live acceptance harness ([eaf6a85](https://github.com/IamMrCupp/benchhud/commit/eaf6a85c489554d639e71e5fae7faaf8760f69e2))
+
+
+### Bug Fixes
+
+* **bench:** fixed /dev/cam-* names for OBS and name a camera's holder ([155c145](https://github.com/IamMrCupp/benchhud/commit/155c145e879ddb091b0424ce6fa12b64b8e5290b))
+* **bench:** fixed /dev/cam-* names for OBS and name a camera's holder ([59d3b81](https://github.com/IamMrCupp/benchhud/commit/59d3b81f782f59837c3071b255b84d8255d279bd))
+* **bench:** name cameras by product, not the repeated UVC interface ([2d0c5b3](https://github.com/IamMrCupp/benchhud/commit/2d0c5b39381c2cfde7c37886f2f45ee34653d7b9))
+* **capture:** ask an unconfigured scope for 1080p instead of OpenCV's 640x480 ([9c152c2](https://github.com/IamMrCupp/benchhud/commit/9c152c2b51f40cf98d916a62da5ded980686aea4))
+* **overlay:** fine thermal zoom that holds, independent of rotation ([1ab3818](https://github.com/IamMrCupp/benchhud/commit/1ab381835e079b452d476ff6ee2b11ad432e8840))
+* **packaging:** ship LICENSE and NOTICES inside the macOS app ([1f49039](https://github.com/IamMrCupp/benchhud/commit/1f490393a712da0f17e408f7d0dd5f2c6fa70767))
+* **shell:** the mouse wheel scrolls a dock, not the controls it passes over ([87a4f59](https://github.com/IamMrCupp/benchhud/commit/87a4f59da79a8dcf296afe2965a1f401ef0dc8db))
+* **terminal:** close inherited fds before exec so a shell job can't hold cameras ([4b0d306](https://github.com/IamMrCupp/benchhud/commit/4b0d306d0d3bb260523f8bc31280ff2d15083a52))
+
+
+### Performance
+
+* **capture:** decode only the scope frames the HUD takes ([5709c83](https://github.com/IamMrCupp/benchhud/commit/5709c83660af6b2db0939335fb4426086d8defca))
+* **overlay:** compose at the size that's shown and blend the thermal in OpenCV ([dae57b8](https://github.com/IamMrCupp/benchhud/commit/dae57b82ec30926d277e1c2322c7e986bf89a14d))
+* **overlay:** compose at the size that's shown and blend the thermal in OpenCV ([1802bc8](https://github.com/IamMrCupp/benchhud/commit/1802bc83c76c4e4256181aded291bcc1def97a97))
+* **shell:** stop copying every frame to swap its colour channels ([0e844f3](https://github.com/IamMrCupp/benchhud/commit/0e844f377ccf599d7c2caa800ecf6c631934740e))
+
+
+### Documentation
+
+* **capture:** give the measured 4K cost instead of claiming it can't decode ([a11028a](https://github.com/IamMrCupp/benchhud/commit/a11028ae7780ef339c5d07ad764055d643b5c56b))
+* **setup:** document the arp_ignore sysctl for wired + Wi-Fi on one subnet ([ff85f3d](https://github.com/IamMrCupp/benchhud/commit/ff85f3d27e6956dd0ea277b151d7c23391b40a2b))
+
 ## [0.11.0](https://github.com/IamMrCupp/benchhud/compare/v0.10.7...v0.11.0) (2026-11-06)
 
 
