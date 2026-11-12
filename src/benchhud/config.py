@@ -51,6 +51,10 @@ class OutputConfig:
     width: int = 1280
     height: int = 720
     fps: int = 15
+    # Extra feeds so OBS can lay the cameras out itself (#344). Empty = off.
+    # Linux only: each is its own v4l2loopback node.
+    scope_device: str = ""  # the scope alone, at width x height
+    thermal_device: str = ""  # the thermal alone, colourised, its own shape, same height
 
 
 @dataclass
@@ -368,7 +372,7 @@ class Config:
         _apply(
             cfg.output,
             data.get("output", {}),
-            ("enabled", "device", "width", "height", "fps"),
+            ("enabled", "device", "width", "height", "fps", "scope_device", "thermal_device"),
         )
 
         panels_d = data.get("panels", {})

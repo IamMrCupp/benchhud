@@ -24,6 +24,10 @@ device = "/dev/video10" # the loopback node, not a real camera
 width = 1280
 height = 720
 fps = 15 # paced to the slower feed; thermal is 25 fps, see research.md §4
+# Extra feeds so OBS can lay the cameras out itself (Linux, one loopback node
+# each; see docs/BENCH-SETUP.md). Blank = off.
+scope_device = ""   # e.g. "/dev/video12": the scope alone, at width x height
+thermal_device = "" # e.g. "/dev/video13": the thermal alone, its own shape at the same height
 
 [panels.scope]
 # BTER 4K microscope cam (UVC). On Linux this is a /dev/videoN path; on
