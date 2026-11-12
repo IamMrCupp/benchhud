@@ -22,6 +22,7 @@ import struct
 from collections.abc import Callable
 from typing import Protocol
 
+import cv2
 import numpy as np
 
 # --- linux/videodev2.h ------------------------------------------------------
@@ -95,7 +96,7 @@ def unpack_v4l2_format(payload: bytes) -> tuple[int, int, int]:
 class V4l2Device(Protocol):
     """An opened loopback node the sink writes frames to."""
 
-    def write(self, data: bytes) -> None:
+    def write(self, data: bytes | memoryview) -> None:
         """Write one whole frame."""
         ...
 
@@ -150,8 +151,11 @@ class V4l2LoopbackSink:
                 f"frame is {frame.shape[1]}x{frame.shape[0]}, sink expects {width}x{height}"
             )
 
-        rgb = np.ascontiguousarray(frame[:, :, ::-1], dtype=np.uint8)  # BGR -> RGB
-        self._device.write(rgb.tobytes())
+        # BGR -> RGB with OpenCV's SIMD swap, then written straight from the
+        # array: the numpy reversed-slice copy plus tobytes() cost ~4 ms a
+        # frame per output (#347).
+        rgb = cv2.cvtColor(np.ascontiguousarray(frame, dtype=np.uint8), cv2.COLOR_BGR2RGB)
+        self._device.write(memoryview(rgb).cast("B"))
 
     def close(self) -> None:
         if self._device is None:
@@ -166,7 +170,7 @@ class _LoopbackFd:
     def __init__(self, fd: int) -> None:
         self._fd = fd
 
-    def write(self, data: bytes) -> None:
+    def write(self, data: bytes | memoryview) -> None:
         view = memoryview(data)
         while view:
             view = view[os.write(self._fd, view) :]
