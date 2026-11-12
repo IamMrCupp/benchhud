@@ -12,6 +12,7 @@ the documented example file in the repo.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import tomllib
@@ -51,6 +52,10 @@ class OutputConfig:
     width: int = 1280
     height: int = 720
     fps: int = 15
+    # Extra feeds so OBS can lay the cameras out itself (#344). Empty = off.
+    # Linux only: each is its own v4l2loopback node.
+    scope_device: str = ""  # the scope alone, at width x height
+    thermal_device: str = ""  # the thermal alone, colourised, its own shape, same height
 
 
 @dataclass
@@ -290,6 +295,45 @@ class FlashConfig:
     programmer: str = "ch341a_spi"  # flashrom's -p value
 
 
+#: The axes a saved camera shot can hold (see benchhud.devices.camera_controls).
+CAMERA_AXES = ("pan", "tilt", "zoom")
+
+
+@dataclass
+class CameraConfig:
+    """A stream camera benchhud can aim (#330): its pan/tilt/zoom and saved shots.
+
+    benchhud only moves the camera; the picture stays with OBS. ``shots`` maps a
+    shot's name (Face, Desk, Reflow) to the raw control values to go back to.
+    """
+
+    name: str
+    device: str  # its /dev/v4l/by-id link, so a USB drop doesn't lose it
+    shots: dict[str, dict[str, int]] = field(default_factory=dict)
+
+
+def _camera_from_dict(data: Any) -> CameraConfig | None:
+    if not isinstance(data, Mapping):
+        return None
+    name, device = data.get("name"), data.get("device")
+    if not (isinstance(name, str) and name and isinstance(device, str) and device):
+        return None
+    shots: dict[str, dict[str, int]] = {}
+    raw_shots = data.get("shots", {})
+    if isinstance(raw_shots, Mapping):
+        for shot, values in raw_shots.items():
+            if not isinstance(values, Mapping):
+                continue
+            kept = {
+                axis: int(values[axis])
+                for axis in CAMERA_AXES
+                if isinstance(values.get(axis), int) and not isinstance(values[axis], bool)
+            }
+            if kept:
+                shots[str(shot)] = kept
+    return CameraConfig(name=name, device=device, shots=shots)
+
+
 @dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
@@ -311,6 +355,7 @@ class Config:
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     tools: list[ToolConfig] = field(default_factory=list)
+    cameras: list[CameraConfig] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Config:
@@ -328,7 +373,7 @@ class Config:
         _apply(
             cfg.output,
             data.get("output", {}),
-            ("enabled", "device", "width", "height", "fps"),
+            ("enabled", "device", "width", "height", "fps", "scope_device", "thermal_device"),
         )
 
         panels_d = data.get("panels", {})
@@ -435,6 +480,9 @@ class Config:
             for t in data.get("tools", [])
             if isinstance(t, Mapping) and "name" in t and "command" in t
         ]
+        raw_cameras = data.get("cameras", [])
+        if isinstance(raw_cameras, list):
+            cfg.cameras = [c for c in map(_camera_from_dict, raw_cameras) if c is not None]
         return cfg
 
     def to_dict(self) -> dict[str, Any]:
@@ -475,10 +523,19 @@ def load(path: str | os.PathLike[str] | None = None) -> Config:
 
 
 def save(config: Config, path: str | os.PathLike[str] | None = None) -> Path:
-    """Persist ``config`` to ``path`` (or the default). Returns the path written."""
+    """Persist ``config`` to ``path`` (or the default). Returns the path written.
+
+    The file is owner-only (``0600``): it holds the intake, bench-parts and
+    bench-recon tokens. An existing file is tightened too.
+    """
     target = Path(path) if path is not None else default_config_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(tomlkit.dumps(config.to_dict()), "utf-8")
+    text = tomlkit.dumps(config.to_dict())
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    with contextlib.suppress(OSError):
+        os.chmod(target, 0o600)  # O_CREAT's mode only applies to a new file
     return target
 
 

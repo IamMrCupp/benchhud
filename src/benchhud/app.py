@@ -25,6 +25,11 @@ def main(argv: list[str] | None = None) -> int:
         from benchhud.devices.camnames import udev_rules_main
 
         return udev_rules_main()
+    if argv and argv[0] == "config":
+        # Scripted config changes (bench-setup). Display-free, like --version.
+        from benchhud.cli_config import main as config_main
+
+        return config_main(argv[1:])
 
     # Import Qt + shell lazily so ``--version`` stays display-free.
     from PySide6.QtCore import QCoreApplication, Qt

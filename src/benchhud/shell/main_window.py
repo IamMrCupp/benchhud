@@ -41,6 +41,7 @@ from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
+from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
@@ -73,6 +74,7 @@ from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.media import now_playing
 from benchhud.media.now_playing import NowPlayingWatcher
+from benchhud.output.feeds import fit_frame, thermal_frame, thermal_size
 from benchhud.output.onair import Layer, compose_on_air, compose_preview, excluded
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
@@ -99,6 +101,7 @@ from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
+from benchhud.shell.panels.cameras import CamerasPanel
 from benchhud.shell.panels.capture import CapturePanel
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.engagement import EngagementPanel
@@ -117,6 +120,7 @@ from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 from benchhud.shell.qt_util import unelide_tabs
 from benchhud.shell.signature_image import render_signature
+from benchhud.shell.wheel_guard import install as install_wheel_guard
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
@@ -181,7 +185,10 @@ def scope_source_for(
     fallback = SyntheticFrameSource(960, 540)
     if not device.strip():
         return FallbackFrameSource(None, fallback)
-    camera = CameraFrameSource(resolve_capture_device(device, cameras), size=size)
+    resolved = resolve_capture_device(device, cameras)
+    if not (size and size[0] > 0 and size[1] > 0) and isinstance(resolved, str):
+        size = auto_size(probed_modes(resolved))  # not OpenCV's 640x480 (#342)
+    camera = CameraFrameSource(resolved, size=size)
     return FallbackFrameSource(
         camera,
         fallback,
@@ -270,6 +277,13 @@ class MainWindow(QMainWindow):
         self._last_temps = None
         self._cameras: list[CameraDevice] = []
         self._sink: OutputSink | None = None
+        # Composed frame size / scope frame size (#348); 1.0 = full size.
+        self._compose_scale = 1.0
+        # The scope-only / thermal-only feeds (#344), by name; Linux only.
+        self._feed_sinks: dict[str, OutputSink] = {}
+        self._feed_factory: SinkFactory | None = None
+        self._thermal_feed_pending = False
+        self._linux_output = sys.platform.startswith("linux")
         # The hub outlives server restarts, so a page reconnecting after a
         # Preferences change gets the current readings straight away.
         self._browser_hub = TopicHub()
@@ -313,6 +327,8 @@ class MainWindow(QMainWindow):
         # left, composite preview in the centre. A saved layout (config) wins on
         # later launches; this is just the first-run arrangement.
         self.panels = PanelManager(self)
+        # The wheel scrolls a dock rather than the controls it passes over (#320).
+        self._wheel_guard = install_wheel_guard(self)
         right = Qt.DockWidgetArea.RightDockWidgetArea
         left = Qt.DockWidgetArea.LeftDockWidgetArea
 
@@ -418,6 +434,9 @@ class MainWindow(QMainWindow):
         minipro_dock = self.panels.add_panel(self.minipro_panel, left)
         self.tabifyDockWidget(flash_dock, minipro_dock)  # …and the T48 (#253)
         self.tabifyDockWidget(minipro_dock, readings_dock)  # …and readings (#235)
+        self.cameras_panel = CamerasPanel(self._config.cameras, scanner=self._scanner)
+        cameras_dock = self.panels.add_panel(self.cameras_panel, left)
+        self.tabifyDockWidget(readings_dock, cameras_dock)  # …and aiming the cameras (#330)
 
         scope_dock.raise_()
         controls_dock.raise_()
@@ -534,6 +553,7 @@ class MainWindow(QMainWindow):
             "jobs",
             "inventory",
             "terminal",
+            "cameras",
         ):
             dock = self.panels.dock(panel_id)
             if dock is not None:
@@ -872,6 +892,18 @@ class MainWindow(QMainWindow):
             scope = compare_reference(
                 scope, self._reference, self.controls_panel.reference_settings(), time.monotonic()
             )
+            self._publish_feed("scope", scope)
+        # Compose no bigger than anything shows it (#348): the output and the
+        # main view are usually well under the scope's 1080p, and every step
+        # after this costs per pixel. Snapshots still use the full frame.
+        full_size = (scope.shape[1], scope.shape[0]) if scope is not None else (0, 0)
+        self._compose_scale = 1.0
+        if scope is not None:
+            k = self._compose_scale_for(full_size)
+            if k < 1.0:
+                small = (max(1, round(full_size[0] * k)), max(1, round(full_size[1] * k)))
+                scope = cv2.resize(scope, small, interpolation=cv2.INTER_AREA)
+                self._compose_scale = k
         if temps is None:
             self._show_composite(scope)
             return
@@ -880,6 +912,19 @@ class MainWindow(QMainWindow):
         if settings.auto_range:
             low, high = self._thermal_range.update(temps)
             settings = replace(settings, tmin=low, tmax=high)
+        thermal_sink = self._thermal_feed_sink(temps)
+        if thermal_sink is not None:
+            self._publish_feed(
+                "thermal",
+                thermal_frame(
+                    temps,
+                    settings.tmin,
+                    settings.tmax,
+                    settings.colormap,
+                    thermal_sink.size,
+                    scale_bar=settings.scale_bar,
+                ),
+            )
         if scope is None:
             # Thermal only — show it colourised on its own.
             self._show_composite(colorize(temps, settings.tmin, settings.tmax, settings.colormap))
@@ -889,12 +934,29 @@ class MainWindow(QMainWindow):
             # A transform saved before #242 or #259: convert it to the current
             # placement now that both frame sizes are known. Same picture, new numbers.
             src = (temps.shape[1], temps.shape[0])
-            dst = (scope.shape[1], scope.shape[0])
-            transform = transform.migrated(src, dst)
+            transform = transform.migrated(src, full_size)
             self.controls_panel.set_transform(transform)
             log.info("thermal registration converted to the centred placement: %s", transform)
         marker = self._marker.update(temps) if settings.mode is OverlayMode.MARKER else None
-        self._show_composite(compose(scope, temps, transform, settings, marker))
+        # The registration is in full-frame pixels; carry it to the smaller frame.
+        placed = transform.for_scaled_frame(self._compose_scale)
+        self._show_composite(compose(scope, temps, placed, settings, marker))
+
+    def _compose_scale_for(self, scope_size: tuple[int, int]) -> float:
+        """How far the scope can shrink before composing: to the larger of the
+        virtual-camera output and the main view, never up. 1.0 = leave it."""
+        width, height = scope_size
+        if width <= 0 or height <= 0:
+            return 1.0
+        need = 0.0
+        if self._sink is not None:
+            out_w, out_h = self._sink.size
+            need = max(out_w / width, out_h / height)
+        if self.composite_view.isVisible():  # an unshown view has no real size
+            view = self.composite_view.size()
+            need = max(need, min(view.width() / width, view.height() / height))
+        # Not worth a resize for the last few percent.
+        return need if 0.0 < need < 0.9 else 1.0
 
     # --- thermal calibration (#243) --------------------------------------------
 
@@ -1012,6 +1074,9 @@ class MainWindow(QMainWindow):
         except CalibrationError as exc:
             panel.show_calibration(str(exc), error=True)
             return
+        # The click is on the composed frame, which may be smaller than the
+        # scope's (#348); calibration works in the scope's own pixels.
+        x, y = x / self._compose_scale, y / self._compose_scale
         self._calibration.append(Pair(tip, (x, y), celsius))
         if len(self._calibration) == 1:
             panel.show_calibration(
@@ -1135,8 +1200,13 @@ class MainWindow(QMainWindow):
         """
         if not self._config.output.enabled:
             return None  # deliberately off — nothing to warn about
-        reason = getattr(self._sink, "reason", "")
-        return reason or None
+        reasons = [getattr(self._sink, "reason", "")]
+        reasons += [
+            f"{name} feed: {getattr(sink, 'reason', '')}"
+            for name, sink in self._feed_sinks.items()
+            if getattr(sink, "reason", "")
+        ]
+        return "; ".join(r for r in reasons if r) or None
 
     def scope_status(self) -> SourceStatus | None:
         """Is the scope preview showing the camera, and if not, why (None: no preview)."""
@@ -1624,10 +1694,34 @@ class MainWindow(QMainWindow):
         out = self._config.output
         factory = sink_factory or open_output_sink
         self._sink = factory(out.device, out.width, out.height)
+        # The scope-only and thermal-only feeds (#344): each its own loopback
+        # node, so Linux only. Elsewhere the one virtual camera is the composite.
+        # The thermal one waits for its first frame, to take the camera's shape.
+        self._feed_factory = factory
+        if self._linux_output:
+            if out.scope_device.strip():
+                self._feed_sinks["scope"] = factory(out.scope_device.strip(), out.width, out.height)
+            self._thermal_feed_pending = bool(out.thermal_device.strip())
         self._refresh_status()
 
+    def _thermal_feed_sink(self, temps) -> OutputSink | None:
+        """The thermal feed's sink, opened at the camera's shape on its first frame."""
+        sink = self._feed_sinks.get("thermal")
+        if sink is None and self._thermal_feed_pending and self._feed_factory is not None:
+            self._thermal_feed_pending = False
+            out = self._config.output
+            size = thermal_size(out.height, temps.shape)
+            sink = self._feed_factory(out.thermal_device.strip(), *size)
+            self._feed_sinks["thermal"] = sink
+            self._refresh_status()
+        return sink
+
     def stop_output(self) -> None:
-        """Close the virtual-camera sink (idempotent)."""
+        """Close the virtual-camera sinks (idempotent)."""
+        for sink in self._feed_sinks.values():
+            sink.close()
+        self._feed_sinks.clear()
+        self._thermal_feed_pending = False
         if self._sink is None:
             return
         self._sink.close()
@@ -1661,6 +1755,21 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("virtual-camera output failed; closing the sink")
             self.stop_output()
+
+    def _publish_feed(self, name: str, frame) -> None:
+        """Send one frame to the ``name`` feed (#344), fitted to it without stretching.
+
+        A feed that fails is dropped on its own; the composite carries on.
+        """
+        sink = self._feed_sinks.get(name)
+        if sink is None:
+            return
+        try:
+            sink.send(fit_frame(frame, sink.size))
+        except Exception:
+            log.exception("%s feed failed; closing it", name)
+            self._feed_sinks.pop(name, None)
+            sink.close()
 
     # --- OBS browser sources (#180) -----------------------------------------
 

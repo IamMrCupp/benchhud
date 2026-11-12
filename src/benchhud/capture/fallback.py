@@ -143,6 +143,12 @@ class FallbackFrameSource:
             return self._camera.size
         return self._fallback.size if self._fallback is not None else (0, 0)
 
+    def set_decode_gate(self, gate: Callable[[], bool] | None) -> None:
+        """Pass decode-on-demand (#346) through to a camera that supports it."""
+        setter = getattr(self._camera, "set_decode_gate", None)
+        if setter is not None:
+            setter(gate)
+
     def _fatal(self) -> str | None:
         return getattr(self._camera, "fatal_error", None)
 

@@ -175,6 +175,40 @@ benchhud so the cameras reopen with it. A dropped frame just holds the last one
 on screen a moment longer. benchhud says so in the status bar while the driver
 still passes torn frames on.
 
+### Wired and Wi-Fi on one subnet
+
+If the bench has Ethernet and Wi-Fi both up on the same subnet, it can boot with
+no IPv4 routes at all. Network sources (a Mevo over SRT, say) go dark: OBS logs
+`Failed to open media: 'srt://…'` and the box reports `Network is unreachable`.
+SSH over IPv6 keeps working, which hides the problem. Some boots are fine; it's
+a race each time a connection comes up.
+
+Linux's default `arp_ignore=0` lets each card answer ARP for the other's
+address. NetworkManager's address-conflict probes then get answered by the
+bench's own other card, it logs `conflict detected for IP address 192.168.x.y
+with host <your own MAC>`, holds the address as not ready and installs no
+routes. Tell each card to answer only for its own addresses:
+
+```bash
+sudo tee /etc/sysctl.d/60-arp-multihome.conf <<'EOF'
+net.ipv4.conf.all.arp_ignore = 1
+net.ipv4.conf.all.arp_announce = 2
+net.ipv4.conf.default.arp_ignore = 1
+net.ipv4.conf.default.arp_announce = 2
+EOF
+sudo sysctl --system
+```
+
+`sysctl --system` applies it now; the file keeps it across reboots. Then
+reconnect both cards (`nmcli connection down <name>; nmcli connection up <name>`)
+and check:
+
+```bash
+sysctl net.ipv4.conf.all.arp_ignore net.ipv4.conf.all.arp_announce   # 1 and 2
+ip route                                                              # a default route per card
+journalctl -b -u NetworkManager | grep -c "conflict detected"         # 0
+```
+
 ## 3. Create the virtual-camera output
 
 benchhud writes its composite to a **v4l2loopback** node that OBS then reads as a
@@ -228,6 +262,28 @@ printf 'options v4l2loopback devices=2 video_nr=10,11 card_label=benchhud,OBS-Vi
 benchhud writes `/dev/video10`, and OBS's Start Virtual Camera takes the other
 one.
 
+### Separate scope and thermal feeds
+
+To lay the cameras out in OBS yourself (scope above thermal, side by side, the
+thermal alone), give benchhud two more nodes: one for the scope alone, one for
+the thermal alone. Quit OBS and benchhud, then:
+
+```bash
+sudo modprobe -r v4l2loopback
+sudo modprobe v4l2loopback devices=4 video_nr=10,11,12,13 \
+  card_label=benchhud,OBS-Virtual-Camera,benchhud-scope,benchhud-thermal \
+  exclusive_caps=1,1,1,1
+printf 'options v4l2loopback devices=4 video_nr=10,11,12,13 card_label=benchhud,OBS-Virtual-Camera,benchhud-scope,benchhud-thermal exclusive_caps=1,1,1,1\n' \
+  | sudo tee /etc/modprobe.d/benchhud-loopback.conf
+```
+
+Then set `scope_device` and `thermal_device` (below, or in Preferences →
+Output), and add each node to OBS as its own Video Capture Device. The scope
+feed is the output size; the thermal feed is the camera's own shape at the same
+height (540x720 for the bench's portrait Sipeed at 720p), with the colour scale
+when the overlay shows one. Neither
+carries the meter or graph overlays: those stay on the composite.
+
 ### When it still won't load
 
 - **`Key was rejected by service`:** Secure Boot is blocking the unsigned DKMS
@@ -251,6 +307,8 @@ device  = "/dev/video10"   # the loopback node from step 3
 width   = 1280
 height  = 720
 fps     = 15               # pace to the slower feed
+scope_device   = ""        # e.g. "/dev/video12": the scope alone (blank = off)
+thermal_device = ""        # e.g. "/dev/video13": the thermal alone (blank = off)
 
 [panels.scope]
 enabled = true
@@ -352,6 +410,38 @@ Voltage, current limit, output on/off and the DMM mode were verified on the
 reference bench (#164, #283). The SPM8104's DMM has eight modes: DC and AC
 volts, DC and AC amps, resistance, continuity, diode and capacitance.
 
+## 7. Aiming the stream cameras (optional)
+
+The **Cameras** panel moves a USB camera's pan, tilt and zoom, and saves shots
+(Face, Desk, Reflow) you can jump back to with **Go**. OBS keeps the picture:
+Linux lets benchhud change a camera's controls while another program streams
+it, so nothing in OBS changes.
+
+1. **Add…** lists the cameras benchhud finds; pick one and name it. It's saved
+   by its `/dev/v4l/by-id` link, so a USB drop doesn't lose it.
+2. The sliders are whatever the camera reports. A camera without pan, tilt or
+   zoom gets none.
+3. Point the camera, then **Save shot…** and name it.
+
+What a camera offers, before you add it:
+
+```bash
+v4l2-ctl -d /dev/v4l/by-id/<camera> --list-ctrls | grep -E 'pan|tilt|zoom'
+```
+
+- Pan and tilt show in degrees; zoom shows as a factor of the camera's minimum.
+- Dragging moves the camera when you let go; a click or an arrow key moves it
+  at once.
+- benchhud only sends absolute positions, never "keep moving", so a crash can't
+  leave a motor running to its end stop.
+- Turn the camera's own face tracking off before using shots, or it pulls the
+  framing back.
+
+Not yet verified on the reference bench (#330): whether the EMEET PIXY zooms at
+4K (other PIXY tools report zoom only works below 4K), and whether its pan
+follows these controls while tracking is on. Network cameras such as the Mevo
+aren't covered here yet.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
@@ -362,5 +452,6 @@ volts, DC and AC amps, resistance, continuity, diode and capacitance.
 | Output logs "unavailable" and falls back | Loopback node missing/wrong path, or another writer holds it. benchhud keeps running without the OBS feed — fix `output.device`. |
 | Output logs the driver "adjusted the format" | `output.width`/`height` don't match what the loopback grants. Set them to the granted size. |
 | Thermal image briefly freezes | The Sipeed's periodic **NUC shutter** — normal, not an error. |
+| Mevo/SRT source won't connect, `Network is unreachable`, no IPv4 routes | Wired and Wi-Fi on one subnet; NetworkManager sees an ARP conflict with itself. See [Wired and Wi-Fi on one subnet](#wired-and-wi-fi-on-one-subnet). |
 | No `/dev/ttyUSB0` | CH34x driver/permissions — check `dmesg | grep ch34` and `dialout` membership. |
 | Frames stutter under load | All cams share one USB 2.0 bus (480M) on the reference bench — isochronous bandwidth is finite. Prefer the small 192×256 Y16 thermal; consider moving the scope cam to a USB 3 port. |

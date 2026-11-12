@@ -231,6 +231,11 @@ every push to `main` opens or updates a release PR that bumps it and
 minor, `fix:` → patch). Merging that PR tags `vX.Y.Z` and publishes the GitHub
 Release. Build packages after that merge, so they carry the new number.
 
+Nobody has to merge the release PR. Once CI passes on it,
+`release-pr-automerge.yml` merges it with `RELEASE_PLEASE_PAT`, so every merge
+to `main` ships a release a few minutes later. To hold a release, close the
+release PR.
+
 **On a Mac, recreate the bundle for a release build.** Briefcase writes the
 version into `Info.plist` only at `create`, like the entitlements above, so
 `update` + `build` after a version bump still produce an app that says the old

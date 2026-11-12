@@ -24,6 +24,10 @@ device = "/dev/video10" # the loopback node, not a real camera
 width = 1280
 height = 720
 fps = 15 # paced to the slower feed; thermal is 25 fps, see research.md §4
+# Extra feeds so OBS can lay the cameras out itself (Linux, one loopback node
+# each; see docs/BENCH-SETUP.md). Blank = off.
+scope_device = ""   # e.g. "/dev/video12": the scope alone, at width x height
+thermal_device = "" # e.g. "/dev/video13": the thermal alone, its own shape at the same height
 
 [panels.scope]
 # BTER 4K microscope cam (UVC). On Linux this is a /dev/videoN path; on
@@ -216,3 +220,16 @@ command = "minipro-gui"
 name = "flashrom"
 command = "flashrom"
 terminal = true
+
+# Stream cameras the Cameras panel can aim (#330): pan, tilt and zoom over V4L2,
+# Linux only. benchhud only moves the camera; OBS keeps the picture. The panel's
+# Add camera… fills this in. Shots are saved from the panel too: raw control
+# values (pan/tilt in arc-seconds, 3600 to a degree; zoom in the camera's units).
+[[cameras]]
+name = "PIXY"
+device = "/dev/v4l/by-id/usb-EMEET_PIXY-video-index0"  # yours: ls /dev/v4l/by-id/
+
+[cameras.shots.Face]
+pan = 0
+tilt = 0
+zoom = 100

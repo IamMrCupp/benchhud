@@ -35,6 +35,8 @@ class Capture(Protocol):
 
     def read(self) -> tuple[bool, Any]: ...
 
+    # grab() / retrieve() are used when present, to decode on demand (#346).
+
     def get(self, prop_id: int) -> float: ...
 
     def set(self, prop_id: int, value: float) -> bool: ...
@@ -82,6 +84,11 @@ class CameraFrameSource:
         self._size = (0, 0)
         self._last_error: str | None = None
         self._closed = False
+        # Decode on demand (#346): see set_decode_gate.
+        self._decode_gate: Callable[[], bool] | None = None
+        self._last_frame: np.ndarray | None = None
+        #: Frames actually decoded, for measuring what the gate saves.
+        self.decodes = 0
         self.open()
 
     # --- lifecycle -------------------------------------------------------
@@ -128,6 +135,7 @@ class CameraFrameSource:
         if self._capture is not None:
             self._capture.release()
             self._capture = None
+        self._last_frame = None  # a reopened camera starts with a real decode
 
     def close(self) -> None:
         self.release()
@@ -154,12 +162,33 @@ class CameraFrameSource:
 
     # --- frames ----------------------------------------------------------
 
+    def set_decode_gate(self, gate: Callable[[], bool] | None) -> None:
+        """Decode a grabbed frame only when ``gate()`` says someone wants one (#346).
+
+        The camera still delivers every frame and each is still grabbed (that
+        keeps the driver's queue drained and the picture current), but decoding
+        a 1080p MJPEG frame costs ~19 ms. When the HUD renders slower than the
+        camera sends, the frames nobody takes aren't decoded; :meth:`read`
+        hands back the last decoded frame for them instead. ``None`` decodes
+        every frame, as before.
+        """
+        self._decode_gate = gate
+
     def read(self) -> np.ndarray | None:
         """Grab the next BGR frame, or ``None`` on any failure."""
         if self._closed or self._capture is None:
             return None
+        gate = self._decode_gate
         try:
-            ok, frame = self._capture.read()
+            if gate is not None and self._last_frame is not None and hasattr(self._capture, "grab"):
+                if not self._capture.grab():
+                    ok, frame = False, None
+                elif gate():
+                    ok, frame = self._capture.retrieve()
+                else:
+                    return self._last_frame  # grabbed, not wanted: skip the decode
+            else:
+                ok, frame = self._capture.read()
         except Exception as exc:
             self._last_error = f"read failed: {exc}"
             return None
@@ -173,4 +202,6 @@ class CameraFrameSource:
         # Trust the frame over the driver's advertised resolution: some UVC
         # cameras report 0x0 until the first successful grab.
         self._size = (frame.shape[1], frame.shape[0])
+        self._last_frame = frame
+        self.decodes += 1
         return frame

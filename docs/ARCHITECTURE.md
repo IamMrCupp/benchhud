@@ -91,6 +91,14 @@ ticket system is a protocol with a fake, not a dependency.
   degrade), `importer` (`resolve_engagement` — "Import from engagement…" makes a
   ref the active engagement; benchhud stores only the ref). Sensitive detail
   stays in bench-recon; the recon panels are off air by default (`output.onair`).
+- **`acceptance.py`** — the Track E live acceptance harness (`scripts/track_e_acceptance.py`
+  is the CLI). Runs against the live bench-recon + bench-parts services and reports,
+  pass/fail: the on-air enforcement proof (a sensitive layer's bytes never reach the
+  sink frame), the panel sensitivity policy, the ref-safe projection boundary (the
+  live API returns only whitelisted fields), and a preflight. Read-only — it verifies
+  an existing engagement ref and never writes to a system of record. The network goes
+  through an injectable `Probe`, so `tests/test_acceptance_track_e.py` covers the
+  assertion logic with no socket.
 - **`boards/`** — the local board-doc library: `library` (`BoardLibrary` —
   recursive scan keyed by filename stem, resolve / search / missing, schematics
   kept distinct from board views), `opener` (`find_board_viewer` from the Tools
