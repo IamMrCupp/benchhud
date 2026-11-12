@@ -182,6 +182,20 @@ class PreferencesDialog(QDialog):
 
     # --- Output ----------------------------------------------------------
 
+    def _feed_combo(self, current: str, placeholder: str, tip: str) -> QComboBox:
+        """An editable loopback picker for an extra feed; blank turns it off (#344)."""
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.lineEdit().setPlaceholderText(f"{placeholder} (blank = off)")
+        combo.setToolTip(tip)
+        combo.addItem("")
+        if self._linux:
+            for node in self._loopback_nodes():
+                combo.addItem(node.path)
+                combo.setItemData(combo.count() - 1, str(node), Qt.ItemDataRole.ToolTipRole)
+        combo.setCurrentText(current)
+        return combo
+
     def _build_output_tab(self) -> QWidget:
         out = self._config.output
         self.output_enabled = QCheckBox("Enable virtual camera output")
@@ -198,6 +212,15 @@ class PreferencesDialog(QDialog):
                     self.output_device.count() - 1, str(node), Qt.ItemDataRole.ToolTipRole
                 )
         self.output_device.setCurrentText(out.device)
+        # Extra feeds for OBS to lay out itself (#344); blank = off.
+        self.scope_feed_device = self._feed_combo(
+            out.scope_device, "/dev/video12", "The scope alone, for its own OBS source"
+        )
+        self.thermal_feed_device = self._feed_combo(
+            out.thermal_device,
+            "/dev/video13",
+            "The thermal alone (colourised), for its own OBS source",
+        )
         self.output_width = _spin(1, 7680, out.width)
         self.output_height = _spin(1, 4320, out.height)
         self.output_fps = _spin(1, 120, out.fps)
@@ -254,10 +277,13 @@ class PreferencesDialog(QDialog):
         grow_fields(form)
         form.addRow(self.output_enabled)
         form.addRow("Loopback device", self.output_device)
+        form.addRow("Scope-only feed", self.scope_feed_device)
+        form.addRow("Thermal-only feed", self.thermal_feed_device)
         if not self._linux:
             # macOS publishes into OBS's camera extension and Windows through
-            # softcam: there's no device path to set.
-            form.setRowVisible(self.output_device, False)
+            # softcam: there's no device path to set, and only the one camera.
+            for field in (self.output_device, self.scope_feed_device, self.thermal_feed_device):
+                form.setRowVisible(field, False)
         form.addRow("Width", self.output_width)
         form.addRow("Height", self.output_height)
         form.addRow("FPS", self.output_fps)
@@ -549,6 +575,8 @@ class PreferencesDialog(QDialog):
 
         self._config.output.enabled = self.output_enabled.isChecked()
         self._config.output.device = self.output_device.currentText().strip()
+        self._config.output.scope_device = self.scope_feed_device.currentText().strip()
+        self._config.output.thermal_device = self.thermal_feed_device.currentText().strip()
         self._config.output.width = self.output_width.value()
         self._config.output.height = self.output_height.value()
         self._config.output.fps = self.output_fps.value()
