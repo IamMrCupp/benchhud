@@ -120,7 +120,8 @@ class PreferencesDialog(QDialog):
         # The scope's resolution (#247), from the modes the chosen camera lists.
         self.scope_resolution = QComboBox()
         self.scope_resolution.setToolTip(
-            "Camera default asks for nothing. MJPG at the chosen size otherwise."
+            "Automatic asks for 1920x1080 when the camera lists it, else the largest "
+            "size under that. MJPG at the chosen size."
         )
         self.scope_combo.currentIndexChanged.connect(lambda _i: self._fill_resolutions())
         self.thermal_combo = QComboBox()
