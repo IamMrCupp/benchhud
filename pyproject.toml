@@ -70,6 +70,10 @@ universal_build = false
 # default floor of 11.0 would make pip find nothing (or an ancient OpenCV).
 min_os_version = "13.0"
 requires = ["std-nslog~=1.0.3"]
+# Briefcase copies license-files only into a .pkg installer, and the app ships
+# as a zip, so put both files in the bundle (Contents/Resources/app/). NOTICES
+# carries the LGPLv3 notice for the bundled Qt/PySide6. Adds to the sources above.
+sources = ["LICENSE", "NOTICES"]
 # The terminal panel (#194) draws in QtWebEngine, and Chromium's V8 needs JIT
 # pages under the hardened runtime. Without this its renderer can't reserve
 # its code range ("V8 process OOM") and the page stays blank. Briefcase signs

@@ -234,6 +234,28 @@ printf 'options v4l2loopback devices=2 video_nr=10,11 card_label=benchhud,OBS-Vi
 benchhud writes `/dev/video10`, and OBS's Start Virtual Camera takes the other
 one.
 
+### Separate scope and thermal feeds
+
+To lay the cameras out in OBS yourself (scope above thermal, side by side, the
+thermal alone), give benchhud two more nodes: one for the scope alone, one for
+the thermal alone. Quit OBS and benchhud, then:
+
+```bash
+sudo modprobe -r v4l2loopback
+sudo modprobe v4l2loopback devices=4 video_nr=10,11,12,13 \
+  card_label=benchhud,OBS-Virtual-Camera,benchhud-scope,benchhud-thermal \
+  exclusive_caps=1,1,1,1
+printf 'options v4l2loopback devices=4 video_nr=10,11,12,13 card_label=benchhud,OBS-Virtual-Camera,benchhud-scope,benchhud-thermal exclusive_caps=1,1,1,1\n' \
+  | sudo tee /etc/modprobe.d/benchhud-loopback.conf
+```
+
+Then set `scope_device` and `thermal_device` (below, or in Preferences →
+Output), and add each node to OBS as its own Video Capture Device. The scope
+feed is the output size; the thermal feed is the camera's own shape at the same
+height (540x720 for the bench's portrait Sipeed at 720p), with the colour scale
+when the overlay shows one. Neither
+carries the meter or graph overlays: those stay on the composite.
+
 ### When it still won't load
 
 - **`Key was rejected by service`:** Secure Boot is blocking the unsigned DKMS
@@ -257,6 +279,8 @@ device  = "/dev/video10"   # the loopback node from step 3
 width   = 1280
 height  = 720
 fps     = 15               # pace to the slower feed
+scope_device   = ""        # e.g. "/dev/video12": the scope alone (blank = off)
+thermal_device = ""        # e.g. "/dev/video13": the thermal alone (blank = off)
 
 [panels.scope]
 enabled = true

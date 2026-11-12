@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import sys
 import time
 from typing import ClassVar
@@ -111,6 +112,24 @@ def test_the_shell_does_not_inherit_the_apps_python(monkeypatch) -> None:
     _wait_for(lambda: host.state().exit_code is not None)
     assert "home=[] term=xterm-256color" in host.read(0)[1]
     host.close()
+
+
+def test_the_shell_does_not_inherit_the_apps_open_files(tmp_path) -> None:
+    # Stands in for a camera OpenCV opened without O_CLOEXEC (#327): a shell
+    # job holding it would keep the camera locked after the app dies.
+    fd = os.open(tmp_path / "camera", os.O_RDWR | os.O_CREAT)
+    os.set_inheritable(fd, True)
+    try:
+        host = TerminalHost(
+            ["/bin/sh", "-c", f"if [ -e /dev/fd/{fd} ]; then echo leaked; else echo clean; fi"],
+            share_token="s",
+        )
+        host.start()
+        _wait_for(lambda: host.state().exit_code is not None)
+        assert "clean" in host.read(0)[1]
+        host.close()
+    finally:
+        os.close(fd)
 
 
 def test_close_ends_a_shell_that_would_run_forever() -> None:

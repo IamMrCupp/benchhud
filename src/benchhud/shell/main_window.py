@@ -41,6 +41,7 @@ from benchhud.capture.camera import CameraFrameSource
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
+from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
@@ -72,6 +73,7 @@ from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.media import now_playing
 from benchhud.media.now_playing import NowPlayingWatcher
+from benchhud.output.feeds import fit_frame, thermal_frame, thermal_size
 from benchhud.output.onair import Layer, compose_on_air, compose_preview, excluded
 from benchhud.output.sink import OutputSink, open_output_sink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
@@ -172,7 +174,10 @@ def scope_source_for(
     fallback = SyntheticFrameSource(960, 540)
     if not device.strip():
         return FallbackFrameSource(None, fallback)
-    camera = CameraFrameSource(resolve_capture_device(device, cameras), size=size)
+    resolved = resolve_capture_device(device, cameras)
+    if not (size and size[0] > 0 and size[1] > 0) and isinstance(resolved, str):
+        size = auto_size(probed_modes(resolved))  # not OpenCV's 640x480 (#342)
+    camera = CameraFrameSource(resolved, size=size)
     return FallbackFrameSource(
         camera,
         fallback,
@@ -261,6 +266,11 @@ class MainWindow(QMainWindow):
         self._sink: OutputSink | None = None
         # Composed frame size / scope frame size (#348); 1.0 = full size.
         self._compose_scale = 1.0
+        # The scope-only / thermal-only feeds (#344), by name; Linux only.
+        self._feed_sinks: dict[str, OutputSink] = {}
+        self._feed_factory: SinkFactory | None = None
+        self._thermal_feed_pending = False
+        self._linux_output = sys.platform.startswith("linux")
         # The hub outlives server restarts, so a page reconnecting after a
         # Preferences change gets the current readings straight away.
         self._browser_hub = TopicHub()
@@ -869,6 +879,7 @@ class MainWindow(QMainWindow):
             scope = compare_reference(
                 scope, self._reference, self.controls_panel.reference_settings(), time.monotonic()
             )
+            self._publish_feed("scope", scope)
         # Compose no bigger than anything shows it (#348): the output and the
         # main view are usually well under the scope's 1080p, and every step
         # after this costs per pixel. Snapshots still use the full frame.
@@ -888,6 +899,19 @@ class MainWindow(QMainWindow):
         if settings.auto_range:
             low, high = self._thermal_range.update(temps)
             settings = replace(settings, tmin=low, tmax=high)
+        thermal_sink = self._thermal_feed_sink(temps)
+        if thermal_sink is not None:
+            self._publish_feed(
+                "thermal",
+                thermal_frame(
+                    temps,
+                    settings.tmin,
+                    settings.tmax,
+                    settings.colormap,
+                    thermal_sink.size,
+                    scale_bar=settings.scale_bar,
+                ),
+            )
         if scope is None:
             # Thermal only — show it colourised on its own.
             self._show_composite(colorize(temps, settings.tmin, settings.tmax, settings.colormap))
@@ -1163,8 +1187,13 @@ class MainWindow(QMainWindow):
         """
         if not self._config.output.enabled:
             return None  # deliberately off — nothing to warn about
-        reason = getattr(self._sink, "reason", "")
-        return reason or None
+        reasons = [getattr(self._sink, "reason", "")]
+        reasons += [
+            f"{name} feed: {getattr(sink, 'reason', '')}"
+            for name, sink in self._feed_sinks.items()
+            if getattr(sink, "reason", "")
+        ]
+        return "; ".join(r for r in reasons if r) or None
 
     def scope_status(self) -> SourceStatus | None:
         """Is the scope preview showing the camera, and if not, why (None: no preview)."""
@@ -1652,10 +1681,34 @@ class MainWindow(QMainWindow):
         out = self._config.output
         factory = sink_factory or open_output_sink
         self._sink = factory(out.device, out.width, out.height)
+        # The scope-only and thermal-only feeds (#344): each its own loopback
+        # node, so Linux only. Elsewhere the one virtual camera is the composite.
+        # The thermal one waits for its first frame, to take the camera's shape.
+        self._feed_factory = factory
+        if self._linux_output:
+            if out.scope_device.strip():
+                self._feed_sinks["scope"] = factory(out.scope_device.strip(), out.width, out.height)
+            self._thermal_feed_pending = bool(out.thermal_device.strip())
         self._refresh_status()
 
+    def _thermal_feed_sink(self, temps) -> OutputSink | None:
+        """The thermal feed's sink, opened at the camera's shape on its first frame."""
+        sink = self._feed_sinks.get("thermal")
+        if sink is None and self._thermal_feed_pending and self._feed_factory is not None:
+            self._thermal_feed_pending = False
+            out = self._config.output
+            size = thermal_size(out.height, temps.shape)
+            sink = self._feed_factory(out.thermal_device.strip(), *size)
+            self._feed_sinks["thermal"] = sink
+            self._refresh_status()
+        return sink
+
     def stop_output(self) -> None:
-        """Close the virtual-camera sink (idempotent)."""
+        """Close the virtual-camera sinks (idempotent)."""
+        for sink in self._feed_sinks.values():
+            sink.close()
+        self._feed_sinks.clear()
+        self._thermal_feed_pending = False
         if self._sink is None:
             return
         self._sink.close()
@@ -1689,6 +1742,21 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("virtual-camera output failed; closing the sink")
             self.stop_output()
+
+    def _publish_feed(self, name: str, frame) -> None:
+        """Send one frame to the ``name`` feed (#344), fitted to it without stretching.
+
+        A feed that fails is dropped on its own; the composite carries on.
+        """
+        sink = self._feed_sinks.get(name)
+        if sink is None:
+            return
+        try:
+            sink.send(fit_frame(frame, sink.size))
+        except Exception:
+            log.exception("%s feed failed; closing it", name)
+            self._feed_sinks.pop(name, None)
+            sink.close()
 
     # --- OBS browser sources (#180) -----------------------------------------
 
