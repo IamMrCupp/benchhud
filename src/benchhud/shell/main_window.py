@@ -13,6 +13,7 @@ shell animates end to end with no camera.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import secrets
@@ -255,6 +256,8 @@ class MainWindow(QMainWindow):
     #: A supply command finished on the instrument's thread: (what, its Future).
     #: A signal so the result is handled back on the GUI thread.
     control_done = Signal(str, object)
+    #: A Recovery Mode check's answer, sent from its thread to this one (#370).
+    _recovery_probed = Signal(object, str, float)
 
     def __init__(
         self,
@@ -294,6 +297,8 @@ class MainWindow(QMainWindow):
         self.recovery_probe: Callable[[str], RecoveryDevice | None] = recovery_device
         self._recovery_checked_at = float("-inf")
         self._recovery_reset_at = float("-inf")
+        self._recovery_probing = False
+        self._recovery_probed.connect(self._on_recovery_probed)
         self._thermal_recovery: RecoveryDevice | None = None
         self._thermal_device: str | None = None
         self._last_temps = None
@@ -1424,13 +1429,36 @@ class MainWindow(QMainWindow):
         In Recovery Mode it has no video node, so it never opens and the lost-camera
         reset above never fires. With ``reset_port`` set, its port is cycled, at most
         once a minute while it stays there; without one, the status bar says how.
+
+        The check reads the camera's name from ``/sys``, and the kernel makes that
+        read wait for as long as it's resetting the device: 14 s on the bench when
+        the camera dropped off USB. So it runs on its own thread, one at a time,
+        and the answer comes back by signal; this thread never waits on it (#370).
         """
         now = time.monotonic() if now is None else now
-        if now - self._recovery_checked_at < THERMAL_RECOVERY_CHECK_S:
+        if self._recovery_probing or now - self._recovery_checked_at < THERMAL_RECOVERY_CHECK_S:
             return
         self._recovery_checked_at = now
+        self._recovery_probing = True
         spec = self._config.panels.thermal.reset_port.strip()
-        device = self.recovery_probe(spec)
+        threading.Thread(target=self._probe_recovery, args=(spec, now), daemon=True).start()
+
+    def _probe_recovery(self, spec: str, now: float) -> None:
+        """The Recovery Mode check itself. Runs off the GUI thread."""
+        try:
+            device = self.recovery_probe(spec)
+        except Exception:
+            log.exception("Recovery Mode check failed")
+            device = None
+        with contextlib.suppress(RuntimeError):  # the window closed while the read waited
+            self._recovery_probed.emit(device, spec, now)
+
+    def _on_recovery_probed(self, device: RecoveryDevice | None, spec: str, now: float) -> None:
+        self._recovery_probing = False
+        status = getattr(self._thermal_source, "status", None)
+        if status is not None and status.live:
+            self._thermal_recovery = None
+            return  # it came back while the check was waiting
         if device is None:
             self._thermal_recovery = None
             return
