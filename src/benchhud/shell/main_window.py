@@ -58,6 +58,7 @@ from benchhud.devices.discovery import (
     stable_path,
 )
 from benchhud.devices.holders import held_by
+from benchhud.devices.recovery import RecoveryDevice, recovery_device
 from benchhud.instruments.owon_spm8104 import InstrumentLimits, open_device
 from benchhud.instruments.session import InstrumentSession
 from benchhud.instruments.signature import Signature, SignatureRecorder, compare, reference_at
@@ -242,6 +243,10 @@ THERMAL_MAX_RETRY_S = 60.0
 THERMAL_PAUSED_S = 1.5
 #: With a reset port configured, reset it once after the camera's been gone this long.
 THERMAL_RESET_AFTER_S = 30.0
+#: How often a thermal that won't open is checked for its firmware's Recovery
+#: Mode, and how long to wait between port cycles while it stays there (#362).
+THERMAL_RECOVERY_CHECK_S = 5.0
+THERMAL_RECOVERY_RESET_S = 60.0
 
 
 class MainWindow(QMainWindow):
@@ -285,6 +290,11 @@ class MainWindow(QMainWindow):
         self._uvc_warning: str | None = None
         #: Runs the port reset (a seam so tests don't call sudo).
         self.reset_runner: Callable[[list[str]], None] = self._run_reset
+        #: Finds a camera in Recovery Mode on the thermal's port (a seam for tests, #362).
+        self.recovery_probe: Callable[[str], RecoveryDevice | None] = recovery_device
+        self._recovery_checked_at = float("-inf")
+        self._recovery_reset_at = float("-inf")
+        self._thermal_recovery: RecoveryDevice | None = None
         self._thermal_device: str | None = None
         self._last_temps = None
         self._cameras: list[CameraDevice] = []
@@ -1381,6 +1391,11 @@ class MainWindow(QMainWindow):
             # A pause shows the last frame dimmed rather than blanking (#276).
             self.thermal_panel.set_paused(getattr(source, "stalled_for", 0.0) > THERMAL_PAUSED_S)
             self._maybe_reset_thermal_port(getattr(source, "lost_for", 0.0))
+            now_status = getattr(source, "status", None)
+            if now_status is not None and not now_status.live:
+                self._check_thermal_recovery()
+            else:
+                self._thermal_recovery = None
         status = self.thermal_status()
         if status != self._thermal_status:
             was_live = self._thermal_status is not None and self._thermal_status.live
@@ -1399,10 +1414,45 @@ class MainWindow(QMainWindow):
         if not spec or self._thermal_port_reset or lost_for < THERMAL_RESET_AFTER_S:
             return
         self._thermal_port_reset = True
-        hub, _, port = spec.partition(":")
-        argv = ["sudo", "-n", "uhubctl", "-l", hub, "-p", port, "-a", "cycle", "-d", "3"]
         log.warning("thermal gone %.0f s: resetting hub port %s", lost_for, spec)
         self.statusBar().showMessage(f"Thermal camera not answering: resetting its port ({spec})")
+        self._cycle_port(spec)
+
+    def _check_thermal_recovery(self, now: float | None = None) -> None:
+        """Power-cycle a thermal that's come up in its firmware's Recovery Mode (#362).
+
+        In Recovery Mode it has no video node, so it never opens and the lost-camera
+        reset above never fires. With ``reset_port`` set, its port is cycled, at most
+        once a minute while it stays there; without one, the status bar says how.
+        """
+        now = time.monotonic() if now is None else now
+        if now - self._recovery_checked_at < THERMAL_RECOVERY_CHECK_S:
+            return
+        self._recovery_checked_at = now
+        spec = self._config.panels.thermal.reset_port.strip()
+        device = self.recovery_probe(spec)
+        if device is None:
+            self._thermal_recovery = None
+            return
+        if self._thermal_recovery != device:
+            log.warning("%s is in Recovery Mode on USB %s", device.product, device.name)
+        self._thermal_recovery = device
+        if not spec:
+            self.statusBar().showMessage(
+                f"{device.product}: power-cycle it, or set reset_port = "
+                f'"{device.port_spec}" under [panels.thermal] to do it automatically'
+            )
+            return
+        if now - self._recovery_reset_at < THERMAL_RECOVERY_RESET_S:
+            return
+        self._recovery_reset_at = now
+        log.warning("thermal in Recovery Mode: power-cycling hub port %s", spec)
+        self.statusBar().showMessage(f"{device.product}: power-cycling its port ({spec})")
+        self._cycle_port(spec)
+
+    def _cycle_port(self, spec: str) -> None:
+        hub, _, port = spec.partition(":")
+        argv = ["sudo", "-n", "uhubctl", "-l", hub, "-p", port, "-a", "cycle", "-d", "3"]
         threading.Thread(target=self.reset_runner, args=(argv,), daemon=True).start()
 
     @staticmethod

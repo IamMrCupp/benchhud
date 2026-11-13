@@ -157,6 +157,20 @@ reset_port = "1-4:4"
 After 30 s gone, the port is cycled once. Some hubs advertise switching but
 only cut the data lines; that's still enough to reset a hung camera.
 
+#### Recovery Mode at boot
+
+The T256s can also start up in its firmware's Recovery Mode. `lsusb` and
+`journalctl -k` then name it `Thermal Camera (Recovery Mode)`, and it shows up as
+a small USB disk with no video node, so benchhud can't open it. A power cycle of
+its port brings it back as `Thermal Camera (UVC)`. With `reset_port` set,
+benchhud does that by itself: it checks every 5 s while the thermal won't open,
+and cycles the port at most once a minute. Without `reset_port`, the status bar
+says the camera's in Recovery Mode and gives the value to set. To do it by hand:
+
+```bash
+sudo uhubctl -l 1-4 -p 4 -a cycle
+```
+
 ### Drop torn frames
 
 When part of a frame goes missing on USB, Linux's camera driver (`uvcvideo`)
