@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/IamMrCupp/benchhud/compare/v0.12.2...v0.12.3) (2026-11-13)
+
+
+### Performance
+
+* **power:** set the chart's series in one call so the HUD holds its frame rate ([972e28f](https://github.com/IamMrCupp/benchhud/commit/972e28f4dd24f016f2856026391b799138fe26ad))
+
 ## [0.12.2](https://github.com/IamMrCupp/benchhud/compare/v0.12.1...v0.12.2) (2026-11-13)
 
 
