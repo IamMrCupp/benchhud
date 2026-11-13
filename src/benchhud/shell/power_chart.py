@@ -9,7 +9,7 @@ offscreen. Uses QtCharts (bundled — no new dependency).
 from __future__ import annotations
 
 from PySide6.QtCharts import QChart, QChartView, QLineSeries, QValueAxis
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -114,32 +114,28 @@ class PowerChart(QWidget):
 
     def _refresh(self) -> None:
         samples = self._history.samples()
-        self.v_series.clear()
-        self.a_series.clear()
-        self.w_series.clear()
-        self.reference_series.clear()
         if not samples:
+            for series in (self.v_series, self.a_series, self.w_series, self.reference_series):
+                series.clear()
             return
 
         t_latest = samples[-1].t
         # Don't show empty time before the first sample (early on there's less
         # data than the window is wide).
         t_min = max(t_latest - self._window, samples[0].t)
-        values: list[float] = []
-        amps: list[float] = []
-        for s in samples:
-            if s.t < t_min:
-                continue
-            self.v_series.append(s.t, s.voltage)
-            self.a_series.append(s.t, s.current)
-            self.w_series.append(s.t, s.power)
-            values.extend((s.voltage, s.power))
-            amps.append(s.current)
-        for t, current in self._reference:
-            if t_min <= t <= t_latest:
-                self.reference_series.append(t, current)
-                amps.append(current)
+        shown = [s for s in samples if s.t >= t_min]
+        reference = [(t, a) for t, a in self._reference if t_min <= t <= t_latest]
+        # One replace() per series, never a point at a time: every append makes
+        # the chart rework the whole series, so a full window of them on every
+        # reading took a third of the GUI thread and dragged the frame rate
+        # down two minutes after start (#350).
+        self.v_series.replace([QPointF(s.t, s.voltage) for s in shown])
+        self.a_series.replace([QPointF(s.t, s.current) for s in shown])
+        self.w_series.replace([QPointF(s.t, s.power) for s in shown])
+        self.reference_series.replace([QPointF(t, a) for t, a in reference])
 
+        values = [v for s in shown for v in (s.voltage, s.power)]
+        amps = [s.current for s in shown] + [a for _, a in reference]
         self._axis_x.setRange(t_min, t_latest if t_latest > t_min else t_min + 1)
         high = max(values) if values else 1.0
         low = min(0.0, min(values)) if values else 0.0
