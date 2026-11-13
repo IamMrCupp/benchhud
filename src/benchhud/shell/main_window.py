@@ -45,7 +45,7 @@ from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
-from benchhud.config import Config, PersistCallback
+from benchhud.config import Config, OutputConfig, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import (
     SERIAL_BY_ID_DIR,
@@ -125,9 +125,22 @@ from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
 from benchhud.tickets import HttpTicketSource, NullTicketSource, TicketSource
 
-# Preview refresh rate for the on-screen scope panel (the virtual-cam output has
-# its own fps in config; this is just how often the GUI repaints).
+# How often the frame loop runs with the virtual camera off. With it on, the
+# loop runs at ``output.fps`` instead (#359).
 _PREVIEW_FPS = 30
+_MAX_FPS = 60
+
+
+def frame_interval_ms(output: OutputConfig) -> int:
+    """Milliseconds between frame ticks.
+
+    With the output on, ``output.fps`` paces the whole loop: the readers only
+    decode what a tick asks for, so a lower rate saves decode, compose and
+    paint alike, and leaves that CPU for OBS on the same box.
+    """
+    fps = output.fps if output.enabled else _PREVIEW_FPS
+    return round(1000 / min(max(int(fps), 1), _MAX_FPS))
+
 
 # Bump when the default dock arrangement changes. The shell auto-saves the
 # layout on close, so without this a layout from an older build would silently
@@ -787,6 +800,7 @@ class MainWindow(QMainWindow):
             self._config, self._scanner, on_save=self._on_persist, parent=self
         )
         dialog.accepted.connect(self.restart_output)
+        dialog.accepted.connect(self.reconfigure_frame_rate)
         dialog.accepted.connect(self.reconfigure_preview)
         dialog.accepted.connect(self.reconfigure_thermal)
         dialog.accepted.connect(self.reconfigure_faults)
@@ -1282,7 +1296,7 @@ class MainWindow(QMainWindow):
         self._pump.start()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._preview_tick)
-        self._timer.start(1000 // _PREVIEW_FPS)
+        self._timer.start(frame_interval_ms(self._config.output))
         self._refresh_status()
 
     def _preview_tick(self) -> None:
@@ -1295,6 +1309,13 @@ class MainWindow(QMainWindow):
         if status != self._scope_status:
             self._scope_status = status
             self._refresh_status()
+
+    def reconfigure_frame_rate(self) -> None:
+        """Repace the running frame timers after Preferences (#359)."""
+        interval = frame_interval_ms(self._config.output)
+        for timer in (self._timer, self._thermal_timer):
+            if timer is not None and timer.interval() != interval:
+                timer.setInterval(interval)
 
     def reconfigure_preview(self) -> None:
         """Reopen the scope after Preferences, if the chosen camera changed."""
@@ -1340,7 +1361,7 @@ class MainWindow(QMainWindow):
         self._thermal_pump.start()
         self._thermal_timer = QTimer(self)
         self._thermal_timer.timeout.connect(self._thermal_tick)
-        self._thermal_timer.start(1000 // _PREVIEW_FPS)
+        self._thermal_timer.start(frame_interval_ms(self._config.output))
         self._refresh_status()
 
     def _on_thermal_frame(self, temps) -> None:
