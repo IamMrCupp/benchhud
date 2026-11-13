@@ -6,6 +6,11 @@ quietly changed a setting. With :class:`WheelGuard` installed, those controls
 inside a scroll area only take the wheel once they've been clicked into;
 otherwise it goes on to the scroll area. Lists and tables still scroll their
 own contents.
+
+The guard filters the controls themselves, one scroll area at a time. It must
+not go on the ``QApplication``: PySide then has to wrap every object in the
+process that receives an event, Qt's own and the desktop's plugins' included,
+and 0.12.0 segfaulted in exactly that on KDE Wayland (#361).
 """
 
 from __future__ import annotations
@@ -42,16 +47,39 @@ def guarded(widget: QObject) -> bool:
     return scroll_area(widget) is not None
 
 
+_CONTROLS = (QAbstractSpinBox, QComboBox, QAbstractSlider)
+
+
 class WheelGuard(QObject):
-    """An application event filter: see the module docstring."""
+    """Filters the controls inside one scroll area: see the module docstring."""
+
+    def __init__(self, area: QAbstractScrollArea) -> None:
+        super().__init__(area)
+        self._area = area
+        area.installEventFilter(self)  # to sweep again whenever it's shown
+        self.sweep()
+
+    def sweep(self) -> int:
+        """Guard every control now in the area. Returns how many it guards.
+
+        Safe to repeat: Qt keeps one copy of a filter per object.
+        """
+        count = 0
+        for kind in _CONTROLS:
+            for control in self._area.findChildren(kind):
+                if not guarded(control):
+                    continue
+                control.installEventFilter(self)
+                # Not focusable by the wheel, or the wheel would focus it and then turn it.
+                if control.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+                    control.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+                count += 1
+        return count
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         kind = event.type()
-        if kind == QEvent.Type.Polish and guarded(watched):
-            # Not focusable by the wheel, or the wheel would focus it and then turn it.
-            assert isinstance(watched, QWidget)
-            if watched.focusPolicy() == Qt.FocusPolicy.WheelFocus:
-                watched.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        if kind == QEvent.Type.Show and watched is self._area:
+            self.sweep()  # picks up controls a panel built after it was docked
         elif kind == QEvent.Type.Wheel:
             area = scroll_area(watched)
             if area is not None and isinstance(event, QWheelEvent):
@@ -85,14 +113,6 @@ def _forward(event: QWheelEvent, area: QAbstractScrollArea) -> None:
     QApplication.sendEvent(viewport, copy)
 
 
-def install(parent: QObject) -> WheelGuard | None:
-    """Install a guard on the running application, owned by ``parent``.
-
-    Qt drops the filter when ``parent`` is destroyed.
-    """
-    app = QApplication.instance()
-    if app is None:
-        return None
-    guard = WheelGuard(parent)
-    app.installEventFilter(guard)
-    return guard
+def install(area: QAbstractScrollArea) -> WheelGuard:
+    """Guard the controls in ``area``. Qt drops the guard with the area."""
+    return WheelGuard(area)

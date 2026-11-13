@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from benchhud.shell.wheel_guard import WheelGuard, guarded
+from benchhud.shell.wheel_guard import WheelGuard, guarded, install
 
 
 def _wheel(widget: QWidget) -> None:
@@ -38,8 +38,6 @@ def _wheel(widget: QWidget) -> None:
 @pytest.fixture
 def dock(qtbot):
     """A tall panel of controls in a short scroll area, like a squeezed dock."""
-    guard = WheelGuard()
-    QApplication.instance().installEventFilter(guard)
     panel = QWidget()
     layout = QVBoxLayout(panel)
     spin = QDoubleSpinBox()
@@ -61,12 +59,12 @@ def dock(qtbot):
     scroll.setWidget(panel)
     scroll.resize(300, 200)
     qtbot.addWidget(scroll)
+    install(scroll)
     scroll.show()
     qtbot.waitExposed(scroll)
     elsewhere.setFocus()
     assert not any(w.hasFocus() for w in (spin, combo, slider))
-    yield scroll, spin, combo, slider
-    QApplication.instance().removeEventFilter(guard)
+    return scroll, spin, combo, slider
 
 
 def test_the_wheel_over_a_control_scrolls_the_dock(dock) -> None:
@@ -108,11 +106,60 @@ def test_only_controls_inside_a_scroll_area_are_guarded(qtbot) -> None:
     assert not guarded(scroll.verticalScrollBar())
 
 
-def test_the_window_installs_the_guard(qtbot) -> None:
+def test_a_control_added_later_is_guarded_once_the_dock_is_shown_again(dock) -> None:
+    scroll, _, _, _ = dock
+    late = QDoubleSpinBox()
+    late.setRange(0, 100)
+    late.setValue(50)
+    scroll.widget().layout().insertWidget(1, late)
+    scroll.hide()
+    scroll.show()
+    before = scroll.verticalScrollBar().value()
+    _wheel(late)
+    assert late.value() == 50
+    assert scroll.verticalScrollBar().value() > before
+
+
+def test_sweep_counts_only_guarded_controls(qtbot) -> None:
+    scroll = QScrollArea()
+    qtbot.addWidget(scroll)
+    panel = QWidget()
+    layout = QVBoxLayout(panel)
+    for widget in (QDoubleSpinBox(), QComboBox(), QLineEdit(), QListWidget()):
+        layout.addWidget(widget)
+    scroll.setWidget(panel)
+    assert WheelGuard(scroll).sweep() == 2
+
+
+def _window(qtbot):
     from benchhud.config import Config
     from benchhud.jobs.store import JobStore
     from benchhud.shell.main_window import MainWindow
 
     window = MainWindow(Config(), job_store=JobStore(":memory:"))
     qtbot.addWidget(window)
-    assert isinstance(window._wheel_guard, WheelGuard)
+    return window
+
+
+def test_every_dock_gets_a_guard(qtbot) -> None:
+    window = _window(qtbot)
+    docks = [window.panels.dock(panel_id) for panel_id in window.panels.panel_ids()]
+    assert docks
+    for dock in docks:
+        assert dock.widget().findChildren(WheelGuard), dock.objectName()
+
+
+def test_the_wheel_over_a_docked_control_leaves_it_alone(qtbot) -> None:
+    window = _window(qtbot)
+    spin = window.controls_panel.offset_x_spin
+    before = spin.value()
+    _wheel(spin)
+    assert spin.value() == before
+
+
+def test_nothing_filters_the_whole_application(qtbot, monkeypatch) -> None:
+    """An app-wide Python filter segfaulted 0.12.0 on KDE Wayland (#361)."""
+    installed: list[object] = []
+    monkeypatch.setattr(QApplication.instance(), "installEventFilter", installed.append)
+    _window(qtbot)
+    assert installed == []

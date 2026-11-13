@@ -320,7 +320,7 @@ enabled = true
 device  = "/dev/video10"   # the loopback node from step 3
 width   = 1280
 height  = 720
-fps     = 15               # pace to the slower feed
+fps     = 15               # the HUD's frame rate while the output is on; lower leaves CPU for OBS
 scope_device   = ""        # e.g. "/dev/video12": the scope alone (blank = off)
 thermal_device = ""        # e.g. "/dev/video13": the thermal alone (blank = off)
 

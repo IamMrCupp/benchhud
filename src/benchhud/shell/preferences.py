@@ -224,7 +224,11 @@ class PreferencesDialog(QDialog):
         )
         self.output_width = _spin(1, 7680, out.width)
         self.output_height = _spin(1, 4320, out.height)
-        self.output_fps = _spin(1, 120, out.fps)
+        self.output_fps = _spin(1, 60, out.fps)
+        self.output_fps.setToolTip(
+            "How often the HUD captures, composes and publishes while the output is on. "
+            "Lower leaves more CPU for OBS."
+        )
 
         overlay = self._config.telemetry_overlay
         self.overlay_enabled = QCheckBox("Overlay live meter readings on the output")

@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDockWidget, QFrame, QMainWindow, QScrollArea
 
 from benchhud.shell.panel import Panel
+from benchhud.shell.wheel_guard import install as install_wheel_guard
 
 
 class PanelManager:
@@ -41,6 +42,8 @@ class PanelManager:
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(panel)
         dock.setWidget(scroll)
+        # The wheel scrolls the dock rather than the controls it passes over (#320).
+        install_wheel_guard(scroll)
 
         self._window.addDockWidget(area, dock)
         self._docks[panel.panel_id] = dock
