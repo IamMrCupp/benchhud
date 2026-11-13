@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.4](https://github.com/IamMrCupp/benchhud/compare/v0.12.3...v0.12.4) (2026-11-13)
+
+
+### Bug Fixes
+
+* **thermal:** check for Recovery Mode off the GUI thread so a USB dropout can't freeze the HUD ([15f92eb](https://github.com/IamMrCupp/benchhud/commit/15f92ebbe860b80817015d9e5e79ebd639751400))
+
 ## [0.12.3](https://github.com/IamMrCupp/benchhud/compare/v0.12.2...v0.12.3) (2026-11-13)
 
 
