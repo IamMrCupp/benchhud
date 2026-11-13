@@ -50,3 +50,41 @@ def test_axis_does_not_show_time_before_the_first_sample(qtbot) -> None:
     chart.add_reading(12.0, 1.0, t=0.0)
     chart.add_reading(12.0, 1.0, t=30.0)  # only 30s of data in a 120s window
     assert chart._axis_x.min() >= 0.0  # not -90
+
+
+def test_a_refresh_sets_each_series_once_not_point_by_point(qtbot, monkeypatch) -> None:
+    """A full window re-added point by point took a third of the GUI thread (#350)."""
+    chart = PowerChart()
+    qtbot.addWidget(chart)
+    for i in range(50):
+        chart.add_reading(12.0, 0.5, float(i))
+    chart.set_reference([(0.0, 0.4), (1.0, 0.6)], t0=10.0)
+
+    calls: dict[str, int] = {}
+    for name in ("v_series", "a_series", "w_series", "reference_series"):
+        series = getattr(chart, name)
+
+        def no_append(*_args, _name=name) -> None:
+            raise AssertionError(f"{_name}.append called during a refresh")
+
+        def counting_replace(points, _series=series, _name=name) -> None:
+            calls[_name] = calls.get(_name, 0) + 1
+            type(_series).replace(_series, points)
+
+        monkeypatch.setattr(series, "append", no_append)
+        monkeypatch.setattr(series, "replace", counting_replace)
+
+    chart.add_reading(12.0, 0.5, 50.0)
+
+    assert calls == {"v_series": 1, "a_series": 1, "w_series": 1, "reference_series": 1}
+    assert chart.v_series.count() == 51
+    assert chart.reference_series.count() == 2
+
+
+def test_the_reference_curve_is_trimmed_to_the_window(qtbot) -> None:
+    chart = PowerChart(window_seconds=10.0)
+    qtbot.addWidget(chart)
+    for i in range(30):
+        chart.add_reading(5.0, 0.2, float(i))
+    chart.set_reference([(0.0, 0.1), (25.0, 0.3), (40.0, 0.9)], t0=0.0)
+    assert [(p.x(), p.y()) for p in chart.reference_series.points()] == [(25.0, 0.3)]
