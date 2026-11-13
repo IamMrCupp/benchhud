@@ -6,7 +6,6 @@
 ### Bug Fixes
 
 * **thermal:** power-cycle a thermal cam that boots in Recovery Mode ([2eec97e](https://github.com/IamMrCupp/benchhud/commit/2eec97ee89de656b99215d4acf830911960f12d8))
-* **thermal:** power-cycle a thermal cam that boots in Recovery Mode ([14b7428](https://github.com/IamMrCupp/benchhud/commit/14b7428558dd426f324070eb6aae49970bdd7c0f))
 
 ## [0.12.1](https://github.com/IamMrCupp/benchhud/compare/v0.12.0...v0.12.1) (2026-11-13)
 
