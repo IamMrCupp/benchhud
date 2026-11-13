@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.1](https://github.com/IamMrCupp/benchhud/compare/v0.12.0...v0.12.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **shell:** guard the wheel per dock, not app-wide, so 0.12.0 stops segfaulting on start ([b09c76e](https://github.com/IamMrCupp/benchhud/commit/b09c76e1a0740541071be6206e0da55bbd2ce0a4))
+
+
+### Performance
+
+* **shell:** pace the frame loop to output.fps so the HUD leaves CPU for OBS ([d506619](https://github.com/IamMrCupp/benchhud/commit/d506619e868d5e404a879d6f90ef2136b8266030))
+
 ## [0.12.0](https://github.com/IamMrCupp/benchhud/compare/v0.11.0...v0.12.0) (2026-11-12)
 
 
