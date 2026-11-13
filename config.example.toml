@@ -23,7 +23,9 @@ enabled = false
 device = "/dev/video10" # the loopback node, not a real camera
 width = 1280
 height = 720
-fps = 15 # paced to the slower feed; thermal is 25 fps, see research.md §4
+# The whole frame loop runs at this rate while the output is on: capture,
+# compose and publish. Lower leaves more CPU for OBS on the same box. 1-60.
+fps = 15
 # Extra feeds so OBS can lay the cameras out itself (Linux, one loopback node
 # each; see docs/BENCH-SETUP.md). Blank = off.
 scope_device = ""   # e.g. "/dev/video12": the scope alone, at width x height

@@ -51,6 +51,7 @@ class OutputConfig:
     device: str = "/dev/video10"
     width: int = 1280
     height: int = 720
+    # Paces the whole frame loop while the output is on (#359), not just the sink.
     fps: int = 15
     # Extra feeds so OBS can lay the cameras out itself (#344). Empty = off.
     # Linux only: each is its own v4l2loopback node.
