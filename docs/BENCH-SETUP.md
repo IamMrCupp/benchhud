@@ -252,7 +252,11 @@ reboot decides its options, and that's often OBS (below):
 echo v4l2loopback | sudo tee /etc/modules-load.d/v4l2loopback.conf
 printf 'options v4l2loopback exclusive_caps=1 card_label=benchhud video_nr=10\n' \
   | sudo tee /etc/modprobe.d/benchhud-loopback.conf
+sudo update-initramfs -u
 ```
+
+The last line matters every time that options file changes: see
+[Rebuild the initramfs after changing the options](#rebuild-the-initramfs-after-changing-the-options).
 
 ### OBS loads the module too
 
@@ -271,6 +275,7 @@ sudo modprobe v4l2loopback devices=2 video_nr=10,11 \
   card_label=benchhud,OBS-Virtual-Camera exclusive_caps=1,1
 printf 'options v4l2loopback devices=2 video_nr=10,11 card_label=benchhud,OBS-Virtual-Camera exclusive_caps=1,1\n' \
   | sudo tee /etc/modprobe.d/benchhud-loopback.conf
+sudo update-initramfs -u
 ```
 
 benchhud writes `/dev/video10`, and OBS's Start Virtual Camera takes the other
@@ -289,7 +294,12 @@ sudo modprobe v4l2loopback devices=4 video_nr=10,11,12,13 \
   exclusive_caps=1,1,1,1
 printf 'options v4l2loopback devices=4 video_nr=10,11,12,13 card_label=benchhud,OBS-Virtual-Camera,benchhud-scope,benchhud-thermal exclusive_caps=1,1,1,1\n' \
   | sudo tee /etc/modprobe.d/benchhud-loopback.conf
+sudo update-initramfs -u
 ```
+
+Don't skip `update-initramfs -u`. Without it the two new nodes are there now and
+gone after the next reboot
+([why](#rebuild-the-initramfs-after-changing-the-options)).
 
 Then set `scope_device` and `thermal_device` (below, or in Preferences →
 Output), and add each node to OBS as its own Video Capture Device. The scope
@@ -297,6 +307,41 @@ feed is the output size; the thermal feed is the camera's own shape at the same
 height (540x720 for the bench's portrait Sipeed at 720p), with the colour scale
 when the overlay shows one. Neither
 carries the meter or graph overlays: those stay on the composite.
+
+### Rebuild the initramfs after changing the options
+
+The options file on disk isn't the copy the module reads at boot.
+`/etc/modules-load.d/v4l2loopback.conf` gets the module loaded early, from the
+initramfs, and the initramfs carries its own copy of
+`/etc/modprobe.d/benchhud-loopback.conf` from the last time it was built. Edit
+the file and reboot, and the module comes up with the old options.
+
+That's how the bench lost its scope and thermal feeds: the file asked for four
+nodes, the initramfs still had the two-node line, and only `/dev/video10` and
+`/dev/video11` came back.
+
+So after every change to the loopback options:
+
+```bash
+sudo update-initramfs -u
+```
+
+To check what the module loaded with, and that the initramfs carries the file:
+
+```bash
+cat /sys/module/v4l2loopback/parameters/video_nr     # -> 10,11,12,13,-1,-1,-1,-1
+sudo lsinitramfs /boot/initrd.img-$(uname -r) | grep benchhud-loopback
+```
+
+The first shows the options the running module got. The second only confirms
+the initramfs has a copy; rebuilding is what makes that copy current.
+
+If the running module has the wrong options, quit OBS and benchhud and reload
+it. No reboot needed:
+
+```bash
+sudo modprobe -r v4l2loopback && sudo modprobe v4l2loopback
+```
 
 ### When it still won't load
 
@@ -463,6 +508,7 @@ aren't covered here yet.
 | Scope/thermal dock shows the animated placeholder | Device didn't open — wrong `/dev/videoN`, another reader holds it (UVC single-access), or not in the `video` group. The status bar names the holder. |
 | Status bar says the camera is *held by obs* | An OBS source has a saved `/dev/videoN` that now belongs to this camera. Point OBS at the `/dev/cam-*` names ([Give OBS names that don't move](#give-obs-names-that-dont-move)). |
 | OBS doesn't list `benchhud` | Module loaded without `exclusive_caps=1`. Re-`modprobe` with it. |
+| A feed node (`/dev/video12`, `/dev/video13`) is gone after a reboot | The module loaded from the initramfs with the old options. Run `sudo update-initramfs -u`, then reload the module ([Rebuild the initramfs after changing the options](#rebuild-the-initramfs-after-changing-the-options)). |
 | Output logs "unavailable" and falls back | Loopback node missing/wrong path, or another writer holds it. benchhud keeps running without the OBS feed — fix `output.device`. |
 | Output logs the driver "adjusted the format" | `output.width`/`height` don't match what the loopback grants. Set them to the granted size. |
 | Thermal image briefly freezes | The Sipeed's periodic **NUC shutter** — normal, not an error. |
