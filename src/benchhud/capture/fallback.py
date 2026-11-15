@@ -149,6 +149,15 @@ class FallbackFrameSource:
         if setter is not None:
             setter(gate)
 
+    def snapshot(self) -> np.ndarray | None:
+        """The live camera's current frame at full size (#349), or ``None``.
+
+        ``None`` while the test pattern is up, or for a camera that has no
+        full-size frame to give: the caller keeps the frame it already has.
+        """
+        take = getattr(self._camera, "snapshot", None)
+        return take() if take is not None and self._status.live else None
+
     def _fatal(self) -> str | None:
         return getattr(self._camera, "fatal_error", None)
 
