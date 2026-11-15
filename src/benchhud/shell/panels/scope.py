@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QResizeEvent
+from PySide6.QtGui import QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from benchhud.shell.panel import Panel
-from benchhud.shell.qt_image import bgr_to_qimage
+from benchhud.shell.qt_image import bgr_to_fitted_pixmap
 
 
 class ScopePanel(Panel):
@@ -29,7 +29,6 @@ class ScopePanel(Panel):
         # The image's size hint is whatever it was last scaled to; don't let it
         # size the panel (#294).
         self._view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
-        self._source_pixmap: QPixmap | None = None
         self._last_frame: np.ndarray | None = None
 
         layout = QVBoxLayout(self)
@@ -38,7 +37,7 @@ class ScopePanel(Panel):
 
     @property
     def has_frame(self) -> bool:
-        return self._source_pixmap is not None
+        return self._last_frame is not None
 
     @property
     def last_frame(self) -> np.ndarray | None:
@@ -50,24 +49,18 @@ class ScopePanel(Panel):
         if frame is None:
             return
         self._last_frame = frame
-        self._source_pixmap = QPixmap.fromImage(bgr_to_qimage(frame))
         self._render()
 
     def _render(self) -> None:
-        if self._source_pixmap is None:
+        # A closed or tabbed-away dock draws nothing; showEvent catches it up (#347).
+        if self._last_frame is None or not self.isVisible():
             return
-        target = self._view.size()
-        if target.isEmpty():
-            self._view.setPixmap(self._source_pixmap)
-        else:
-            self._view.setPixmap(
-                self._source_pixmap.scaled(
-                    target,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
+        self._view.setPixmap(bgr_to_fitted_pixmap(self._last_frame, self._view.size()))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self._render()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
         self._render()

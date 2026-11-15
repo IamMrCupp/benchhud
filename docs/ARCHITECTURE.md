@@ -34,8 +34,10 @@ ticket system is a protocol with a fake, not a dependency.
   `FramePump` (Qt-free dispatch).
 - **`output/`** — `OutputSink` protocol, `FakeSink`, `NullSink` (carries a
   `reason` the status bar shows), and one real backend per platform, chosen by
-  `open_output_sink`: `V4l2LoopbackSink` (`v4l2.py`: writes RGB24 straight to a
-  v4l2loopback node via `VIDIOC_S_FMT` + `os.write`, stdlib only) on Linux,
+  `open_output_sink`: `V4l2LoopbackSink` (`v4l2.py`: writes frames straight to a
+  v4l2loopback node via `VIDIOC_S_FMT` + `os.write`, stdlib only; it asks for
+  BGR24, the frames' own byte order, and swaps to RGB24 only when the node
+  answers with that) on Linux,
   `CmioSink` (`cmio.py`: publishes UYVY frames into OBS's camera-extension sink
   stream through Apple's public CoreMediaIO API via `ctypes` — no PyObjC, no
   compiled extension) on macOS, and `SoftcamSink` (`softcam.py`: sends BGR24
