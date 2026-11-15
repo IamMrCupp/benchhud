@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.6](https://github.com/IamMrCupp/benchhud/compare/v0.12.5...v0.12.6) (2026-11-15)
+
+
+### Performance
+
+* **shell:** size frames to the view before Qt and write BGR to the loopback ([8e8b860](https://github.com/IamMrCupp/benchhud/commit/8e8b86092579d705d0b677160b7957a8116a09b0))
+
 ## [0.12.5](https://github.com/IamMrCupp/benchhud/compare/v0.12.4...v0.12.5) (2026-11-15)
 
 
