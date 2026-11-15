@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.5](https://github.com/IamMrCupp/benchhud/compare/v0.12.4...v0.12.5) (2026-11-15)
+
+
+### Documentation
+
+* **setup:** rebuild the initramfs after changing the v4l2loopback options ([94d228b](https://github.com/IamMrCupp/benchhud/commit/94d228bc6edee95ef92e0fdb5460792c190d9fdc))
+
 ## [0.12.4](https://github.com/IamMrCupp/benchhud/compare/v0.12.3...v0.12.4) (2026-11-13)
 
 
