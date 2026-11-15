@@ -38,7 +38,7 @@ from benchhud.boards.opener import open_board, open_schematic
 from benchhud.boards.worklist import boards_to_source
 from benchhud.browser_sources import BrowserSourceServer, TopicHub
 from benchhud.browser_sources.payloads import graph_payload, job_payload, meter_payload
-from benchhud.capture.camera import CameraFrameSource
+from benchhud.capture.camera import CameraFrameSource, full_size_of
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
 from benchhud.capture.latest_frame_reader import LatestFrameReader
@@ -202,7 +202,8 @@ def scope_source_for(
     resolved = resolve_capture_device(device, cameras)
     if not (size and size[0] > 0 and size[1] > 0) and isinstance(resolved, str):
         size = auto_size(probed_modes(resolved))  # not OpenCV's 640x480 (#342)
-    camera = CameraFrameSource(resolved, size=size)
+    # Decoded small for the live view, full size for snapshots (#349).
+    camera = CameraFrameSource(resolved, size=size, reduced_live=True)
     return FallbackFrameSource(
         camera,
         fallback,
@@ -903,6 +904,14 @@ class MainWindow(QMainWindow):
         except Exception:
             return []
 
+    def _scope_snapshot(self) -> np.ndarray | None:
+        """The scope frame to save: the camera's full size, not the live one (#349)."""
+        if self.scope_panel.last_frame is None:
+            return None
+        take = getattr(self._scope_source, "snapshot", None)
+        full = take() if take is not None else None
+        return full if full is not None else self.scope_panel.last_frame
+
     def _on_scope_frame(self, frame) -> None:
         self.scope_panel.update_frame(frame)
         self.render_composite()
@@ -913,20 +922,28 @@ class MainWindow(QMainWindow):
         temps = self.thermal_panel.last_temps
         if scope is None and temps is None:
             return
+        # The live frame may already be a fraction of the camera's (#349). The
+        # registration and the reference nudge are in the camera's pixels.
+        full_size = full_size_of(scope, self._scope_source) if scope is not None else (0, 0)
+        live_scale = scope.shape[1] / full_size[0] if scope is not None else 1.0
         if scope is not None:
             # The good board goes under the thermal, so heat still reads on top (#256).
-            scope = compare_reference(
-                scope, self._reference, self.controls_panel.reference_settings(), time.monotonic()
-            )
+            reference = self.controls_panel.reference_settings()
+            if live_scale != 1.0:
+                reference = replace(
+                    reference,
+                    offset_x=reference.offset_x * live_scale,
+                    offset_y=reference.offset_y * live_scale,
+                )
+            scope = compare_reference(scope, self._reference, reference, time.monotonic())
             self._publish_feed("scope", scope)
         # Compose no bigger than anything shows it (#348): the output and the
         # main view are usually well under the scope's 1080p, and every step
         # after this costs per pixel. Snapshots still use the full frame.
-        full_size = (scope.shape[1], scope.shape[0]) if scope is not None else (0, 0)
-        self._compose_scale = 1.0
+        self._compose_scale = live_scale
         if scope is not None:
             k = self._compose_scale_for(full_size)
-            if k < 1.0:
+            if k < live_scale * 0.9:  # never up, and not for the last few percent
                 small = (max(1, round(full_size[0] * k)), max(1, round(full_size[1] * k)))
                 scope = cv2.resize(scope, small, interpolation=cv2.INTER_AREA)
                 self._compose_scale = k
@@ -1033,7 +1050,7 @@ class MainWindow(QMainWindow):
     def capture_reference(self) -> None:
         """This scope frame becomes the board's known-good reference."""
         board = self._selected_board()
-        frame = self.scope_panel.last_frame
+        frame = self._scope_snapshot()
         if not board:
             self.controls_panel.show_reference(
                 "Select a job with a board number first: references are per board.", error=True
@@ -1112,7 +1129,7 @@ class MainWindow(QMainWindow):
             return
         first, second = self._calibration
         src = (temps.shape[1], temps.shape[0])
-        dst = (scope.shape[1], scope.shape[0])
+        dst = full_size_of(scope, self._scope_source)
         try:
             transform = solve(first, second, src, dst)
         except CalibrationError as exc:
@@ -1213,7 +1230,7 @@ class MainWindow(QMainWindow):
     def capture_context(self) -> CaptureContext:
         """Current bench state for capture-to-job: scope + thermal + readings."""
         return CaptureContext(
-            scope=self.scope_panel.last_frame,
+            scope=self._scope_snapshot(),
             temps=self.thermal_panel.last_temps,
             snapshot=self.power_panel.last_snapshot,
         )

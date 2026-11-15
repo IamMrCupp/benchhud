@@ -144,8 +144,8 @@ def _built_scope(monkeypatch, size, modes):
     asked = {}
 
     class Recorder:
-        def __init__(self, device, size=None):
-            asked.update(device=device, size=size)
+        def __init__(self, device, size=None, reduced_live=False):
+            asked.update(device=device, size=size, reduced_live=reduced_live)
 
     monkeypatch.setattr(mw, "CameraFrameSource", Recorder)
     monkeypatch.setattr(mw, "probed_modes", lambda _d: modes)
