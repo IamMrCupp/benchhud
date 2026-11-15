@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+import pytest
+
 from benchhud.config import Config
+from benchhud.output import loopback_probe
 from benchhud.output import sink as sink_module
-from benchhud.output.loopback_probe import LoopbackNode, diagnose, loopback_nodes, module_loaded
+from benchhud.output.loopback_probe import (
+    LoopbackNode,
+    configured_video_nrs,
+    diagnose,
+    loopback_nodes,
+    module_loaded,
+)
 from benchhud.shell.preferences import PreferencesDialog
+
+
+@pytest.fixture(autouse=True)
+def no_real_modprobe_d(tmp_path, monkeypatch) -> None:
+    """Never read this machine's /etc/modprobe.d: the bench has a real options line."""
+    monkeypatch.setattr(loopback_probe, "MODPROBE_DIR", str(tmp_path / "no-modprobe.d"))
 
 
 def fake_sys(tmp_path, *, loaded=True, loopback=(), cameras=()):
@@ -106,3 +121,46 @@ def test_preferences_hide_the_device_where_there_is_none(qtbot) -> None:
     qtbot.addWidget(dialog)
     dialog.show()
     assert not dialog.output_device.isVisible()
+
+
+def fake_modprobe(tmp_path, *lines):
+    """An /etc/modprobe.d holding one benchhud-loopback.conf."""
+    conf_dir = tmp_path / "modprobe.d"
+    conf_dir.mkdir()
+    (conf_dir / "benchhud-loopback.conf").write_text("\n".join(lines) + "\n")
+    return conf_dir
+
+
+FOUR = (
+    "options v4l2loopback devices=4 video_nr=10,11,12,13 "
+    "card_label=benchhud,OBS-Virtual-Camera,benchhud-scope,benchhud-thermal "
+    "exclusive_caps=1,1,1,1"
+)
+
+
+def test_configured_video_nrs_reads_the_options_line(tmp_path) -> None:
+    conf_dir = fake_modprobe(tmp_path, "# loopback nodes", "options uvcvideo nodrop=0", FOUR)
+    assert configured_video_nrs(conf_dir) == [10, 11, 12, 13]
+    assert configured_video_nrs(tmp_path / "missing") == []
+
+
+def test_stale_initramfs_options_are_named(tmp_path) -> None:
+    """The bench (#366): the file asks for four nodes, the module came up with two."""
+    root = fake_sys(tmp_path, loopback=[("video10", "benchhud"), ("video11", "OBS-Virtual-Camera")])
+    reason = diagnose("/dev/video12", root, fake_modprobe(tmp_path, FOUR))
+    assert reason.startswith("/dev/video12 doesn't exist.")
+    assert "2 of the 4 nodes" in reason
+    assert "sudo update-initramfs -u" in reason
+
+
+def test_a_node_modprobe_never_asked_for_keeps_the_old_hint(tmp_path) -> None:
+    root = fake_sys(tmp_path, loopback=[("video10", "benchhud")])
+    reason = diagnose("/dev/video20", root, fake_modprobe(tmp_path, FOUR))
+    assert "update-initramfs" not in reason and "Pick one in Preferences" in reason
+
+
+def test_obs_loading_it_first_is_not_blamed_on_the_initramfs(tmp_path) -> None:
+    """modprobe.d asks for video10, but the only node is OBS's own: the old hint stands."""
+    root = fake_sys(tmp_path, loopback=[("video5", "OBS Virtual Camera")])
+    reason = diagnose("/dev/video10", root, fake_modprobe(tmp_path, FOUR))
+    assert "update-initramfs" not in reason and "a node of its own" in reason
