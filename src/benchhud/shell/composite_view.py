@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QMouseEvent, QPixmap, QResizeEvent
+from PySide6.QtGui import QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
-from benchhud.shell.qt_image import bgr_to_qimage
+from benchhud.shell.qt_image import bgr_to_fitted_pixmap
 
 _PLACEHOLDER = (
     "benchhud — composite / preview area\n\n"
@@ -29,7 +29,7 @@ class CompositeView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._source_pixmap: QPixmap | None = None
+        self._frame: np.ndarray | None = None
 
         self._label = QLabel(_PLACEHOLDER)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -42,38 +42,33 @@ class CompositeView(QWidget):
 
     @property
     def has_frame(self) -> bool:
-        return self._source_pixmap is not None
+        return self._frame is not None
 
     def show_frame(self, frame: np.ndarray | None) -> None:
         """Display a BGR frame. ``None`` keeps whatever is already shown."""
         if frame is None:
             return
-        self._source_pixmap = QPixmap.fromImage(bgr_to_qimage(frame))
+        self._frame = frame  # kept, not copied: redrawn from on resize and show
         self._render()
 
     def _render(self) -> None:
-        if self._source_pixmap is None:
+        # Nothing is drawn while the view is hidden; showEvent catches it up (#347).
+        if self._frame is None or not self.isVisible():
             return
-        target = self._label.size()
-        if target.isEmpty():
-            self._label.setPixmap(self._source_pixmap)
-        else:
-            self._label.setPixmap(
-                self._source_pixmap.scaled(
-                    target,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
+        self._label.setPixmap(bgr_to_fitted_pixmap(self._frame, self._label.size()))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._render()
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self._render()
+
     def frame_point(self, pos: QPointF) -> tuple[float, float] | None:
         """Where a point in this widget falls on the frame, or None if off it."""
         shown = self._label.pixmap()
-        if self._source_pixmap is None or shown is None or shown.isNull():
+        if self._frame is None or shown is None or shown.isNull():
             return None
         local = self._label.mapFrom(self, pos.toPoint())
         left = (self._label.width() - shown.width()) / 2.0
@@ -81,8 +76,8 @@ class CompositeView(QWidget):
         x, y = local.x() - left, local.y() - top
         if not (0 <= x < shown.width() and 0 <= y < shown.height()):
             return None
-        source = self._source_pixmap
-        return x * source.width() / shown.width(), y * source.height() / shown.height()
+        height, width = self._frame.shape[:2]
+        return x * width / shown.width(), y * height / shown.height()
 
     def set_picking(self, picking: bool) -> None:
         """A crosshair while a click is wanted."""

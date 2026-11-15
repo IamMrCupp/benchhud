@@ -18,10 +18,12 @@ from benchhud.output.v4l2 import (
     V4L2_BUF_TYPE_VIDEO_OUTPUT,
     V4L2_FIELD_NONE,
     V4L2_FORMAT_SIZE,
+    V4L2_PIX_FMT_BGR24,
     V4L2_PIX_FMT_RGB24,
     VIDIOC_S_FMT,
     V4l2LoopbackSink,
     _LoopbackFd,
+    open_loopback_device,
     pack_v4l2_format,
     unpack_v4l2_format,
 )
@@ -30,9 +32,16 @@ from benchhud.output.v4l2 import (
 class _FakeDevice:
     """Stand-in for an opened loopback node: records the bytes written to it."""
 
-    def __init__(self, device: str = "/dev/video10", width: int = 2, height: int = 2):
+    def __init__(
+        self,
+        device: str = "/dev/video10",
+        width: int = 2,
+        height: int = 2,
+        pixelformat: int = V4L2_PIX_FMT_RGB24,
+    ):
         self.device = device
         self.size = (width, height)
+        self.pixelformat = pixelformat
         self.writes: list[bytes] = []
         self.close_count = 0
 
@@ -43,8 +52,10 @@ class _FakeDevice:
         self.close_count += 1
 
 
-def _sink_with_fake(width: int = 2, height: int = 2) -> tuple[V4l2LoopbackSink, _FakeDevice]:
-    device = _FakeDevice(width=width, height=height)
+def _sink_with_fake(
+    width: int = 2, height: int = 2, pixelformat: int = V4L2_PIX_FMT_RGB24
+) -> tuple[V4l2LoopbackSink, _FakeDevice]:
+    device = _FakeDevice(width=width, height=height, pixelformat=pixelformat)
     sink = V4l2LoopbackSink("/dev/video10", width, height, device_factory=lambda d, w, h: device)
     return sink, device
 
@@ -65,6 +76,15 @@ def test_vidioc_s_fmt_matches_the_kernel_encoding() -> None:
 
 def test_rgb24_fourcc() -> None:
     assert int.from_bytes(b"RGB3", "little") == V4L2_PIX_FMT_RGB24
+
+
+def test_bgr24_fourcc() -> None:
+    assert int.from_bytes(b"BGR3", "little") == V4L2_PIX_FMT_BGR24
+
+
+def test_pack_carries_the_pixel_format_asked_for() -> None:
+    payload = pack_v4l2_format(1280, 720, V4L2_PIX_FMT_BGR24)
+    assert unpack_v4l2_format(payload) == (1280, 720, V4L2_PIX_FMT_BGR24)
 
 
 def test_pack_places_fields_at_the_kernel_offsets() -> None:
@@ -222,3 +242,143 @@ def test_sink_takes_a_non_contiguous_frame() -> None:
     wide[0, 2] = (4, 5, 6)
     sink.send(wide[:, ::2])
     assert bytes(device.writes[0]) == bytes([3, 2, 1, 6, 5, 4])
+
+
+# --- BGR24 first, RGB24 if the node says so (#347) ----------------------------
+
+
+def _known_frame() -> np.ndarray:
+    """Four pixels with a different value in every channel, so a swap can't hide."""
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    frame[0, 0] = (10, 20, 30)  # B, G, R
+    frame[0, 1] = (255, 0, 0)  # blue
+    frame[1, 0] = (0, 255, 0)  # green
+    frame[1, 1] = (0, 0, 255)  # red
+    return frame
+
+
+def _decode_to_rgb(written: bytes, pixelformat: int) -> np.ndarray:
+    """What a reader that honours the node's fourcc sees, as RGB."""
+    pixels = np.frombuffer(written, dtype=np.uint8).reshape(2, 2, 3)
+    return pixels[:, :, ::-1] if pixelformat == V4L2_PIX_FMT_BGR24 else pixels
+
+
+def test_a_bgr_node_gets_the_frame_bytes_as_they_are() -> None:
+    sink, device = _sink_with_fake(pixelformat=V4L2_PIX_FMT_BGR24)
+    frame = _known_frame()
+
+    sink.send(frame)
+
+    assert sink.swaps_channels is False
+    assert bytes(device.writes[0]) == frame.tobytes()
+
+
+def test_an_rgb_node_still_gets_rgb() -> None:
+    sink, device = _sink_with_fake(pixelformat=V4L2_PIX_FMT_RGB24)
+
+    sink.send(_known_frame())
+
+    assert sink.swaps_channels is True
+    assert bytes(device.writes[0]) == bytes([30, 20, 10, 0, 0, 255, 0, 255, 0, 255, 0, 0])
+
+
+def test_both_node_formats_carry_the_same_picture() -> None:
+    """Read back by its fourcc, either node shows the frame's own colours."""
+    frame = _known_frame()
+    expected_rgb = frame[:, :, ::-1]
+
+    for pixelformat in (V4L2_PIX_FMT_BGR24, V4L2_PIX_FMT_RGB24):
+        sink, device = _sink_with_fake(pixelformat=pixelformat)
+        sink.send(frame)
+        seen = _decode_to_rgb(bytes(device.writes[0]), pixelformat)
+        assert np.array_equal(seen, expected_rgb)
+
+
+def test_sink_refuses_a_node_in_another_format() -> None:
+    """Writing 24-bit frames into a YUYV node would be garbage, not a picture."""
+    yuyv = int.from_bytes(b"YUYV", "little")
+    device = _FakeDevice(pixelformat=yuyv)
+
+    with pytest.raises(RuntimeError, match="not BGR24 or RGB24"):
+        V4l2LoopbackSink("/dev/video10", 2, 2, device_factory=lambda d, w, h: device)
+
+    assert device.close_count == 1
+
+
+class _FakeNode:
+    """Answers VIDIOC_S_FMT the way a loopback node does: with what it settled on."""
+
+    def __init__(self, monkeypatch, answer) -> None:
+        fcntl = pytest.importorskip("fcntl")
+        self.asked: list[int] = []
+        self._answer = answer
+        self._read_fd, self.fd = os.pipe()
+        self.closed = False
+        monkeypatch.setattr(os, "open", lambda path, flags: self.fd)
+        monkeypatch.setattr(fcntl, "ioctl", self._ioctl)
+
+    def _ioctl(self, fd: int, request: int, payload: bytes) -> bytes:
+        assert (fd, request) == (self.fd, VIDIOC_S_FMT)
+        width, height, wanted = unpack_v4l2_format(payload)
+        self.asked.append(wanted)
+        return pack_v4l2_format(width, height, self._answer(wanted))
+
+    def still_open(self) -> bool:
+        try:
+            os.fstat(self.fd)
+        except OSError:
+            return False
+        return True
+
+    def cleanup(self) -> None:
+        os.close(self._read_fd)
+        if self.still_open():
+            os.close(self.fd)
+
+
+def test_open_asks_for_bgr_first_and_takes_it(monkeypatch) -> None:
+    node = _FakeNode(monkeypatch, answer=lambda wanted: wanted)
+    try:
+        device = open_loopback_device("/dev/video10", 1280, 720)
+        assert node.asked == [V4L2_PIX_FMT_BGR24]
+        assert device.pixelformat == V4L2_PIX_FMT_BGR24
+        device.close()
+    finally:
+        node.cleanup()
+
+
+def test_open_follows_a_node_that_answers_rgb(monkeypatch) -> None:
+    """A node holding its format (a reader attached, keep_format) keeps RGB24."""
+    node = _FakeNode(monkeypatch, answer=lambda wanted: V4L2_PIX_FMT_RGB24)
+    try:
+        device = open_loopback_device("/dev/video10", 1280, 720)
+        assert node.asked == [V4L2_PIX_FMT_BGR24]  # the answer was usable; no second ask
+        assert device.pixelformat == V4L2_PIX_FMT_RGB24
+        device.close()
+    finally:
+        node.cleanup()
+
+
+def test_open_falls_back_to_asking_for_rgb(monkeypatch) -> None:
+    yuyv = int.from_bytes(b"YUYV", "little")
+    node = _FakeNode(
+        monkeypatch, answer=lambda wanted: wanted if wanted == V4L2_PIX_FMT_RGB24 else yuyv
+    )
+    try:
+        device = open_loopback_device("/dev/video10", 1280, 720)
+        assert node.asked == [V4L2_PIX_FMT_BGR24, V4L2_PIX_FMT_RGB24]
+        assert device.pixelformat == V4L2_PIX_FMT_RGB24
+        device.close()
+    finally:
+        node.cleanup()
+
+
+def test_open_gives_up_on_a_node_with_neither_format(monkeypatch) -> None:
+    yuyv = int.from_bytes(b"YUYV", "little")
+    node = _FakeNode(monkeypatch, answer=lambda wanted: yuyv)
+    try:
+        with pytest.raises(RuntimeError, match="refused BGR24 and RGB24"):
+            open_loopback_device("/dev/video10", 1280, 720)
+        assert node.still_open() is False  # no leaked descriptor
+    finally:
+        node.cleanup()

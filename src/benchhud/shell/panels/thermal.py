@@ -12,7 +12,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QPixmap, QResizeEvent
+from PySide6.QtGui import QPainter, QPixmap, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from benchhud.overlay.composite import RangeTracker, colorize
@@ -144,7 +144,8 @@ class ThermalPanel(Panel):
             self._render()
 
     def _render(self) -> None:
-        if self._source_pixmap is None:
+        # A closed or tabbed-away dock draws nothing; showEvent catches it up (#347).
+        if self._source_pixmap is None or not self.isVisible():
             return
         pixmap = self._source_pixmap
         if self._paused:
@@ -163,4 +164,8 @@ class ThermalPanel(Panel):
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
+        self._render()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
         self._render()
