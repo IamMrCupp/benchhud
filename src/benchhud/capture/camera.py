@@ -9,6 +9,12 @@ crash the shell, so the constructor never raises and :meth:`read` returns
 ``None`` until the device shows up. :attr:`is_open` and :attr:`last_error` say
 why, for the status bar.
 
+On Linux a ``/dev/...`` path is opened with OpenCV's V4L2 backend (#377). Left
+to choose, OpenCV 5 opens ``/dev/video4`` with FFmpeg, which refuses the size
+and format requests and runs the camera in whatever mode it was left in.
+:meth:`open` and :meth:`read` check what the camera really sends and log it
+when it isn't what was asked for.
+
 The capture object is created via an injected factory so tests exercise every
 path — closed device, open-but-no-frame, resolution reporting — with no camera.
 
@@ -21,6 +27,8 @@ on the bench costs about 8 ms for a 1080p frame against 28 ms for the full one.
 
 from __future__ import annotations
 
+import logging
+import sys
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -33,7 +41,10 @@ _CAP_PROP_FRAME_HEIGHT = 4
 _CAP_PROP_FOURCC = 6
 _CAP_PROP_FORMAT = 8
 _CAP_PROP_CONVERT_RGB = 16
+_CAP_V4L2 = 200
 _FOURCC_MJPG = 0x47504A4D  # "MJPG", little-endian
+
+_log = logging.getLogger(__name__)
 
 #: The live frame is never decoded narrower than this: the test pattern's
 #: width, and half of 1080p.
@@ -101,10 +112,32 @@ def parse_device(device: int | str) -> int | str:
     return int(text) if text.lstrip("-").isdigit() else text
 
 
+def open_arguments(device: int | str, platform: str | None = None) -> tuple[int | str, ...]:
+    """What to call ``cv2.VideoCapture`` with for ``device`` on ``platform``.
+
+    A Linux device path names the V4L2 backend (#377): OpenCV's own pick for
+    ``/dev/video4`` is FFmpeg, which ignores every ``set()``. Indexes, and
+    everything on macOS and Windows, stay with OpenCV's choice.
+    """
+    platform = sys.platform if platform is None else platform
+    if platform.startswith("linux") and isinstance(device, str) and device.startswith("/dev/"):
+        return (device, _CAP_V4L2)
+    return (device,)
+
+
+def fourcc_text(value: float) -> str:
+    """A cv2 fourcc property as text: ``"MJPG"``, or ``"?"`` when it isn't one."""
+    try:
+        text = int(value).to_bytes(4, "little").decode("ascii").strip()
+    except (OverflowError, ValueError):  # negative, too big, or not ASCII
+        return "?"
+    return text if text.isprintable() and text else "?"
+
+
 def _default_factory(device: int | str) -> Capture:
     import cv2
 
-    return cv2.VideoCapture(device)
+    return cv2.VideoCapture(*open_arguments(device))
 
 
 class CameraFrameSource:
@@ -160,16 +193,37 @@ class CameraFrameSource:
         self._last_error = None
         if self._requested is not None:
             self._request_size(capture, self._requested)
-        self._size = (
-            int(capture.get(_CAP_PROP_FRAME_WIDTH)),
-            int(capture.get(_CAP_PROP_FRAME_HEIGHT)),
-        )
         self.size_note = None
-        if self._requested is not None and self._size != self._requested:
-            want, got = self._requested, self._size
-            self.size_note = f"asked for {want[0]}x{want[1]}, the camera gave {got[0]}x{got[1]}"
+        self._delivered(
+            (int(capture.get(_CAP_PROP_FRAME_WIDTH)), int(capture.get(_CAP_PROP_FRAME_HEIGHT)))
+        )
         self._compressed = self._reduced_live and self._request_compressed(capture)
+        backend = getattr(capture, "getBackendName", None)
+        _log.info(
+            "camera %s opened: %dx%d %s, backend %s%s",
+            self._device,
+            *self._size,
+            fourcc_text(capture.get(_CAP_PROP_FOURCC)),
+            backend() if backend is not None else "?",
+            ", compressed frames" if self._compressed else "",
+        )
         return True
+
+    def _delivered(self, size: tuple[int, int]) -> None:
+        """Record the size the camera is sending, and say when it isn't the one asked for.
+
+        Called with the driver's answer at open and again with the first frame
+        that disagrees with it: the frame is what the camera really delivered.
+        A 0x0 answer is a driver that doesn't know yet, not a refusal.
+        """
+        self._size = size
+        note = None
+        if self._requested is not None and size != self._requested and size != (0, 0):
+            want = self._requested
+            note = f"asked for {want[0]}x{want[1]}, the camera gave {size[0]}x{size[1]}"
+            if note != self.size_note:
+                _log.warning("camera %s: %s", self._device, note)
+        self.size_note = note
 
     @staticmethod
     def _request_compressed(capture: Capture) -> bool:
@@ -269,7 +323,8 @@ class CameraFrameSource:
         self._last_error = None
         # Trust the frame over the driver's advertised resolution: some UVC
         # cameras report 0x0 until the first successful grab.
-        self._size = (frame.shape[1], frame.shape[0])
+        if (frame.shape[1], frame.shape[0]) != self._size:
+            self._delivered((frame.shape[1], frame.shape[0]))
         self._last_frame = frame
         self.decodes += 1
         return frame
@@ -300,11 +355,12 @@ class CameraFrameSource:
         self._last_error = None
         height, width = frame.shape[:2]
         if factor == 1:
-            self._size = (width, height)
+            if (width, height) != self._size:
+                self._delivered((width, height))
         elif (-(-self._size[0] // factor), -(-self._size[1] // factor)) != (width, height):
             # The driver's advertised size was wrong; learn it from a full decode.
             full = cv2.imdecode(data, cv2.IMREAD_COLOR)
-            self._size = (full.shape[1], full.shape[0])
+            self._delivered((full.shape[1], full.shape[0]))
         self._last_jpeg = data
         self._last_frame = frame
         self.decodes += 1
