@@ -138,7 +138,7 @@ def test_probing_reports_nothing_when_it_cant_ask() -> None:
     assert found[0] == (3840, 2160)
 
 
-def _built_scope(monkeypatch, size, modes):
+def _built_scope(monkeypatch, size, modes, **kwargs):
     import benchhud.shell.main_window as mw
 
     asked = {}
@@ -150,7 +150,7 @@ def _built_scope(monkeypatch, size, modes):
     monkeypatch.setattr(mw, "CameraFrameSource", Recorder)
     monkeypatch.setattr(mw, "probed_modes", lambda _d: modes)
     monkeypatch.setattr(mw, "FallbackFrameSource", lambda *a, **k: None)
-    mw.scope_source_for("/dev/v4l/by-id/usb-Elgato_Cam_Link_4K-video-index0", (), size)
+    mw.scope_source_for("/dev/v4l/by-id/usb-Elgato_Cam_Link_4K-video-index0", (), size, **kwargs)
     return asked
 
 
@@ -166,6 +166,12 @@ def test_a_configured_size_is_left_alone(monkeypatch) -> None:
 
 def test_unreadable_modes_leave_it_to_the_camera(monkeypatch) -> None:
     assert _built_scope(monkeypatch, None, [])["size"] is None
+
+
+def test_the_reduced_live_setting_reaches_the_camera(monkeypatch) -> None:
+    modes = parse_formats(CAM_LINK)
+    assert _built_scope(monkeypatch, None, modes)["reduced_live"] is True
+    assert _built_scope(monkeypatch, None, modes, reduced_live=False)["reduced_live"] is False
 
 
 class Scanner:

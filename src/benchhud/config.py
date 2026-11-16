@@ -66,6 +66,10 @@ class ScopePanelConfig:
     # The resolution to ask the camera for (#247); 0 x 0 takes its default.
     width: int = 0
     height: int = 0
+    # Decode the camera's MJPEG small for the live view (#349): less CPU, a softer
+    # live picture. Off decodes every frame at full size. Snapshots are full size
+    # either way (#381).
+    reduced_live: bool = True
 
 
 @dataclass
@@ -379,7 +383,9 @@ class Config:
 
         panels_d = data.get("panels", {})
         _apply(
-            cfg.panels.scope, panels_d.get("scope", {}), ("enabled", "device", "width", "height")
+            cfg.panels.scope,
+            panels_d.get("scope", {}),
+            ("enabled", "device", "width", "height", "reduced_live"),
         )
         _apply(cfg.panels.thermal, panels_d.get("thermal", {}), ("enabled", "device", "reset_port"))
         _apply(

@@ -124,6 +124,15 @@ class PreferencesDialog(QDialog):
             "size under that. MJPG at the chosen size."
         )
         self.scope_combo.currentIndexChanged.connect(lambda _i: self._fill_resolutions())
+        # The reduced live decode (#349) made optional (#381).
+        self.scope_reduced_live = QCheckBox("Decode the live view at reduced size (less CPU)")
+        self.scope_reduced_live.setToolTip(
+            "On: a 1080p or 4K MJPG camera is decoded at 960x540 for the live view "
+            "and the stream, which costs much less CPU and looks softer. "
+            "Off: every frame is decoded at full size. "
+            "Capture to job is full size either way."
+        )
+        self.scope_reduced_live.setChecked(self._config.panels.scope.reduced_live)
         self.thermal_combo = QComboBox()
         self.serial_combo = QComboBox()
         self.rescan_button = QPushButton("Rescan")
@@ -134,6 +143,7 @@ class PreferencesDialog(QDialog):
         grow_fields(form)
         form.addRow("Scope camera", self.scope_combo)
         form.addRow("Resolution", self.scope_resolution)
+        form.addRow("", self.scope_reduced_live)
         form.addRow("Thermal camera", self.thermal_combo)
         form.addRow("Instrument port", self.serial_combo)
         # The switch Preferences never had (#264): without it, telemetry could
@@ -572,6 +582,7 @@ class PreferencesDialog(QDialog):
         width, height = self.scope_size
         self._config.panels.scope.width = width
         self._config.panels.scope.height = height
+        self._config.panels.scope.reduced_live = self.scope_reduced_live.isChecked()
         self._config.panels.thermal.device = self.thermal_combo.currentData() or ""
         # Picking a thermal camera is what turns thermal on; "(none)" turns it off.
         self._config.panels.thermal.enabled = bool(self._config.panels.thermal.device)

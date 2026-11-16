@@ -372,6 +372,7 @@ thermal_device = ""        # e.g. "/dev/video13": the thermal alone (blank = off
 [panels.scope]
 enabled = true
 device  = "/dev/video4"    # your scope cam
+reduced_live = true        # decode the live view small; false = full size (see below)
 
 [panels.thermal]
 enabled = true
@@ -387,6 +388,37 @@ baud    = 115200
 > device for that size and **refuses to stream if the driver adjusts it**
 > (rather than silently sending desynced frames) — if output won't open, check
 > the sizes agree.
+
+### Live decode size: CPU against sharpness
+
+`panels.scope.reduced_live` (Preferences → Devices → "Decode the live view at
+reduced size") decides how an MJPG scope camera is decoded for the live view and
+the stream. It is on by default.
+
+- **On:** a 1080p or 4K camera is decoded at 960x540. A camera at 1280x720 or
+  smaller, or one that isn't sending MJPG, is left alone.
+- **Off:** every frame is decoded at the camera's full size, as it was up to 0.12.6.
+
+Capture to job and capture reference save the full-size frame either way.
+
+Measured on the reference bench (Cam Link 4K at 1920x1080 MJPG, 1280x720 output
+at 15 fps, thermal and both feeds on, OBS open), both holding 15.6 fps:
+
+| `reduced_live` | benchhud CPU | Scope feed sharpness (Laplacian variance) |
+|---|---|---|
+| `false` (full-size decode) | 433% of a core | 27.9 |
+| `true` | 249% of a core | 12.8 |
+
+With it on, a 720p stream is scaled up from 960x540 instead of down from 1080p:
+fine silkscreen and pad edges are softer, designators stay readable. Turn it off
+if the stream needs the detail and the box has the CPU to spare.
+
+```bash
+benchhud config set panels.scope.reduced_live false
+```
+
+Restart benchhud after changing it from the command line; Preferences applies it
+on save.
 
 ---
 

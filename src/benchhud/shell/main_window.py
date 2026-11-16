@@ -187,7 +187,10 @@ def camera_holder_check(
 
 
 def scope_source_for(
-    device: str, cameras: Sequence[CameraDevice] = (), size: tuple[int, int] | None = None
+    device: str,
+    cameras: Sequence[CameraDevice] = (),
+    size: tuple[int, int] | None = None,
+    reduced_live: bool = True,
 ) -> FallbackFrameSource:
     """The scope feed: the configured camera, or the synthetic pattern until it opens.
 
@@ -195,6 +198,7 @@ def scope_source_for(
     macOS, or simply wrong in the config must leave the shell usable — so we
     fall back rather than fail, keep retrying, and report why in ``status``.
     ``cameras`` is the current scan, used to resolve a Qt device id to an index.
+    ``reduced_live`` off decodes every live frame at full size (#381).
     """
     fallback = SyntheticFrameSource(960, 540)
     if not device.strip():
@@ -202,8 +206,9 @@ def scope_source_for(
     resolved = resolve_capture_device(device, cameras)
     if not (size and size[0] > 0 and size[1] > 0) and isinstance(resolved, str):
         size = auto_size(probed_modes(resolved))  # not OpenCV's 640x480 (#342)
-    # Decoded small for the live view, full size for snapshots (#349).
-    camera = CameraFrameSource(resolved, size=size, reduced_live=True)
+    # Decoded small for the live view, full size for snapshots (#349), unless
+    # the config asks for the full-size live picture (#381).
+    camera = CameraFrameSource(resolved, size=size, reduced_live=reduced_live)
     return FallbackFrameSource(
         camera,
         fallback,
@@ -284,6 +289,7 @@ class MainWindow(QMainWindow):
         self._scope_status: SourceStatus | None = None
         self._preview_device: str | None = None
         self._preview_size: tuple[int, int] = (0, 0)
+        self._preview_reduced_live = True
         self._thermal_pump: FramePump | None = None
         self._thermal_timer: QTimer | None = None
         self._thermal_source: FrameSource | None = None
@@ -1313,15 +1319,17 @@ class MainWindow(QMainWindow):
         scope = self._config.panels.scope
         device = scope.device
         size = (scope.width, scope.height)
+        reduced_live = scope.reduced_live
         if source_factory is None:
             cameras = self._scan_cameras()
             self._cameras = cameras
 
             def source_factory() -> FrameSource:
-                return scope_source_for(device, cameras, size)
+                return scope_source_for(device, cameras, size, reduced_live)
 
         self._preview_device = device
         self._preview_size = size
+        self._preview_reduced_live = reduced_live
         self._scope_source = source_factory()
         reader = LatestFrameReader(self._scope_source)
         self._pump = FramePump(reader, consumers=[self._on_scope_frame])
@@ -1355,6 +1363,7 @@ class MainWindow(QMainWindow):
         unchanged = (
             scope.device == self._preview_device
             and (scope.width, scope.height) == self._preview_size
+            and scope.reduced_live == self._preview_reduced_live
         )
         if self._pump is None or unchanged:
             return
