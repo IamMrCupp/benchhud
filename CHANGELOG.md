@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/IamMrCupp/benchhud/compare/v0.12.6...v0.13.0) (2026-11-16)
+
+
+### Features
+
+* **capture:** make the reduced live decode a setting, panels.scope.reduced_live, on by default ([840e6fd](https://github.com/IamMrCupp/benchhud/commit/840e6fd224e49bfbc1b81f456e1d07c94cabdf71))
+
 ## [0.12.6](https://github.com/IamMrCupp/benchhud/compare/v0.12.5...v0.12.6) (2026-11-15)
 
 
