@@ -14,6 +14,9 @@ dependencies = [
     "opencv-python>=4.10",
     "pyserial>=3.5",
     "PySide6>=6.8",
+    # The terminal panel's ConPTY backend (#203). MIT. Windows only: macOS and
+    # Linux use the standard library's pty.
+    "pywinpty>=3.0; sys_platform == 'win32'",
     "tomlkit>=0.13",
 ]
 

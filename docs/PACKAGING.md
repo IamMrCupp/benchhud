@@ -194,8 +194,9 @@ doesn't prove anything that needs Windows hardware:
 - **Virtual-camera output** (softcam) is wired but fake-backed until the DLL is
   built and registered (#124 B.2). The HUD falls back and says so in the
   status bar.
-- **The terminal panel** needs ConPTY (#203). On Windows the panel says it isn't
-  available yet.
+- **The terminal panel** is covered one layer down: the `windows-terminal` job
+  runs a real `cmd.exe` in a ConPTY pseudo-console under pytest. Nothing in CI
+  opens the panel itself, so the page in QtWebEngine on Windows is unchecked.
 
 The MSI is ad-hoc signed, so Windows SmartScreen warns on first run. Signing it
 properly needs a code-signing certificate in CI.
@@ -213,7 +214,8 @@ builds every package:
 - **Every PR and merge to `main`:** tests, lint, and the Ubuntu `.deb` with its
   clean-container install check. Docs-only changes skip CI.
 - **Every release, a manual run, or a PR labelled `full-ci`:** also the Windows
-  MSI (installed and start-checked) and the macOS app. Add the label to a PR that
+  MSI (installed and start-checked), the Windows terminal tests, and the macOS
+  app. Add the label to a PR that
   touches packaging, so a macOS- or Windows-only break shows up there rather than
   at the next release.
 

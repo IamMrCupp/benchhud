@@ -460,7 +460,7 @@ class PreferencesDialog(QDialog):
         form = QFormLayout(widget)
         grow_fields(form)
         if not TERMINAL_SUPPORTED:
-            form.addRow(QLabel("The terminal isn't available on Windows yet."))
+            form.addRow(QLabel("The terminal isn't available on this platform."))
             self.terminal_enabled.setEnabled(False)
         form.addRow(self.terminal_enabled)
         form.addRow("Shell", self.terminal_shell)

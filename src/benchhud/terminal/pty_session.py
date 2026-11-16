@@ -10,7 +10,8 @@ arrives whole, and handed to ``on_output`` from the reader thread. The caller
 owns thread safety on that side (:class:`~benchhud.terminal.host.TerminalHost`
 takes a lock).
 
-macOS and Linux only. Windows needs ConPTY, which is a separate backend.
+macOS and Linux only. Windows has its own backend:
+:mod:`~benchhud.terminal.conpty_session`.
 """
 
 from __future__ import annotations
@@ -29,19 +30,7 @@ import time
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 
-#: Variables the packaged app sets for its own bundled Python. Leaking them into
-#: the operator's shell would break their own ``python``.
-_STRIP_ENV = ("PYTHONHOME", "PYTHONPATH", "PYTHONEXECUTABLE", "PYTHONNOUSERSITE")
-
-
-def shell_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
-    """The environment for the shell: ours, minus the app's Python, plus a TERM."""
-    env = dict(base if base is not None else os.environ)
-    for key in _STRIP_ENV:
-        env.pop(key, None)
-    env["TERM"] = "xterm-256color"
-    env["COLORTERM"] = "truecolor"
-    return env
+from benchhud.terminal.env import shell_env
 
 
 def _max_fd() -> int:

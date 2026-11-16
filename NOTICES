@@ -40,6 +40,14 @@ pySerial
   https://github.com/pyserial/pyserial
   License: BSD 3-Clause
 
+pywinpty (Windows builds only)
+  https://github.com/andfoy/pywinpty
+  License: MIT
+
+  The pywinpty wheel bundles winpty (https://github.com/rprichard/winpty, MIT)
+  and Microsoft's OpenConsole and conpty.dll
+  (https://github.com/microsoft/terminal, MIT).
+
 tomlkit
   https://github.com/python-poetry/tomlkit
   License: MIT

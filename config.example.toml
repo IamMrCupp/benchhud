@@ -125,10 +125,10 @@ enabled = false
 port = 8780
 
 [terminal]
-# A terminal panel inside the app (your login shell, macOS and Linux). It runs on
+# A terminal panel inside the app, running your own shell. It runs on
 # the browser-source port above, loopback only. Off by default.
 enabled = false
-shell = ""             # empty = your login shell; or e.g. "/bin/zsh"
+shell = ""             # empty = your login shell (Windows: %COMSPEC%); or e.g. "/bin/zsh", "powershell.exe"
 # Also serve a read-only copy to OBS as a Browser source. The panel's Pause
 # button hides it mid-stream (it resumes from that moment, never replaying what
 # you typed while paused). The link carries a token, shown in Preferences.

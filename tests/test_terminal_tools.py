@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import ClassVar
 
 import pytest
@@ -182,7 +181,6 @@ def _window(qtbot, *, terminal: bool, target: str = "shell"):
     return window, spawned
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the terminal panel is POSIX-only")
 def test_with_the_terminal_on_the_command_waits_at_the_prompt(qtbot) -> None:
     window, spawned = _window(qtbot, terminal=True)
     try:
@@ -224,7 +222,6 @@ def test_with_no_terminal_anywhere_the_status_bar_says_so(qtbot, monkeypatch) ->
         window.close()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the terminal panel is POSIX-only")
 def test_a_serial_console_is_only_dropped_with_a_yes(qtbot) -> None:
     window, spawned = _window(qtbot, terminal=True, target="/dev/ttyUSB9")
     try:

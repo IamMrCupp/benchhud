@@ -211,6 +211,39 @@ jobs:
           path: dist/*.msi
           if-no-files-found: error
 
+  # The terminal's ConPTY backend (#203) against a real pseudo-console. The
+  # main suite runs on Linux, where those tests skip, so this is the only place
+  # they run. Just the Windows terminal tests, not the whole suite: the rest
+  # has never been run on Windows.
+  windows-terminal:
+    # Windows runners cost 2x Linux minutes, so this runs when the MSI does.
+    if: inputs.full || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Sync (frozen)
+        run: uv sync --frozen
+
+      # -rs lists every skip: a ConPTY test that skipped here didn't run anywhere.
+      - name: Pytest (the Windows terminal)
+        run: >
+          uv run pytest -v -rs
+          tests/test_terminal_windows.py
+          tests/test_terminal_tools.py::test_with_the_terminal_on_the_command_waits_at_the_prompt
+          tests/test_terminal_tools.py::test_a_serial_console_is_only_dropped_with_a_yes
+
   # The macOS app (#206): build it on every PR and check the built bundle
   # starts, like deb-verify and msi-verify. Ad-hoc signed: a Developer ID
   # signature needs the certificate in CI (#173), so the release build is still
