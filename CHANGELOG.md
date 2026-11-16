@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.1](https://github.com/IamMrCupp/benchhud/compare/v0.13.0...v0.13.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **capture:** open the scope with V4L2 on Linux so the size request is applied ([79df64a](https://github.com/IamMrCupp/benchhud/commit/79df64a8491f6139b404a1762a7e93ed88b36059))
+* **shell:** size the window against the largest screen, not Qt's primary one ([377948c](https://github.com/IamMrCupp/benchhud/commit/377948c8e39d12ebcb34489a1a87fd99fe21a0e0))
+
+
+### Documentation
+
+* **readme:** add bench screenshots and bring the status section up to date ([0752f30](https://github.com/IamMrCupp/benchhud/commit/0752f30e51785392aaaec4802cc88f01cee416b0))
+
 ## [0.13.0](https://github.com/IamMrCupp/benchhud/compare/v0.12.6...v0.13.0) (2026-11-16)
 
 
