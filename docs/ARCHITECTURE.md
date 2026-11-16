@@ -109,6 +109,14 @@ ticket system is a protocol with a fake, not a dependency.
   path logic; nothing renders. See [BOARDS.md](BOARDS.md).
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
+## Measuring it
+
+`scripts/bench_hud.py` runs this pipeline headless — the real `MainWindow`
+offscreen, a generated 1080p MJPEG clip for the scope, synthetic Y16 for the
+thermal, the loopback sink writing to nowhere — and reports output fps, CPU per
+thread, time per stage and peak RSS, as a table and as JSON. Run it before and
+after a perf change. See [BENCHMARK.md](BENCHMARK.md).
+
 ## The seams
 
 Every hardware boundary is a protocol with a tested fake. The bench work is
