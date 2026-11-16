@@ -256,6 +256,18 @@ THERMAL_RECOVERY_CHECK_S = 5.0
 THERMAL_RECOVERY_RESET_S = 60.0
 
 
+def largest_screen(screens):
+    """The screen with the most usable area, or None when there are none."""
+    best = None
+    best_area = -1
+    for screen in screens:
+        avail = screen.availableGeometry()
+        area = avail.width() * avail.height()
+        if area > best_area:
+            best, best_area = screen, area
+    return best
+
+
 class MainWindow(QMainWindow):
     """Top-level HUD window."""
 
@@ -528,8 +540,13 @@ class MainWindow(QMainWindow):
             self.restoreState(QByteArray.fromBase64(shell.layout.encode("ascii")))
 
     def _resize_within_screen(self, width: int, height: int) -> None:
-        """Resize to (width, height) but never larger than the screen; centre it."""
-        screen = QGuiApplication.primaryScreen()
+        """Resize to (width, height) but never larger than the biggest screen; centre it.
+
+        Sized against the biggest screen, not Qt's primary one: with two displays
+        the primary can be the small one, and clamping to it shrank a window
+        saved on the big display and wrote the smaller size back (#385).
+        """
+        screen = largest_screen(QGuiApplication.screens())
         if screen is not None:
             avail = screen.availableGeometry()
             width = min(width, avail.width())
