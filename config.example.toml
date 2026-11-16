@@ -41,6 +41,10 @@ device = "/dev/video4"
 # 4K works but decodes heavier.
 width = 0
 height = 0
+# Decode the camera's MJPEG at reduced size for the live view and the stream
+# (a 1080p or 4K camera becomes 960 x 540): much less CPU, a softer picture.
+# false decodes every frame at full size. Capture to job is full size either way.
+reduced_live = true
 
 [panels.thermal]
 # Sipeed T256s. Analysis uses the raw Y16 192x256 @ 25 fps stream.

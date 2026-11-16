@@ -307,3 +307,103 @@ def test_capture_to_job_without_a_camera_keeps_the_frame_it_has(qtbot) -> None:
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     window.scope_panel.update_frame(frame)
     assert window.capture_context().scope is frame
+
+
+# --- the setting that turns it off (#381) --------------------------------------
+
+
+def test_reduced_live_is_on_by_default_and_round_trips(tmp_path) -> None:
+    from benchhud import config as config_module
+
+    assert Config().panels.scope.reduced_live is True
+    config = Config()
+    config.panels.scope.reduced_live = False
+    path = config_module.save(config, tmp_path / "config.toml")
+    assert config_module.load(path).panels.scope.reduced_live is False
+
+
+def test_config_set_turns_it_off_and_on(tmp_path) -> None:
+    from benchhud import cli_config
+    from benchhud import config as config_module
+
+    path = str(tmp_path / "config.toml")
+    cli_config.set_value("panels.scope.reduced_live", "false", path)
+    assert config_module.load(path).panels.scope.reduced_live is False
+    cli_config.set_value("panels.scope.reduced_live", "true", path)
+    assert config_module.load(path).panels.scope.reduced_live is True
+
+
+@pytest.mark.parametrize(("setting", "live"), [(True, (540, 960, 3)), (False, (1080, 1920, 3))])
+def test_the_setting_decides_the_live_frame_size(qtbot, monkeypatch, setting, live) -> None:
+    import benchhud.shell.main_window as mw
+
+    captures: list[MjpegCapture] = []
+
+    class Camera(CameraFrameSource):
+        def __init__(self, device, **kwargs) -> None:
+            captures.append(MjpegCapture((1920, 1080)))
+            super().__init__(device, capture_factory=lambda _d: captures[-1], **kwargs)
+
+    monkeypatch.setattr(mw, "CameraFrameSource", Camera)
+    monkeypatch.setattr(mw, "probed_modes", lambda _d: [])
+    config = Config()
+    config.panels.scope.device = "/dev/video2"
+    config.panels.scope.reduced_live = setting
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    window._scan_cameras = lambda: []
+    window.start_preview()
+    try:
+        source = window._scope_source
+        frame = None
+        for _ in range(3):
+            frame = source.read()
+        assert frame.shape == live
+        assert source.snapshot().shape == (1080, 1920, 3)  # full size either way
+        # Off never asks the camera for compressed frames: 0.12.6's path.
+        asked = any(prop in (FORMAT, CONVERT_RGB) for prop, _ in captures[0].sets)
+        assert asked is setting
+    finally:
+        window.stop_preview()
+
+
+def test_changing_the_setting_reopens_the_scope(qtbot) -> None:
+    config = Config()
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    built: list[bool] = []
+
+    def factory():
+        built.append(config.panels.scope.reduced_live)
+        return SyntheticFrameSource(64, 48)
+
+    window.start_preview(factory)
+    try:
+        window.reconfigure_preview()
+        assert len(built) == 1  # nothing changed: left running
+        config.panels.scope.reduced_live = False
+        restarted: list[bool] = []
+        window.start_preview = lambda *a: restarted.append(True)  # type: ignore[method-assign]
+        window.reconfigure_preview()
+        assert restarted == [True]
+    finally:
+        window.stop_preview()
+
+
+def test_preferences_has_the_switch_and_saves_it(qtbot) -> None:
+    from benchhud.shell.preferences import PreferencesDialog
+
+    class Scanner:
+        def cameras(self):
+            return []
+
+        def serial_ports(self):
+            return []
+
+    config = Config()
+    dialog = PreferencesDialog(config, Scanner(), camera_modes=lambda _d: [])
+    qtbot.addWidget(dialog)
+    assert dialog.scope_reduced_live.isChecked()
+    dialog.scope_reduced_live.setChecked(False)
+    dialog.apply_to_config()
+    assert config.panels.scope.reduced_live is False
