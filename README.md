@@ -8,11 +8,17 @@ serial, and pushes the whole composite out as a virtual camera for OBS.
 It started as "I want to see which part is overheating without looking away from
 the scope" and turned into the bench's command center.
 
-> **Status: early.** Installable from each release (see *Install*), and verified
-> on real hardware for scope capture and macOS virtual-camera output into OBS.
-> The rest of the device-facing work (raw Y16 thermal, the OWON's write
-> commands, Windows virtual-camera output) is built and tested off-hardware and
-> waits on the bench. Not a daily driver yet.
+![A circuit board under the microscope, with the USB connector glowing orange where the thermal camera sees it running warm](docs/images/fusion.jpg)
+
+*The fused output: the USB connector is the warm part, so it's the part that
+glows — on the scope image, with the rest of the board left alone.*
+
+> **Status: running on the reference bench.** Scope capture, the thermal
+> overlay with real temperatures, and virtual-camera output into OBS all run
+> there on Ubuntu, and macOS virtual-camera output is verified on real hardware
+> too. Still off-hardware: the OWON's write commands. Not built yet: Windows
+> virtual-camera output (#124) and the Windows terminal panel (#203). Releases
+> land often, so expect the odd rough edge.
 
 ## What it does
 
@@ -62,6 +68,12 @@ the scope" and turned into the bench's command center.
 
 Everything lives in dockable panels — arrange the bench the way you work, and the
 layout sticks across restarts.
+
+![The benchhud window: thermal controls on the left, the fused scope view in the middle, the raw thermal feed and the meter on the right](docs/images/hud.png)
+
+*The HUD on the bench. Controls on the left, the fused view in the middle, the
+raw thermal feed and the meter on the right, the rest of the panels tabbed along
+the bottom.*
 
 ## How it works
 
@@ -122,13 +134,19 @@ The shop side runs separately, with its own installers (Linux service `.deb`,
 Windows and macOS tray apps, Docker, Kubernetes):
 [benchhud-intake](https://github.com/IamMrCupp/benchhud-intake) for tickets and
 [bench-parts](https://github.com/IamMrCupp/bench-parts) for parts inventory.
+[bench-recon](https://github.com/IamMrCupp/bench-recon) sits beside them as the
+system of record for hardware pentest engagements. Each one shows up as a panel
+in the HUD once you point benchhud at it, and
+[bench-suite](https://github.com/IamMrCupp/bench-suite) sets up the lot and
+wires them to each other in one go.
 
 ## Hardware
 
 benchhud isn't locked to specific gear — device paths are config — but it's
 developed against:
 
-- **Scope:** a UVC microscope camera (BTER 4K).
+- **Scope:** a UVC microscope camera (BTER 4K) — over USB, or its HDMI output
+  through a capture card (an Elgato Cam Link 4K on the reference bench).
 - **Thermal:** Sipeed T256s — 256×192 LWIR, raw Y16 for true temperatures.
 - **Instrument:** OWON SPM8104 (PSU + DMM) over SCPI serial.
 
