@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QRect
+
 from benchhud.config import Config
-from benchhud.shell.main_window import MainWindow
+from benchhud.shell import main_window
+from benchhud.shell.main_window import MainWindow, largest_screen
 
 
 def test_main_window_constructs(qtbot) -> None:
@@ -40,6 +43,46 @@ def test_window_clamps_to_screen(qtbot) -> None:
     screen = window.screen().availableGeometry()
     assert window.width() <= screen.width()
     assert window.height() <= screen.height()
+
+
+class _FakeScreen:
+    def __init__(self, x: int, y: int, width: int, height: int) -> None:
+        self._rect = QRect(x, y, width, height)
+
+    def availableGeometry(self) -> QRect:
+        return self._rect
+
+
+def test_largest_screen_is_picked_by_usable_area() -> None:
+    small = _FakeScreen(0, 404, 1707, 932)
+    big = _FakeScreen(1707, 0, 3072, 1682)
+    assert largest_screen([small, big]) is big
+    assert largest_screen([big, small]) is big
+    assert largest_screen([]) is None
+
+
+def test_saved_size_survives_a_small_first_screen(qtbot, monkeypatch) -> None:
+    # The bench: Qt lists the small display first, the HUD lives on the big one.
+    # The size saved there must not be cut down to the small display (#385).
+    screens = [_FakeScreen(0, 404, 1707, 932), _FakeScreen(1707, 0, 3072, 1682)]
+    monkeypatch.setattr(main_window.QGuiApplication, "screens", lambda: screens)
+    config = Config()
+    config.shell.window_width = 1762
+    config.shell.window_height = 1610
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    assert (window.width(), window.height()) == (1762, 1610)
+
+
+def test_window_clamps_to_the_largest_screen(qtbot, monkeypatch) -> None:
+    screens = [_FakeScreen(0, 0, 1707, 932), _FakeScreen(1707, 0, 3072, 1682)]
+    monkeypatch.setattr(main_window.QGuiApplication, "screens", lambda: screens)
+    config = Config()
+    config.shell.window_width = 99999
+    config.shell.window_height = 99999
+    window = MainWindow(config)
+    qtbot.addWidget(window)
+    assert (window.width(), window.height()) == (3072, 1682)
 
 
 def test_persist_captures_geometry_and_layout(qtbot) -> None:
