@@ -47,6 +47,48 @@ uvx briefcase package macOS app -p zip --no-notarize \
 This signs `build/benchhud/macos/app/benchhud.app` in place, with hardened runtime
 and the camera entitlement, and writes `dist/benchhud-<version>.app.zip`.
 
+### A notarized `.dmg`, for other Macs
+
+The zip above only works on the Mac that built it. On any other Mac, Gatekeeper
+blocks an app that Apple hasn't notarized. To hand benchhud to someone:
+
+```sh
+uvx briefcase package macOS app -p dmg \
+  --identity "Developer ID Application: AARON MICHAEL CUPP (C4MTP3Z42F)"
+```
+
+Briefcase signs the app, builds `dist/benchhud-<version>.dmg`, uploads it to
+Apple, waits for the verdict and staples the ticket to the `.dmg`. The first one
+took about ten minutes, most of it the upload and Apple's queue.
+
+It needs a notarization credential in the keychain, saved once per Mac. Briefcase
+looks for a profile named `briefcase-macOS-<team id>`:
+
+```sh
+xcrun notarytool store-credentials --team-id C4MTP3Z42F briefcase-macOS-C4MTP3Z42F
+```
+
+It asks for the developer Apple ID and an **app-specific password** (made at
+account.apple.com, under Sign-In and Security), not the Apple ID password. Keep
+that password in the password manager: Apple shows it once, and revokes it when
+the Apple ID password changes.
+
+If `store-credentials` fails with `403 ... A required agreement is missing or
+has expired`, the Apple ID and password are fine. Apple has updated the Developer
+Program License Agreement and the account holder has to accept it at
+developer.apple.com/account. After accepting, the notary service took about six
+minutes to catch up.
+
+Check the result:
+
+```sh
+xcrun stapler validate dist/benchhud-<version>.dmg
+spctl -a -vv -t open --context context:primary-signature dist/benchhud-<version>.dmg
+```
+
+`spctl` should say `accepted` and `source=Notarized Developer ID`. Before
+notarization the same check says `rejected`, `source=Unnotarized Developer ID`.
+
 ### The JIT entitlement (terminal panel)
 
 The terminal panel draws in QtWebEngine, and Chromium's JavaScript engine needs
@@ -272,4 +314,4 @@ sources.
   built, checked to start, and uploaded as **benchhud-macos**. That one is
   ad-hoc signed, so it isn't the build to install: the camera grant follows the
   signature. Sign locally with the Developer ID for that (above).
-- **Not done yet:** notarization and a `.dmg` for handing to other people (#173).
+- **Not done yet:** signing and notarizing in CI, so a release carries the `.dmg`. Today it's a local step (above, #173).
