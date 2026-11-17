@@ -152,8 +152,26 @@ which also brings updates with `brew upgrade`:
 brew tap iammrcupp/bench
 brew install --cask benchhud
 ```
- For OBS, see [MACOS-SETUP.md](docs/MACOS-SETUP.md);
+
+For OBS, see [MACOS-SETUP.md](docs/MACOS-SETUP.md);
 to build and sign your own, [PACKAGING.md](docs/PACKAGING.md).
+
+**The whole bench on a Mac (optional).** The same tap has a `bench-suite` cask:
+benchhud, the benchhud-intake and bench-parts menu-bar apps, and `bench-setup`.
+
+```sh
+brew tap iammrcupp/bench
+brew trust --tap iammrcupp/bench
+brew install --cask bench-suite
+bench-setup
+```
+
+`bench-setup` sets one password for the two menu-bar apps, makes a token each,
+and writes the URLs and tokens into benchhud's config. `bench-setup doctor`
+checks the result, including that macOS has OBS's camera extension turned on.
+macOS asks before the first launch of a download, so `bench-setup` will tell
+you to open each menu-bar app once from Applications, then run it again.
+Nothing here needs it. See [bench-suite](https://github.com/IamMrCupp/bench-suite#on-a-mac).
 
 **From source (any OS).** `uv run benchhud`; see *Development* below.
 
