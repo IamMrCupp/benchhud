@@ -181,7 +181,8 @@ Windows and macOS tray apps, Docker, Kubernetes):
 [bench-parts](https://github.com/IamMrCupp/bench-parts) for parts inventory.
 [bench-recon](https://github.com/IamMrCupp/bench-recon) sits beside them as the
 system of record for hardware pentest engagements. Each one shows up as a panel
-in the HUD once you point benchhud at it — by hand in Preferences, or with
+in the HUD once you point benchhud at it — by hand in Preferences (**Find on
+this machine** fills in the address of one running on the same computer), or with
 [bench-suite](https://github.com/IamMrCupp/bench-suite), above.
 
 ## Hardware
