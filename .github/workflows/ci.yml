@@ -244,10 +244,11 @@ jobs:
           tests/test_terminal_tools.py::test_with_the_terminal_on_the_command_waits_at_the_prompt
           tests/test_terminal_tools.py::test_a_serial_console_is_only_dropped_with_a_yes
 
-  # The macOS app (#206): build it on every PR and check the built bundle
-  # starts, like deb-verify and msi-verify. Ad-hoc signed: a Developer ID
-  # signature needs the certificate in CI (#173), so the release build is still
-  # signed on the maintainer's Mac (docs/PACKAGING.md).
+  # The macOS app (#206): build it and check the built bundle starts, like
+  # deb-verify and msi-verify. A release or a run by hand signs it with the
+  # Developer ID and has Apple notarize it (#173), so the .dmg opens on any Mac
+  # with no Gatekeeper warning. A pull request stays ad-hoc signed: it doesn't
+  # get the certificate.
   macos-app:
     # macOS and Windows runners cost 10x and 2x Linux minutes, so this runs
     # for releases, by hand, or on a PR labelled full-ci, not on every push.
@@ -255,6 +256,8 @@ jobs:
     runs-on: macos-latest
     env:
       QT_QPA_PLATFORM: offscreen
+      # Sign for real only off pull requests, and only where the certificate is.
+      SIGN: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -317,9 +320,92 @@ jobs:
           grep -q 'base_url = "http://127.0.0.1:8401"' "$BENCHHUD_CONFIG"
 
       - name: Package (ad-hoc signed)
+        if: env.SIGN != 'true'
         run: briefcase package macOS app --adhoc-sign -p zip --no-input
 
+      # The Developer ID certificate goes into a keychain made for this run.
+      # Nothing here echoes a secret; the files are removed at the end.
+      - name: Signing certificate
+        if: env.SIGN == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          pass=$(openssl rand -hex 24)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pass" "$keychain" >/dev/null
+          # Searched first, with the login keychain kept for the notary profile.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"\(Developer ID Application: .*\)"$/\1/p' | head -1)
+          test -n "$identity" || { echo "no Developer ID Application identity in the certificate"; exit 1; }
+          team=$(printf '%s' "$identity" | sed -n 's/.*(\([A-Z0-9]*\))$/\1/p')
+          test -n "$team"
+          echo "IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "TEAM_ID=$team" >> "$GITHUB_ENV"
+          echo "signing as: $identity"
+
+      # Briefcase notarizes with the keychain profile briefcase-macOS-<team id>
+      # (docs/PACKAGING.md). In CI that profile is an App Store Connect API key.
+      - name: Notary credentials
+        if: env.SIGN == 'true'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/AuthKey.p8"
+          # The key as pasted from the .p8 file, or base64 of it.
+          case "$APPLE_API_KEY_P8" in
+            *"BEGIN PRIVATE KEY"*) printf '%s\n' "$APPLE_API_KEY_P8" > "$key" ;;
+            *) printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$key" ;;
+          esac
+          grep -q "BEGIN PRIVATE KEY" "$key" || { echo "APPLE_API_KEY_P8 isn't a .p8 key"; exit 1; }
+          xcrun notarytool store-credentials "briefcase-macOS-$TEAM_ID" \
+            --key "$key" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" >/dev/null
+          rm -f "$key"
+          echo "notary profile briefcase-macOS-$TEAM_ID stored"
+
+      - name: Package, sign and notarize the .dmg
+        if: env.SIGN == 'true'
+        run: briefcase package macOS app -p dmg --identity "$IDENTITY" --no-input
+
+      # What a stranger's Mac will decide: stapled ticket, accepted by Gatekeeper.
+      - name: Gatekeeper accepts the .dmg
+        if: env.SIGN == 'true'
+        run: |
+          set -euo pipefail
+          dmg=$(ls dist/*.dmg | head -1)
+          xcrun stapler validate "$dmg"
+          spctl -a -vv -t open --context context:primary-signature "$dmg" 2>&1 | tee "$RUNNER_TEMP/spctl.txt"
+          grep -q "accepted" "$RUNNER_TEMP/spctl.txt"
+          grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/spctl.txt"
+          # And the app inside it, the way it lands in /Applications.
+          mount=$(mktemp -d)
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount" >/dev/null
+          codesign --verify --deep --strict "$mount/benchhud.app"
+          spctl -a -vv -t exec "$mount/benchhud.app" 2>&1 | tee "$RUNNER_TEMP/spctl-app.txt"
+          grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/spctl-app.txt"
+          for f in LICENSE NOTICES; do test -s "$mount/benchhud.app/Contents/Resources/app/$f"; done
+          hdiutil detach "$mount" >/dev/null
+
+      - name: Forget the certificate
+        if: always() && env.SIGN == 'true'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/AuthKey.p8"
+
       - name: The zip carries LICENSE and NOTICES
+        if: env.SIGN != 'true'
         run: |
           zip=$(ls dist/*.zip | head -1)
           for f in LICENSE NOTICES; do
@@ -331,7 +417,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: benchhud-macos
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.dmg
           if-no-files-found: error
 
   # Install it silently on a clean runner and check it starts, like deb-verify.

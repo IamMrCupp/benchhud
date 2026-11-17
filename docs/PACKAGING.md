@@ -49,6 +49,17 @@ and the camera entitlement, and writes `dist/benchhud-<version>.app.zip`.
 
 ### A notarized `.dmg`, for other Macs
 
+Every release carries one, built by CI: `benchhud-<version>.dmg`, signed with
+the Developer ID, notarized and stapled, then checked with `spctl` the way
+Gatekeeper will on someone else's Mac. The rest of this section is how to make
+one by hand.
+
+CI signs with five repository secrets: `APPLE_CERTIFICATE` (the Developer ID
+Application certificate and key as a base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
+and an App Store Connect API key for the notary service — `APPLE_API_KEY` (the
+key id), `APPLE_API_ISSUER` and `APPLE_API_KEY_P8` (the `.p8` file's contents).
+Pull requests never see them and stay ad-hoc signed.
+
 The zip above only works on the Mac that built it. On any other Mac, Gatekeeper
 blocks an app that Apple hasn't notarized. To hand benchhud to someone:
 
@@ -257,7 +268,8 @@ builds every package:
   clean-container install check. Docs-only changes skip CI.
 - **Every release, a manual run, or a PR labelled `full-ci`:** also the Windows
   MSI (installed and start-checked), the Windows terminal tests, and the macOS
-  app. Add the label to a PR that
+  app. A release or a manual run signs and notarizes it; a labelled PR builds it
+  ad-hoc signed. Add the label to a PR that
   touches packaging, so a macOS- or Windows-only break shows up there rather than
   at the next release.
 
