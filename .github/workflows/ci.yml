@@ -604,13 +604,21 @@ jobs:
           $env:BENCHHUD_CONFIG = $cfg
           $p = Start-Process $env:BENCHHUD_EXE -PassThru
           try {
-            python repo\packaging\windows\read_virtual_camera.py 1280 720 90
+            python repo\packaging\windows\read_virtual_camera.py 1280 720 90 virtual-camera.png
             $code = $LASTEXITCODE
             if ($p.HasExited) { throw "benchhud exited with $($p.ExitCode) while publishing" }
           } finally {
             if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
           }
           if ($code -ne 0) { throw "no picture from the installed app's virtual camera" }
+
+      # The frame the reader accepted, to look at: the check above only knows
+      # it isn't a flat colour.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchhud-windows-virtual-camera
+          path: virtual-camera.png
+          if-no-files-found: error
 
       - name: Uninstalling takes the registration with it
         run: |

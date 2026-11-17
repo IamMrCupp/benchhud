@@ -5,10 +5,12 @@ started with output on, and this opens the "DirectShow Softcam" camera through
 DirectShow and checks that a real picture arrives at the configured size. It
 is the installed build's version of ``tests/test_softcam_windows.py``.
 
-    python packaging/windows/read_virtual_camera.py 1280 720
+    python packaging/windows/read_virtual_camera.py 1280 720 [seconds] [frame.png]
 
 Exits 0 when a camera delivers frames of that size that aren't a flat colour,
-1 otherwise. Needs only ``opencv-python`` and ``numpy``, not benchhud.
+1 otherwise. With a fourth argument it saves the frame it accepted, and CI
+keeps that as an artifact: "not flat" is a number, and the picture is the thing
+to look at. Needs only ``opencv-python`` and ``numpy``, not benchhud.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ def main(argv: list[str]) -> int:
 
     width, height = int(argv[0]), int(argv[1])
     seconds = float(argv[2]) if len(argv) > 2 else 60.0
+    save_to = argv[3] if len(argv) > 3 else ""
     deadline = time.monotonic() + seconds
     # The app may still be starting, so keep going round the cameras.
     while time.monotonic() < deadline:
@@ -48,6 +51,9 @@ def main(argv: list[str]) -> int:
                     # A flat frame is what a camera with no sender shows.
                     if spread > 5.0:
                         print("a picture is arriving from the virtual camera")
+                        if save_to:
+                            cv2.imwrite(save_to, frame)
+                            print(f"saved it to {save_to}")
                         return 0
             finally:
                 capture.release()

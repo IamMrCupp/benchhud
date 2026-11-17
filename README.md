@@ -16,9 +16,10 @@ glows — on the scope image, with the rest of the board left alone.*
 > **Status: running on the reference bench.** Scope capture, the thermal
 > overlay with real temperatures, and virtual-camera output into OBS all run
 > there on Ubuntu, and macOS virtual-camera output is verified on real hardware
-> too. Still off-hardware: the OWON's write commands, and the Windows
-> terminal panel, which CI exercises but no Windows bench has run. Not built
-> yet: Windows virtual-camera output (#124). Releases
+> too. Still off-hardware: the OWON's write commands, and the Windows build —
+> its terminal panel and its virtual camera both pass on CI's Windows runner,
+> where a DirectShow reader gets the HUD's picture back byte for byte, but no
+> Windows bench has run either and nobody has watched it in OBS there. Releases
 > land often, so expect the odd rough edge.
 
 ## What it does
@@ -96,9 +97,10 @@ others are optional. **macOS and Windows are committed targets**, not ports
 someone might get to. The app itself is portable and runs on all three today;
 what's platform-specific is virtual-camera output, which talks to a different OS
 interface on each: v4l2loopback on Linux ([BENCH-SETUP.md](docs/BENCH-SETUP.md)),
-OBS's camera extension on macOS ([MACOS-SETUP.md](docs/MACOS-SETUP.md)), and a
-Windows backend still to come. Where a backend isn't available, the status bar
-says so rather than streaming nothing quietly.
+OBS's camera extension on macOS ([MACOS-SETUP.md](docs/MACOS-SETUP.md)), and
+softcam, a DirectShow camera that ships in the installer, on Windows
+([WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md)). Where a backend can't open, the
+status bar says why rather than streaming nothing quietly.
 
 ## Install
 
@@ -137,11 +139,14 @@ camera names, and what to tell OBS. It asks before it changes anything, and
 `bench-setup doctor` checks the result. Nothing here needs it; it saves the
 copying. See [bench-suite](https://github.com/IamMrCupp/bench-suite#readme).
 
-**Windows.** The `.msi` from the latest release. It installs per user, with no
-admin rights. It's ad-hoc signed, so SmartScreen warns on first run. The HUD
-runs, with one piece missing: virtual-camera output (#124). The terminal panel
-runs `cmd.exe` or PowerShell there, checked on CI's Windows runner but not yet
-on a Windows bench ([TERMINAL.md](docs/TERMINAL.md#windows)).
+**Windows.** The `.msi` from the latest release. It's ad-hoc signed, so
+SmartScreen warns on first run. Install it for everyone on the PC and the
+virtual camera is registered as part of the install; install it just for
+yourself, with no admin rights, and benchhud registers the camera from
+Preferences → Output with one approval prompt
+([WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md)). The terminal panel runs `cmd.exe`
+or PowerShell ([TERMINAL.md](docs/TERMINAL.md#windows)). Both are checked on
+CI's Windows runner, not yet on a Windows bench.
 
 **macOS.** The `.dmg` from the latest release, for Apple silicon: signed with a
 Developer ID and notarized, so it opens without a Gatekeeper warning. Drag
@@ -198,6 +203,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, the hardware seams, design rules. |
 | [BENCH-SETUP.md](docs/BENCH-SETUP.md) | Bringing it up on the Linux bench — cameras, the OWON, v4l2loopback → OBS. |
 | [MACOS-SETUP.md](docs/MACOS-SETUP.md) | Publishing into OBS's virtual camera on a Mac. |
+| [WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md) | The Windows virtual camera: registering it, and adding it to OBS. |
 | [PACKAGING.md](docs/PACKAGING.md) | The packages: the Ubuntu `.deb`, the Windows MSI, the signed macOS `.app`, releases, and what CI builds when. |
 | [BROWSER-SOURCES.md](docs/BROWSER-SOURCES.md) | The data panels as OBS Browser sources: URLs, what goes on air. |
 | [TERMINAL.md](docs/TERMINAL.md) | The terminal panel and its read-only stream view. |

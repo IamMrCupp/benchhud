@@ -42,7 +42,10 @@ ticket system is a protocol with a fake, not a dependency.
   stream through Apple's public CoreMediaIO API via `ctypes` — no PyObjC, no
   compiled extension) on macOS, and `SoftcamSink` (`softcam.py`: sends BGR24
   straight into softcam's DirectShow filter DLL via `ctypes` — the one backend
-  that converts nothing) on Windows. `onair.py` holds the tagged-sensitive
+  that converts nothing) on Windows. It loads the DLL Windows has registered
+  and refuses to open without a registration, since softcam would take the
+  frames and no camera app could see them; `softcam_register.py` does the
+  registering (`regsvr32`, elevated) and is `benchhud virtual-camera`. `onair.py` holds the tagged-sensitive
   model (`Layer` + `compose_on_air`/`compose_preview`) that keeps sensitive
   surfaces out of the published frame — see the stream-safety design rule below.
 - **`browser_sources/`** — the data panels as OBS Browser sources: `hub`
@@ -127,6 +130,7 @@ implementing the real side of each — no consumer changes.
 | Camera in | `capture.FrameSource` | `SyntheticFrameSource` | `CameraFrameSource` over `cv2.VideoCapture(/dev/videoN)` |
 | Virtual cam out (Linux) | `output.OutputSink` | `FakeSink`, fake `V4l2Device` | `V4l2LoopbackSink` on a real `/dev/videoN` loopback node |
 | Virtual cam out (macOS) | `output.OutputSink` | pure helpers (fourcc, stream selection, BGR→UYVY) + injected fake enumeration | `CmioSink` into OBS's camera extension; the real-delivery test runs only on a Mac with the extension approved |
+| Virtual cam out (Windows) | `output.OutputSink` | fake camera (byte layout), injected registry and elevated run | `SoftcamSink` into the registered softcam.dll; CI's `softcam` job reads the picture back through DirectShow |
 | Instrument | `instruments.SerialPort` | `FakeSerialPort` | `OwonSpm8104.open_device('/dev/ttyUSB0')` |
 | Thermal frames | `FrameSource` (raw Y16) | synthetic °C arrays | Y16 capture → `thermal.convert.y16_to_celsius` |
 | Device discovery | `devices.DeviceScanner` | canned `/sys` + `list_ports` fakes | `SystemDeviceScanner` over real `/dev` nodes |
