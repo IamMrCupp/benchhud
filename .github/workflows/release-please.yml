@@ -40,3 +40,4 @@ jobs:
     uses: ./.github/workflows/release-assets.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

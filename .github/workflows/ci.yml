@@ -245,9 +245,8 @@ jobs:
           tests/test_terminal_tools.py::test_a_serial_console_is_only_dropped_with_a_yes
 
   # The macOS app (#206): build it on every PR and check the built bundle
-  # starts, like deb-verify and msi-verify. Ad-hoc signed: a Developer ID
-  # signature needs the certificate in CI (#173), so the release build is still
-  # signed on the maintainer's Mac (docs/PACKAGING.md).
+  # starts, like deb-verify and msi-verify. A release or a manual run signs it
+  # with the Developer ID and notarizes it (#397); a PR's build is ad-hoc signed.
   macos-app:
     # macOS and Windows runners cost 10x and 2x Linux minutes, so this runs
     # for releases, by hand, or on a PR labelled full-ci, not on every push.
@@ -301,10 +300,26 @@ jobs:
           echo "still running after 45s"
           kill "$pid"
 
-      - name: Package (ad-hoc signed)
+      # Signs and notarizes when the repo has the Apple secrets (#397), and
+      # builds an ad-hoc signed zip when it has none (forks). Pull requests
+      # never get the secrets, so a PR's build is ad-hoc too. See "macOS
+      # signing in CI" in docs/PACKAGING.md.
+      - name: Set up signing
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_API_KEY: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY || '' }}
+          APPLE_API_ISSUER: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY_P8: ${{ github.event_name != 'pull_request' && secrets.APPLE_API_KEY_P8 || '' }}
+        run: scripts/macos/signing.sh setup
+
+      - name: Package (ad-hoc signed zip)
+        if: steps.signing.outputs.enabled != 'true'
         run: briefcase package macOS app --adhoc-sign -p zip --no-input
 
       - name: The zip carries LICENSE and NOTICES
+        if: steps.signing.outputs.enabled != 'true'
         run: |
           zip=$(ls dist/*.zip | head -1)
           for f in LICENSE NOTICES; do
@@ -313,10 +328,35 @@ jobs:
           done
           echo "both files in $zip"
 
+      # Briefcase signs the .app and the .dmg; notarize-dmg.sh does the
+      # notarizing, because Briefcase only takes a keychain profile for that.
+      - name: Package (Developer ID signed dmg)
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          briefcase package macOS app -p dmg --no-notarize \
+            --identity "$APPLE_SIGNING_IDENTITY" --no-input
+
+      - name: Notarize and staple the dmg
+        if: steps.signing.outputs.enabled == 'true'
+        run: scripts/macos/notarize-dmg.sh dist/*.dmg
+
+      # Nothing after this needs the certificate or the API key.
+      - name: Remove the signing keychain and API key
+        if: always()
+        run: scripts/macos/signing.sh cleanup
+
+      # The checks Gatekeeper runs on someone else's Mac. A dmg that fails
+      # them is never uploaded, so it can't reach a release.
+      - name: Verify signature and notarization
+        if: steps.signing.outputs.enabled == 'true'
+        run: scripts/macos/verify-signing.sh dist/*.dmg
+
       - uses: actions/upload-artifact@v4
         with:
           name: benchhud-macos
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.dmg
           if-no-files-found: error
 
   # Install it silently on a clean runner and check it starts, like deb-verify.

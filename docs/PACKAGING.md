@@ -151,8 +151,9 @@ story.
 
 ### Download it from a release (the normal way)
 
-Every release carries its installers: the `.deb` and the Windows MSI are
-attached to the GitHub Release (`release-assets.yml`). They're built by the
+Every release carries its installers: the `.deb`, the Windows MSI and the
+notarized macOS `.dmg` are attached to the GitHub Release
+(`release-assets.yml`). They're built by the
 same CI jobs every PR runs, at the release tag, including the clean-container
 install check.
 
@@ -161,9 +162,9 @@ gh release download --repo IamMrCupp/benchhud --pattern '*.deb' --dir dist
 sudo apt install ./dist/benchhud_*.deb
 ```
 
-The Mac app isn't attached. CI's build is ad-hoc signed, and macOS ties camera
-permission to the signature, so the one to install is the Developer ID build
-from *Build (macOS)* above.
+The `.dmg` is signed with the Developer ID and notarized in CI (see *macOS
+signing in CI* below), so Gatekeeper accepts it. It's an Apple
+Silicon build; there's no Intel one. Releases up to v0.14.0 have no Mac download.
 
 For a release made before this existed, run **release-assets** from the
 Actions tab with the tag (or `gh workflow run release-assets.yml -f tag=v0.3.0`).
@@ -248,6 +249,65 @@ by `scripts/make_icns.sh`, like the other icons.
 
 ---
 
+## macOS signing in CI
+
+The `macos-app` job signs and notarizes on one condition: the repo has all five
+secrets below, and the run isn't a pull request.
+
+| Secrets set | What the job does |
+|---|---|
+| None, or a pull request | Builds an ad-hoc signed zip, as before. Forks land here. |
+| All five | Signs, notarizes, staples, verifies, then uploads the `.dmg`. |
+| Some | Fails, naming the missing ones. A half-configured repo doesn't get to ship unsigned by accident. |
+
+| Secret | What it is |
+|---|---|
+| `APPLE_CERTIFICATE` | base64 of the Developer ID Application `.p12` (certificate and private key) |
+| `APPLE_CERTIFICATE_PASSWORD` | the `.p12`'s export password |
+| `APPLE_API_KEY` | App Store Connect API key ID |
+| `APPLE_API_ISSUER` | App Store Connect issuer ID |
+| `APPLE_API_KEY_P8` | contents of the `AuthKey_<key id>.p8` file |
+
+They're the same five burnwright uses, from the same 1Password item
+("Apple Developer ID signing"). An API key rather than the app-specific
+password from the local setup, because Apple revokes those whenever the Apple ID
+password changes.
+
+What a signed run does:
+
+1. `scripts/macos/signing.sh setup` imports the certificate into a temporary
+   keychain and writes the API key to a file, both under `$RUNNER_TEMP`.
+2. Briefcase signs everything in `benchhud.app` (hardened runtime, Apple's
+   timestamp), builds the `.dmg` and signs that.
+3. `scripts/macos/notarize-dmg.sh` submits the `.dmg` to Apple and staples the
+   ticket. Briefcase can notarize too, but only with a keychain profile, which
+   suits a Mac with a login keychain and not a runner.
+4. `scripts/macos/signing.sh cleanup` deletes the keychain and the key file,
+   before the checks and even when an earlier step failed.
+5. `scripts/macos/verify-signing.sh` checks the `.dmg` and the app inside it
+   the way Gatekeeper will, plus every Mach-O file in the bundle: Developer ID
+   signature, hardened runtime, one team. It fails the job if any check does.
+6. Only then is the `.dmg` uploaded, so a build that fails notarization never
+   reaches a release.
+
+To try it without a release, run CI by hand on a branch and take the
+**benchhud-macos** artifact:
+
+```sh
+gh workflow run ci.yml --ref <branch>
+```
+
+The same script checks any build on a Mac:
+
+```sh
+scripts/macos/verify-signing.sh dist/benchhud-<version>.dmg
+```
+
+When the certificate is renewed, export a new `.p12`, update the 1Password
+item, and set `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` again.
+
+---
+
 ## What CI builds when
 
 macOS and Windows runners bill at 10× and 2× Linux minutes, so not every run
@@ -311,7 +371,7 @@ sources.
   by `scripts/make_icns.sh`. Rerun that script if the PNG changes.
 - **CI builds every package on every PR:** the Ubuntu `.deb` (#192) and the
   Windows MSI (#207) are built and install-verified; the macOS app (#206) is
-  built, checked to start, and uploaded as **benchhud-macos**. That one is
-  ad-hoc signed, so it isn't the build to install: the camera grant follows the
-  signature. Sign locally with the Developer ID for that (above).
-- **Not done yet:** signing and notarizing in CI, so a release carries the `.dmg`. Today it's a local step (above, #173).
+  built, checked to start, and uploaded as **benchhud-macos**. On a PR that
+  one is ad-hoc signed, so it isn't the build to install: the camera grant
+  follows the signature. A release or a manual run signs and notarizes it
+  (#397).

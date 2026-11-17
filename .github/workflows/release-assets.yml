@@ -27,6 +27,8 @@ jobs:
     with:
       ref: ${{ inputs.tag }}
       full: true
+    # The Apple signing secrets, for the macOS .dmg.
+    secrets: inherit
 
   attach:
     needs: build
@@ -45,7 +47,9 @@ jobs:
           shopt -s nullglob
           # Release assets can't sensibly carry spaces in their names.
           for f in dist/*' '*; do mv "$f" "${f// /-}"; done
-          files=(dist/*.deb dist/*.msi)
+          # The .dmg only exists when it was signed and notarized. The ad-hoc
+          # zip a repo without the Apple secrets builds is not a download.
+          files=(dist/*.deb dist/*.msi dist/*.dmg)
           if [ ${#files[@]} -eq 0 ]; then echo "no installers built"; ls -l dist; exit 1; fi
           ls -l "${files[@]}"
           gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"
