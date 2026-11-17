@@ -26,6 +26,24 @@ def bench_hud():
     sys.modules.pop("bench_hud", None)
 
 
+def test_threads_switch_sets_the_count_and_puts_it_back(bench_hud, qapp) -> None:
+    import cv2
+
+    # Through the calls: OpenCV on GCD (macOS) ignores the count.
+    before = cv2.getNumThreads()
+    calls: list[int] = []
+    real = cv2.setNumThreads
+    bench_hud.cv2.setNumThreads = lambda n: (calls.append(n), real(n))[1]
+    try:
+        result = _run(bench_hud, "--threads", "1", "--no-feeds", "--no-thermal")
+    finally:
+        bench_hud.cv2.setNumThreads = real
+
+    assert calls == [1, before]
+    assert result["config"]["opencv_threads"] == result["host"]["opencv_threads"]
+    assert cv2.getNumThreads() == before
+
+
 def _run(bench_hud, *extra: str) -> dict:
     # A small clip and output keep it quick; the code paths are the same.
     argv = ["--duration", "1.2", "--warmup", "0.6", "--scope-size", "1920x1080"]

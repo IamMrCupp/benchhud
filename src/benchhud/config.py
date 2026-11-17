@@ -293,6 +293,16 @@ class NowPlayingConfig:
 
 
 @dataclass
+class PerformanceConfig:
+    """Knobs that trade CPU for speed."""
+
+    # Threads OpenCV may spread a resize or a blend over. Its own default is one
+    # per core, which on the bench cost a core more than 2 for the same output
+    # frame rate (#415). 0 leaves OpenCV's default alone.
+    opencv_threads: int = 2
+
+
+@dataclass
 class FlashConfig:
     """The flashrom panel (#227): which flashrom, and the last programmer used."""
 
@@ -359,6 +369,7 @@ class Config:
     flash: FlashConfig = field(default_factory=FlashConfig)
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     tools: list[ToolConfig] = field(default_factory=list)
     cameras: list[CameraConfig] = field(default_factory=list)
 
@@ -479,6 +490,7 @@ class Config:
             data.get("now_playing", {}),
             ("enabled", "hide_when_paused", "label"),
         )
+        _apply(cfg.performance, data.get("performance", {}), ("opencv_threads",))
 
         cfg.tools = [
             ToolConfig(

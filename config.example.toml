@@ -203,6 +203,12 @@ enabled = true
 hide_when_paused = true
 label = "Now playing"
 
+[performance]
+# Threads OpenCV may use for a resize or a blend. Its own default is one per
+# core; on the reference bench 2 gave the same frame rate for half the CPU.
+# 0 leaves OpenCV's default. Restart benchhud after changing it.
+opencv_threads = 2
+
 [flash]
 # The Flash panel: read, back up and write SPI flash chips with flashrom. A
 # backup is two reads that must match; dumps are filed with the selected job.

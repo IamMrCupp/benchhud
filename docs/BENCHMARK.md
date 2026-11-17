@@ -25,6 +25,7 @@ The switches that matter on the bench:
 | `--feeds` / `--no-feeds` | `output.scope_device`, `output.thermal_device` | on |
 | `--thermal` / `--no-thermal` | `panels.thermal.enabled` | on |
 | `--overlays` / `--no-overlays` | `telemetry_overlay` and `graph_overlay`, fed demo telemetry | off |
+| `--threads 2` | `performance.opencv_threads`; 0 leaves OpenCV's one per core | the app's default, 2 |
 | `--rgb-node` | the composite node answers RGB3 (a node OBS already holds), so each frame is swapped | off |
 
 `--duration` and `--warmup` set the times. `--help` lists the rest (camera

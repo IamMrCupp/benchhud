@@ -430,6 +430,38 @@ benchhud config set panels.scope.reduced_live false
 Restart benchhud after changing it from the command line; Preferences applies it
 on save.
 
+### OpenCV threads: CPU for nothing
+
+`performance.opencv_threads` is how many threads OpenCV may spread a resize or a
+blend over. It defaults to 2. OpenCV's own default is one per core, and on the
+reference bench (8 threads) that cost a core more for the same output.
+
+The live HUD, 1280x720 output at 15 fps, thermal and both feeds on, OBS open:
+
+| OpenCV threads | benchhud CPU | Scope feed |
+|---|---|---|
+| 8 (OpenCV's default) | 240% of a core | 15.6 fps |
+| 2 | 119% of a core | 15.6 fps |
+
+The 8-thread reading was taken 5 hours after start and the 2-thread one 5 minutes
+after, one sample each. `scripts/bench_hud.py --threads N` gave the same shape:
+174% at 8, 119% at 4, 92% at 2, 72% at 1, all at 15.6 fps (see
+[BENCHMARK.md](BENCHMARK.md)).
+
+More threads make each frame render sooner (13.8 ms at 8 against 21.7 ms at 2 in
+the benchmark), which a 15 fps cap doesn't need: a frame has 66 ms. If you raise
+`output.fps` and the output falls short of the cap, try 4. `0` hands the choice
+back to OpenCV.
+
+```bash
+benchhud config set performance.opencv_threads 2
+```
+
+Quit benchhud before running that, and start it again after. There's no
+Preferences control for it. benchhud logs the count OpenCV ended up with at
+startup (`OpenCV threads: 2`). On macOS OpenCV schedules through the system and
+ignores the setting; this is a Linux knob.
+
 ---
 
 ## 5. First run and verify

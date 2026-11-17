@@ -69,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
     config = config_module.load()
     configure_logging(config.shell.logging.level)
 
+    from benchhud import cvthreads
+
+    cvthreads.apply(config.performance.opencv_threads)
+
     from benchhud.shell.icon import app_icon
     from benchhud.shell.theme import apply_theme
 
