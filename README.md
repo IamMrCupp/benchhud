@@ -143,10 +143,10 @@ runs, with one piece missing: virtual-camera output (#124). The terminal panel
 runs `cmd.exe` or PowerShell there, checked on CI's Windows runner but not yet
 on a Windows bench ([TERMINAL.md](docs/TERMINAL.md#windows)).
 
-**macOS.** No download: macOS grants camera access per app *signature*, so the
-app has to be built and signed with a Developer ID, which
-[PACKAGING.md](docs/PACKAGING.md) walks through. For OBS, see
-[MACOS-SETUP.md](docs/MACOS-SETUP.md).
+**macOS.** The `.dmg` from the latest release, for Apple silicon: signed with a
+Developer ID and notarized, so it opens without a Gatekeeper warning. Drag
+benchhud to Applications. For OBS, see [MACOS-SETUP.md](docs/MACOS-SETUP.md);
+to build and sign your own, [PACKAGING.md](docs/PACKAGING.md).
 
 **From source (any OS).** `uv run benchhud`; see *Development* below.
 
