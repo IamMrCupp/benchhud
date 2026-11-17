@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/IamMrCupp/benchhud/compare/v0.15.0...v0.16.0) (2026-11-17)
+
+
+### Features
+
+* **output:** build, ship and register softcam.dll so Windows publishes the virtual camera ([2c5ec55](https://github.com/IamMrCupp/benchhud/commit/2c5ec55a80950d80aefad847938fcac0c990330e))
+
 ## [0.15.0](https://github.com/IamMrCupp/benchhud/compare/v0.14.8...v0.15.0) (2026-11-17)
 
 
