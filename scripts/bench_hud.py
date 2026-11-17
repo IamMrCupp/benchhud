@@ -442,6 +442,16 @@ def run(args: argparse.Namespace) -> dict:
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
 
+    # The app sets this once in main(); here it's put back afterwards, so a run
+    # inside a longer process (the test suite) leaves the count as it found it.
+    threads_before = cv2.getNumThreads()
+    threads = args.threads
+    if threads is None:  # the installed app's default, or OpenCV's on an older one
+        threads = getattr(getattr(Config(), "performance", None), "opencv_threads", 0)
+    if threads > 0:
+        cv2.setNumThreads(threads)
+    opencv_threads = cv2.getNumThreads()
+
     if args.clip is not None:
         clip = load_clip(args.clip)
         clip_source = str(args.clip)
@@ -583,6 +593,7 @@ def run(args: argparse.Namespace) -> dict:
         window.close()
         stages.restore()
         app.processEvents()
+        cv2.setNumThreads(threads_before)
 
     start, end = snaps
     wall = end.wall - start.wall
@@ -618,7 +629,7 @@ def run(args: argparse.Namespace) -> dict:
             "cpus": os.cpu_count(),
             "python": platform.python_version(),
             "opencv": cv2.__version__,
-            "opencv_threads": cv2.getNumThreads(),
+            "opencv_threads": opencv_threads,
             "pyside6": pyside_version,
         },
         "config": {
@@ -629,6 +640,7 @@ def run(args: argparse.Namespace) -> dict:
             "thermal": args.thermal,
             "overlays": args.overlays,
             "rgb_node": args.rgb_node,
+            "opencv_threads": opencv_threads,
             "window": list(args.window),
             "duration_s": round(wall, 2),
             "warmup_s": args.warmup,
@@ -727,7 +739,11 @@ def format_comparison(before: dict, after: dict) -> str:
     """Two results side by side, with the change."""
     lines = []
     for key in ("host", "clip"):
-        if before[key] != after[key]:
+        # The thread count is a setting: it's reported under config below.
+        ours, theirs = (
+            {k: v for k, v in r[key].items() if k != "opencv_threads"} for r in (before, after)
+        )
+        if ours != theirs:
             lines.append(f"note: the two runs differ in {key}; the numbers may not be comparable")
     ours, theirs = before["config"], after["config"]
     changed = [k for k in ours if k != "duration_s" and ours[k] != theirs.get(k)]
@@ -810,6 +826,13 @@ def build_parser() -> argparse.ArgumentParser:
         action=flag,
         default=False,
         help="the meter and power-graph overlays, fed demo telemetry (off)",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="performance.opencv_threads: OpenCV's thread count (the app's default; "
+        "0 leaves OpenCV's own)",
     )
     parser.add_argument(
         "--rgb-node",
