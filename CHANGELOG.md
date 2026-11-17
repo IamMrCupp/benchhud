@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/IamMrCupp/benchhud/compare/v0.14.5...v0.14.6) (2026-11-17)
+
+
+### Bug Fixes
+
+* **license:** relicense to AGPL-3.0-or-later ([59b053d](https://github.com/IamMrCupp/benchhud/commit/59b053dd9da264d2c8c3559e47c49a5b25d1fb66))
+
 ## [0.14.5](https://github.com/IamMrCupp/benchhud/compare/v0.14.4...v0.14.5) (2026-11-17)
 
 
