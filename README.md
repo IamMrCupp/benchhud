@@ -145,7 +145,14 @@ on a Windows bench ([TERMINAL.md](docs/TERMINAL.md#windows)).
 
 **macOS.** The `.dmg` from the latest release, for Apple silicon: signed with a
 Developer ID and notarized, so it opens without a Gatekeeper warning. Drag
-benchhud to Applications. For OBS, see [MACOS-SETUP.md](docs/MACOS-SETUP.md);
+benchhud to Applications. Or with [Homebrew](https://github.com/IamMrCupp/homebrew-bench),
+which also brings updates with `brew upgrade`:
+
+```sh
+brew tap iammrcupp/bench
+brew install --cask benchhud
+```
+ For OBS, see [MACOS-SETUP.md](docs/MACOS-SETUP.md);
 to build and sign your own, [PACKAGING.md](docs/PACKAGING.md).
 
 **From source (any OS).** `uv run benchhud`; see *Development* below.
