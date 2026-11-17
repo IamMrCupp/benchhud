@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.0](https://github.com/IamMrCupp/benchhud/compare/v0.13.1...v0.14.0) (2026-11-17)
+
+
+### Features
+
+* **terminal:** run the terminal panel on Windows through ConPTY ([d75b2a4](https://github.com/IamMrCupp/benchhud/commit/d75b2a4a2197a45a12a30a433713fa3071431d7b))
+
+
+### Performance
+
+* **bench:** add a headless pipeline benchmark with fps, CPU per thread and stage times ([fb25972](https://github.com/IamMrCupp/benchhud/commit/fb25972193013b3409e31669851a9ef33c44782d))
+
 ## [0.13.1](https://github.com/IamMrCupp/benchhud/compare/v0.13.0...v0.13.1) (2026-11-16)
 
 
