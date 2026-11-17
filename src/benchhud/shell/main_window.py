@@ -147,7 +147,13 @@ def frame_interval_ms(output: OutputConfig) -> int:
 # Bump when the default dock arrangement changes. The shell auto-saves the
 # layout on close, so without this a layout from an older build would silently
 # override a newer default (and the user never knowingly saved one).
-LAYOUT_VERSION = 8
+LAYOUT_VERSION = 9
+
+#: The side columns' default widths. Qt's own default is each dock's size hint,
+#: and the left column's is its whole row of tabs: it opened some 950 px wide
+#: and left the composite a strip (#422).
+SIDE_DOCK_WIDTH = 340
+METER_DOCK_WIDTH = 330
 
 SourceFactory = Callable[[], FrameSource]
 #: Takes ``(device, width, height)`` and returns an open :class:`OutputSink`.
@@ -538,6 +544,14 @@ class MainWindow(QMainWindow):
         # a stale one is discarded so the newer default wins.
         if shell.layout and shell.layout_version == LAYOUT_VERSION:
             self.restoreState(QByteArray.fromBase64(shell.layout.encode("ascii")))
+        else:
+            self._size_side_docks()
+
+    def _size_side_docks(self) -> None:
+        """Give the side columns their default widths; the composite gets the rest."""
+        docks = [self.panels.dock("controls"), self.panels.dock("power")]
+        widths = [SIDE_DOCK_WIDTH, METER_DOCK_WIDTH]
+        self.resizeDocks(docks, widths, Qt.Orientation.Horizontal)
 
     def _resize_within_screen(self, width: int, height: int) -> None:
         """Resize to (width, height) but never larger than the biggest screen; centre it.
@@ -621,6 +635,7 @@ class MainWindow(QMainWindow):
     def reset_layout(self) -> None:
         """Restore the default dock arrangement and drop the saved layout."""
         self.restoreState(self._default_state)
+        self._size_side_docks()
         self._config.shell.layout = None
         self._config.shell.layout_version = LAYOUT_VERSION
 
