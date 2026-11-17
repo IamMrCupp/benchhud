@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.5](https://github.com/IamMrCupp/benchhud/compare/v0.14.4...v0.14.5) (2026-11-17)
+
+
+### Documentation
+
+* **readme:** install on a Mac with Homebrew ([d18b84e](https://github.com/IamMrCupp/benchhud/commit/d18b84e947263fcb2b4d127dfb68e88ea37cccd4))
+
 ## [0.14.4](https://github.com/IamMrCupp/benchhud/compare/v0.14.3...v0.14.4) (2026-11-17)
 
 
