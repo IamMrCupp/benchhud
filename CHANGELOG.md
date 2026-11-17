@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.8](https://github.com/IamMrCupp/benchhud/compare/v0.14.7...v0.14.8) (2026-11-17)
+
+
+### Documentation
+
+* **readme:** the unified installer on a Mac ([#418](https://github.com/IamMrCupp/benchhud/issues/418)) ([53dc7c3](https://github.com/IamMrCupp/benchhud/commit/53dc7c32a13bc3a87fe679be836620469affef30))
+
 ## [0.14.7](https://github.com/IamMrCupp/benchhud/compare/v0.14.6...v0.14.7) (2026-11-17)
 
 
