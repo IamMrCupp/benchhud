@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/IamMrCupp/benchhud/compare/v0.14.3...v0.14.4) (2026-11-17)
+
+
+### Bug Fixes
+
+* **app:** a command's output goes to stdout in the Mac app too ([89390bf](https://github.com/IamMrCupp/benchhud/commit/89390bfae9ed18de0d898190587265e5d206f810))
+
 ## [0.14.3](https://github.com/IamMrCupp/benchhud/compare/v0.14.2...v0.14.3) (2026-11-17)
 
 
