@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/IamMrCupp/benchhud/compare/v0.14.2...v0.14.3) (2026-11-17)
+
+
+### Documentation
+
+* point the README and BENCH-SETUP at the bench-suite installer ([2785d0f](https://github.com/IamMrCupp/benchhud/commit/2785d0f1a858106d97a5a8a213a6646829567d69))
+
 ## [0.14.2](https://github.com/IamMrCupp/benchhud/compare/v0.14.1...v0.14.2) (2026-11-17)
 
 
