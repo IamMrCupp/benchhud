@@ -2,9 +2,9 @@
 
 Contributions are welcome — bug fixes, board profiles, instrument drivers, docs.
 
-benchhud is source-available, and I sell commercial licences for use above the
-[PolyForm Small Business](LICENSE) limits. That only works if the rights over
-every line are clean, so two rules apply to every contribution.
+benchhud is open source under the [AGPL-3.0-or-later](LICENSE), and I sell
+commercial licences to anyone the AGPL doesn't fit. That only works if the
+rights over every line are clean, so two rules apply to every contribution.
 
 ## Sign off every commit (DCO)
 
@@ -23,8 +23,8 @@ identity. A pull request with an unsigned commit won't be merged — fix it with
 ## Licensing of contributions
 
 By contributing, you agree that your contribution is licensed under the
-project's [PolyForm Small Business License 1.0.0](LICENSE), and that it may be
-included in commercially licensed versions of benchhud.
+project's [GNU Affero General Public License v3.0 or later](LICENSE), and that
+it may be included in commercially licensed versions of benchhud.
 
 ## Before you start
 

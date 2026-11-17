@@ -1,14 +1,16 @@
 benchhud — third-party notices
 
-benchhud itself is licensed under the PolyForm Small Business License 1.0.0
-(see LICENSE). It is built on, and its packaged builds include, the following
-third-party components. Each remains under its own license, listed below.
+benchhud itself is licensed under the GNU Affero General Public License v3.0
+or later (see LICENSE). It is built on, and its packaged builds include, the
+following third-party components. Each remains under its own license, listed
+below.
 
 -------------------------------------------------------------------------------
 
 PySide6 (Qt for Python) and Qt
   https://www.qt.io/qt-for-python
-  License: GNU Lesser General Public License v3.0 (LGPLv3)
+  License: GNU Lesser General Public License v3.0 (LGPLv3), except Qt Charts
+  (next entry)
 
   PySide6, shiboken6 and the Qt libraries they ship are used as dynamically
   linked shared libraries. benchhud does not modify them, and you may replace
@@ -16,6 +18,17 @@ PySide6 (Qt for Python) and Qt
   from the Qt Project (https://download.qt.io/official_releases/) and as the
   PySide6 source distribution on PyPI (https://pypi.org/project/PySide6/).
   The LGPLv3 text: https://www.gnu.org/licenses/lgpl-3.0.html
+
+Qt Charts (the power graph)
+  https://doc.qt.io/qt-6/qtcharts-index.html
+  License: GNU General Public License v3.0 (GPLv3)
+
+  Qt Charts ships inside the PySide6 add-ons, but its open-source edition is
+  GPLv3 only — it is not offered under the LGPL. benchhud's power graph uses
+  it, unmodified and dynamically linked like the rest of Qt. Section 13 of
+  the GPLv3 and of the AGPLv3 allows the two to be combined. Source code is
+  available from the same places as Qt above.
+  The GPLv3 text: https://www.gnu.org/licenses/gpl-3.0.html
 
 DSEG font (DSEG7 Classic)
   Copyright (c) 2017, keshikan (http://www.keshikan.net),
