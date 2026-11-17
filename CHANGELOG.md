@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/IamMrCupp/benchhud/compare/v0.14.1...v0.14.2) (2026-11-17)
+
+
+### Documentation
+
+* **benchmark:** correct the bench invocation and the Linux thread naming ([856b490](https://github.com/IamMrCupp/benchhud/commit/856b4900ce18490c7623750c0d32779c077e21bd))
+
 ## [0.14.1](https://github.com/IamMrCupp/benchhud/compare/v0.14.0...v0.14.1) (2026-11-17)
 
 
