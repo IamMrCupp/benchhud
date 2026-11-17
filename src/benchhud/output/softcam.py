@@ -6,10 +6,19 @@ push arbitrary images into it. Any DirectShow consumer — OBS included — sees
 camera. Only that DLL's five-function C API is used here, through ``ctypes``,
 so nothing GPL is linked and benchhud's licensing stays open.
 
-The DLL can only be loaded on a registered Windows machine, so the layout rules
-are pure functions tested byte-for-byte on any OS, and :class:`SoftcamSink`
-takes an injectable ``camera_factory`` — frame handling is unit-tested with a
-fake camera and only the real ``scCreateCamera`` is machine-gated.
+The DLL only exists on Windows, so the layout rules are pure functions tested
+byte-for-byte on any OS, and :class:`SoftcamSink` takes an injectable
+``camera_factory`` — frame handling is unit-tested with a fake camera. The real
+``scCreateCamera`` runs in CI's ``softcam`` job, which builds the DLL, registers
+it and reads the frames back through DirectShow (``tests/test_softcam_windows.py``).
+
+**The DLL that gets loaded is the one Windows has registered.** A camera app
+finds softcam through its COM registration, which records the DLL's full path;
+the sender has to be that same build, because the two sides share a memory
+layout. Sending works without the registration (it only creates shared memory),
+so an unregistered DLL would take frames that no app could ever see. The sink
+therefore refuses to open until the registration is there, and says how to add
+it. :mod:`benchhud.output.softcam_register` does the registering.
 
 **The frame buffer is BGR24, top-down, tightly packed** — read out of softcam's
 implementation, since neither its header nor its README says so. Its sender-side
@@ -25,7 +34,9 @@ BGR->RGB and ``cmio.py`` converts BGR->UYVY.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -45,8 +56,57 @@ DIMENSION_MULTIPLE = 4
 #: "useful if the application has a real-time source stream".
 REALTIME_FRAMERATE = 0.0
 
-#: The camera name softcam's DLL registers, used only in operator-facing text.
-SOFTCAM_DEVICE_NAME = "DirectShow softcam"
+#: The camera name softcam's DLL registers (``FILTER_NAME`` in its
+#: ``softcam.cpp``): what OBS lists under Video Capture Device.
+SOFTCAM_DEVICE_NAME = "DirectShow Softcam"
+
+#: softcam's COM class id (``CLSID_DShowSoftcam`` in its ``softcam.cpp``). Its
+#: ``InprocServer32`` key holds the registered DLL's full path.
+SOFTCAM_CLSID = "{AEF3B972-5FA5-4647-9571-358EB472BC9E}"
+
+SOFTCAM_DLL_NAME = "softcam.dll"
+
+#: Points at a softcam.dll to register, ahead of the one shipped with benchhud.
+SOFTCAM_DLL_ENV = "BENCHHUD_SOFTCAM_DLL"
+
+
+def registered_dll_path() -> Path | None:
+    """The softcam DLL registered with Windows, or ``None`` if there isn't one.
+
+    Reads the 64-bit registry view: benchhud and OBS are both 64-bit, and a
+    32-bit registration is a different DLL that neither of them can load.
+    """
+    try:
+        import winreg
+    except ImportError:  # not Windows
+        return None
+    key_path = rf"CLSID\{SOFTCAM_CLSID}\InprocServer32"
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CLASSES_ROOT, key_path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY
+        ) as key:
+            value, _kind = winreg.QueryValueEx(key, "")
+    except OSError:
+        return None
+    return Path(value) if value else None
+
+
+def bundled_dll_path() -> Path | None:
+    """The softcam DLL that came with this benchhud, or ``None``.
+
+    The installer puts it beside the ``benchhud`` package (Briefcase's ``app``
+    folder). A source checkout has it where ``packaging/windows/build-softcam.ps1``
+    leaves it. :data:`SOFTCAM_DLL_ENV` names another one.
+    """
+    package_parent = Path(__file__).resolve().parents[2]
+    candidates = [
+        package_parent / SOFTCAM_DLL_NAME,
+        package_parent.parent / "packaging" / "windows" / "softcam" / SOFTCAM_DLL_NAME,
+    ]
+    override = os.environ.get(SOFTCAM_DLL_ENV)
+    if override:
+        candidates.insert(0, Path(override))
+    return next((path for path in candidates if path.is_file()), None)
 
 
 def validate_dimensions(width: int, height: int) -> None:
@@ -135,13 +195,21 @@ class SoftcamSink:
         self._camera = None
 
 
-#: Told to the operator when softcam's DLL can't be loaded. Actionable on
-#: purpose: the DLL ships with benchhud but needs a one-time elevated
-#: ``regsvr32`` before Windows will hand it out, and "load failed" alone sends
-#: people hunting for a missing file that's already on disk.
+#: Told to the operator when Windows has no softcam registered. The DLL ships
+#: with benchhud but camera apps only find it once it is registered, which
+#: takes administrator approval one time. An install for all users does it; an
+#: install for one user can't, so the fix is named here.
+SOFTCAM_NOT_REGISTERED = (
+    "the Windows virtual camera isn't registered yet — "
+    "open Preferences, Output, and choose Register virtual camera "
+    "(Windows asks for administrator approval once)"
+)
+
+#: Told to the operator when there is no softcam.dll to register or load: a run
+#: from source, or a registration left pointing at a file that has gone.
 SOFTCAM_DLL_MISSING = (
-    "the softcam virtual-camera driver isn't registered — "
-    "run the benchhud installer, or register softcam.dll as administrator"
+    "the Windows virtual camera's softcam.dll is missing — "
+    "install benchhud from its installer, which includes it"
 )
 
 #: Shown when the DLL loaded but the camera wouldn't be created. softcam allows
@@ -168,14 +236,19 @@ class SoftcamUnavailable(RuntimeError):
     ``reason`` is operator-facing — it names what to go fix, and it's what the
     shell puts in the status bar. Distinct situations get distinct reasons,
     because they need different fixes: the DLL isn't registered
-    (:data:`SOFTCAM_DLL_MISSING`), it is and something else already holds the
-    camera (:data:`SOFTCAM_CAMERA_BUSY`), or the configured size is illegal
+    (:data:`SOFTCAM_NOT_REGISTERED`), there is no DLL
+    (:data:`SOFTCAM_DLL_MISSING`), something else already holds the camera
+    (:data:`SOFTCAM_CAMERA_BUSY`), or the configured size is illegal
     (:data:`SOFTCAM_BAD_SIZE`).
     """
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
         self.reason = reason
+
+
+class SoftcamNotRegistered(OSError):
+    """Windows has no softcam registered, so no camera app could see the frames."""
 
 
 def open_softcam_sink(
@@ -198,6 +271,9 @@ def open_softcam_sink(
     except ValueError as exc:
         log.warning("softcam won't take the configured output size: %s", exc)
         raise SoftcamUnavailable(f"{SOFTCAM_BAD_SIZE} ({exc})") from exc
+    except SoftcamNotRegistered as exc:
+        log.warning("softcam isn't registered with Windows: %s", exc)
+        raise SoftcamUnavailable(SOFTCAM_NOT_REGISTERED) from exc
     except OSError as exc:
         # ctypes raises OSError when the DLL itself can't be loaded.
         log.warning("could not load softcam's DLL: %s", exc)
@@ -232,25 +308,37 @@ class _SoftcamHandle:
 
 
 def open_softcam_camera(width: int, height: int) -> SoftcamCamera:
-    """Load softcam's DLL and create the virtual camera.
+    """Load the registered softcam DLL and create the virtual camera.
 
-    Raises ``OSError`` if the DLL isn't registered and ``RuntimeError`` if the
-    camera couldn't be created — ``scCreateCamera`` returns a null pointer when
-    another sender already holds it. Callers that must stay up should fall back;
-    see :func:`benchhud.output.sink.open_output_sink`.
+    Raises :class:`SoftcamNotRegistered` if Windows has no softcam registered,
+    ``OSError`` if the registered DLL can't be loaded, and ``RuntimeError`` if
+    the camera couldn't be created — ``scCreateCamera`` returns a null pointer
+    when another sender already holds it. Callers that must stay up should fall
+    back; see :func:`benchhud.output.sink.open_output_sink`.
     """
     import ctypes  # Imported here so the module stays importable off Windows.
 
+    dll = registered_dll_path()
+    if dll is None:
+        raise SoftcamNotRegistered(f"no InprocServer32 for CLSID {SOFTCAM_CLSID}")
+    if not dll.is_file():
+        raise FileNotFoundError(f"registered at {dll}, which is not there")
+
+    # By full path: Python doesn't search the app's folders for a bare name.
     # __cdecl, per softcam.h — CDLL, not WinDLL. Exports are undecorated.
-    library = ctypes.CDLL("softcam.dll")
-    library.scCreateCamera.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_float]
-    library.scCreateCamera.restype = ctypes.c_void_p
-    library.scDeleteCamera.argtypes = [ctypes.c_void_p]
-    library.scDeleteCamera.restype = None
-    library.scSendFrame.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-    library.scSendFrame.restype = None
-    library.scIsConnected.argtypes = [ctypes.c_void_p]
-    library.scIsConnected.restype = ctypes.c_bool
+    library = ctypes.CDLL(str(dll))
+    try:
+        library.scCreateCamera.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_float]
+        library.scCreateCamera.restype = ctypes.c_void_p
+        library.scDeleteCamera.argtypes = [ctypes.c_void_p]
+        library.scDeleteCamera.restype = None
+        library.scSendFrame.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        library.scSendFrame.restype = None
+        library.scIsConnected.argtypes = [ctypes.c_void_p]
+        library.scIsConnected.restype = ctypes.c_bool
+    except AttributeError as exc:
+        # Another program's older softcam can be the registered one.
+        raise OSError(f"{dll} is not a softcam this benchhud can use ({exc})") from exc
 
     # C++ default arguments don't survive into the export — pass all three.
     handle = library.scCreateCamera(width, height, REALTIME_FRAMERATE)

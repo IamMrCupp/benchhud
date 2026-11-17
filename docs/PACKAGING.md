@@ -227,26 +227,48 @@ system package just uses your groups.
 
 ## Windows (built by CI)
 
-There's no Windows bench yet, so CI is the Windows build machine. Every PR and
-every push to `main` builds an MSI on a `windows-latest` runner (Briefcase fetches
-WiX itself) and uploads it as the **benchhud-msi** artifact:
+There's no Windows bench yet, so CI is the Windows build machine. A release, a
+run by hand, or a PR labelled `full-ci` builds an MSI on a `windows-latest`
+runner (Briefcase fetches WiX itself) and uploads it as the **benchhud-msi**
+artifact:
 
 ```sh
 gh run download --name benchhud-msi --dir dist
 ```
 
+**The virtual camera's DLL comes first.** `softcam.dll` isn't in the repo. The
+`softcam` job builds it from a pinned softcam commit with
+`packaging/windows/build-softcam.ps1`, registers it, and has benchhud publish a
+known picture that a DirectShow reader must get back byte for byte
+(`tests/test_softcam_windows.py`). Only then does `msi` run, with that DLL:
+`pyproject.toml` lists it as a Windows source, so it lands in the install's
+`app\` folder beside LICENSE and NOTICES. To build an MSI by hand, run the
+script first — `briefcase create` fails without the DLL. It needs Visual Studio
+2022 or its Build Tools with the C++ workload.
+
+The MSI carries two scripts, `packaging/windows/post_install.bat` and
+`pre_uninstall.bat`. The first registers the DLL with `regsvr32`, the second
+takes the registration out again if it's this install's. Registering takes
+administrator rights, so it works in an install for everyone and fails quietly
+in an install for one user, where benchhud offers it under Preferences → Output
+instead ([WINDOWS-SETUP.md](WINDOWS-SETUP.md)).
+
 `msi-verify` then installs it silently on a clean runner and checks benchhud is
-still running 45 seconds later, the same bar as `deb-verify`. It installs per
-user, into `%LOCALAPPDATA%\Programs\Aaron Cupp\benchhud`, so it needs no admin
-rights.
+still running 45 seconds later, the same bar as `deb-verify`. It goes on to
+check the registration points at the installed DLL, start the installed app
+with output on and read its picture through DirectShow
+(`packaging/windows/read_virtual_camera.py`), and uninstall, which has to
+remove the registration.
 
 **What that proves, and what it doesn't.** A green run means the MSI builds,
-installs, and the app starts: Qt, OpenCV and the job database all load. It
-doesn't prove anything that needs Windows hardware:
+installs, the app starts, and a DirectShow reader gets its picture. It doesn't
+prove anything that needs a person at a Windows PC:
 
-- **Virtual-camera output** (softcam) is wired but fake-backed until the DLL is
-  built and registered (#124 B.2). The HUD falls back and says so in the
-  status bar.
+- **Virtual-camera output** is read back by OpenCV's DirectShow backend, not
+  by OBS. Nobody has yet added it as a Video Capture Device in OBS on Windows.
+- **The per-user install** is run by the runner's administrator account, so
+  the path where registration is refused at install time and done later from
+  Preferences, behind an approval prompt, has not run for real.
 - **The terminal panel** is covered one layer down: the `windows-terminal` job
   runs a real `cmd.exe` in a ConPTY pseudo-console under pytest. Nothing in CI
   opens the panel itself, so the page in QtWebEngine on Windows is unchecked.

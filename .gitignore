@@ -31,6 +31,9 @@ build/
 logs/
 *.egg-info/
 
+# softcam.dll, built by packaging/windows/build-softcam.ps1 (never committed)
+packaging/windows/softcam/
+
 # Output of scripts/check_camera.py — a real camera frame, never commit it
 camera-check.png
 

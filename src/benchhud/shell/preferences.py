@@ -50,6 +50,7 @@ from benchhud.devices.discovery import (
 from benchhud.launcher.catalog import is_command_line
 from benchhud.local_services import INTAKE, PARTS, LocalService
 from benchhud.local_services import find as find_local_service
+from benchhud.output import softcam_register
 from benchhud.output.loopback_probe import LoopbackNode, loopback_nodes
 from benchhud.shell.qt_util import fit_combo_popup, grow_fields
 from benchhud.shell.tool_picker import ToolPickerDialog
@@ -82,6 +83,10 @@ class PreferencesDialog(QDialog):
         camera_modes: Callable[[str], list[tuple[int, int]]] = camera_modes,
         find_service: Callable[[str], LocalService | None] = find_local_service,
         platform: str = sys.platform,
+        virtual_camera_status: Callable[
+            [], softcam_register.SoftcamStatus
+        ] = softcam_register.status,
+        virtual_camera_register: Callable[[], Path] = softcam_register.register,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -92,6 +97,9 @@ class PreferencesDialog(QDialog):
         self._camera_modes = camera_modes
         self._find_service = find_service
         self._linux = platform.startswith("linux")
+        self._windows = platform.startswith("win")
+        self._virtual_camera_status = virtual_camera_status
+        self._virtual_camera_register = virtual_camera_register
         self.setWindowTitle("benchhud — Preferences")
 
         tabs = QTabWidget()
@@ -303,6 +311,22 @@ class PreferencesDialog(QDialog):
             # softcam: there's no device path to set, and only the one camera.
             for field in (self.output_device, self.scope_feed_device, self.thermal_feed_device):
                 form.setRowVisible(field, False)
+        if self._windows:
+            # Camera apps only find the virtual camera once it's registered with
+            # Windows, which an install for one user can't do (#124).
+            self.virtual_camera_state = QLabel()
+            self.virtual_camera_state.setWordWrap(True)
+            self.virtual_camera_button = QPushButton("Register virtual camera…")
+            self.virtual_camera_button.setToolTip(
+                "Lets OBS and other camera apps see benchhud. "
+                "Windows asks for administrator approval once."
+            )
+            self.virtual_camera_button.clicked.connect(self.register_virtual_camera)
+            camera_row = QHBoxLayout()
+            camera_row.addWidget(self.virtual_camera_state, 1)
+            camera_row.addWidget(self.virtual_camera_button)
+            form.addRow("Windows camera", camera_row)
+            self._show_virtual_camera_state()
         form.addRow("Width", self.output_width)
         form.addRow("Height", self.output_height)
         form.addRow("FPS", self.output_fps)
@@ -320,6 +344,22 @@ class PreferencesDialog(QDialog):
         form.addRow(self.browser_sources_enabled)
         form.addRow("Browser source port", self.browser_sources_port)
         return widget
+
+    def _show_virtual_camera_state(self, note: str = "") -> None:
+        current = self._virtual_camera_status()
+        text = current.describe()
+        self.virtual_camera_state.setText(f"{text}. {note}" if note else text)
+        # Nothing to press once it's registered, or with no DLL to register.
+        self.virtual_camera_button.setEnabled(not current.ready and current.bundled is not None)
+
+    def register_virtual_camera(self) -> None:
+        """Register softcam with Windows (one administrator prompt)."""
+        try:
+            self._virtual_camera_register()
+        except softcam_register.RegistrationError as exc:
+            self._show_virtual_camera_state(f"Could not register: {exc.reason}")
+            return
+        self._show_virtual_camera_state("Press OK to start publishing")
 
     # --- Tools -----------------------------------------------------------
 
