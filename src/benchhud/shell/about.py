@@ -5,8 +5,8 @@ from __future__ import annotations
 from benchhud import __version__
 
 REPO_URL = "https://github.com/IamMrCupp/benchhud"
-LICENSE_NAME = "PolyForm Small Business 1.0.0"
-LICENSE_URL = "https://polyformproject.org/licenses/small-business/1.0.0/"
+LICENSE_NAME = "AGPL-3.0-or-later"
+LICENSE_URL = "https://www.gnu.org/licenses/agpl-3.0.html"
 
 
 def about_html() -> str:
