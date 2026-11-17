@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/IamMrCupp/benchhud/compare/v0.14.0...v0.14.1) (2026-11-17)
+
+
+### Documentation
+
+* **packaging:** how to build the notarized macOS .dmg ([3ef15ea](https://github.com/IamMrCupp/benchhud/commit/3ef15ea377905cfb8ae196f2b0f6d9a18275fc68))
+
 ## [0.14.0](https://github.com/IamMrCupp/benchhud/compare/v0.13.1...v0.14.0) (2026-11-17)
 
 
