@@ -10,6 +10,31 @@ import sys
 
 from benchhud import __version__
 
+#: First arguments that are a command, answered on the terminal with no window.
+COMMANDS = frozenset({"-V", "--version", "udev-rules", "config"})
+
+
+def use_terminal_streams() -> None:
+    """Point stdin, stdout and stderr back at the process's own file descriptors.
+
+    The packaged macOS app sends Python's output to the system log. That suits
+    a windowed app and breaks a command: ``benchhud config path`` has to put
+    the path on stdout, where bench-setup reads it. A stream that already is
+    its descriptor is left alone.
+    """
+    for name, fd, mode in (("stdin", 0, "r"), ("stdout", 1, "w"), ("stderr", 2, "w")):
+        stream = getattr(sys, name)
+        try:
+            if stream is not None and stream.fileno() == fd:
+                continue
+        except (AttributeError, OSError, ValueError):
+            pass
+        try:
+            extra = {"buffering": 1} if mode == "w" else {}
+            setattr(sys, name, open(fd, mode, encoding="utf-8", closefd=False, **extra))  # noqa: SIM115
+        except OSError:
+            pass  # no such descriptor: keep what's there
+
 
 def main(argv: list[str] | None = None) -> int:
     """Console-script entry point for ``benchhud``.
@@ -17,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     Returns a process exit code (the Qt event-loop result when the shell runs).
     """
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in COMMANDS:
+        use_terminal_streams()
     if argv and argv[0] in {"-V", "--version"}:
         print(f"benchhud {__version__}")
         return 0

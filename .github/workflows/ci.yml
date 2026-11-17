@@ -301,6 +301,21 @@ jobs:
           echo "still running after 45s"
           kill "$pid"
 
+      # bench-setup drives benchhud through the app's own binary on a Mac.
+      # Inside the bundle Python writes to the system log, so a command has to
+      # put stdout back: the answer must arrive bare, on stdout, with no window.
+      - name: The app's binary answers commands on stdout
+        run: |
+          app=build/benchhud/macos/app/benchhud.app/Contents/MacOS/benchhud
+          export BENCHHUD_CONFIG="$RUNNER_TEMP/cli.toml"
+          version=$("$app" --version)
+          echo "$version"
+          echo "$version" | grep -qx "benchhud [0-9][0-9.]*"
+          test "$("$app" config path)" = "$BENCHHUD_CONFIG"
+          printf 'tok-123' | "$app" config set intake.token -
+          "$app" config set intake.base_url http://127.0.0.1:8401
+          grep -q 'base_url = "http://127.0.0.1:8401"' "$BENCHHUD_CONFIG"
+
       - name: Package (ad-hoc signed)
         run: briefcase package macOS app --adhoc-sign -p zip --no-input
 
