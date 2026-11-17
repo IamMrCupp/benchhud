@@ -48,6 +48,8 @@ from benchhud.devices.discovery import (
     same_device,
 )
 from benchhud.launcher.catalog import is_command_line
+from benchhud.local_services import INTAKE, PARTS, LocalService
+from benchhud.local_services import find as find_local_service
 from benchhud.output import softcam_register
 from benchhud.output.loopback_probe import LoopbackNode, loopback_nodes
 from benchhud.shell.qt_util import fit_combo_popup, grow_fields
@@ -79,6 +81,7 @@ class PreferencesDialog(QDialog):
         on_save: SaveCallback | None = None,
         loopback_nodes: Callable[[], list[LoopbackNode]] = loopback_nodes,
         camera_modes: Callable[[str], list[tuple[int, int]]] = camera_modes,
+        find_service: Callable[[str], LocalService | None] = find_local_service,
         platform: str = sys.platform,
         virtual_camera_status: Callable[
             [], softcam_register.SoftcamStatus
@@ -92,6 +95,7 @@ class PreferencesDialog(QDialog):
         self._on_save = on_save
         self._loopback_nodes = loopback_nodes
         self._camera_modes = camera_modes
+        self._find_service = find_service
         self._linux = platform.startswith("linux")
         self._windows = platform.startswith("win")
         self._virtual_camera_status = virtual_camera_status
@@ -539,6 +543,9 @@ class PreferencesDialog(QDialog):
         grow_fields(form)
         form.addRow("Intake base URL", self.intake_base_url)
         form.addRow("API token", self.intake_token)
+        self.intake_find, self.intake_found = self._add_find_row(
+            form, INTAKE, self.intake_base_url, self.intake_token
+        )
         return widget
 
     def _build_inventory_tab(self) -> QWidget:
@@ -554,7 +561,45 @@ class PreferencesDialog(QDialog):
         grow_fields(form)
         form.addRow("bench-parts base URL", self.inventory_base_url)
         form.addRow("API token", self.inventory_token)
+        self.inventory_find, self.inventory_found = self._add_find_row(
+            form, PARTS, self.inventory_base_url, self.inventory_token
+        )
         return widget
+
+    def _add_find_row(
+        self, form: QFormLayout, app: str, url: QLineEdit, token: QLineEdit
+    ) -> tuple[QPushButton, QLabel]:
+        """A button that looks for ``app`` on this machine and fills in its URL."""
+        button = QPushButton("Find on this machine")
+        button.setToolTip(
+            f"Looks for {app} on this computer and fills in its address. "
+            "The token still comes from you."
+        )
+        found = QLabel("")
+        found.setWordWrap(True)
+        button.clicked.connect(lambda: self.find_service(app, url, token, found))
+        form.addRow("", button)
+        form.addRow("", found)
+        return button, found
+
+    def find_service(self, app: str, url: QLineEdit, token: QLineEdit, found: QLabel) -> None:
+        service = self._find_service(app)
+        if service is None:
+            found.setText(
+                f"No {app} answered on this machine. If it runs somewhere else, "
+                "type its address above."
+            )
+            return
+        url.setText(service.base_url)
+        version = f" {service.version}" if service.version else ""
+        if token.text().strip():
+            found.setText(f"Found {app}{version} at {service.base_url}.")
+            return
+        found.setText(
+            f"Found {app}{version} at {service.base_url}. Paste its API token above, "
+            "or quit benchhud and run bench-setup, which fills in both."
+        )
+        token.setFocus()
 
     def _build_boards_tab(self) -> QWidget:
         boards = self._config.boards
