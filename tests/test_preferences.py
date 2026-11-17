@@ -212,3 +212,54 @@ def test_graph_overlay_settings_round_trip(qtbot) -> None:
     assert config.graph_overlay.corner == "top-left"
     assert config.graph_overlay.window_seconds == 90.0
     assert config.graph_overlay.opacity == 0.7
+
+
+def test_find_fills_in_the_address_and_asks_for_the_token(qtbot) -> None:
+    from benchhud.local_services import INTAKE, PARTS, LocalService
+
+    asked: list[str] = []
+
+    def find(app: str):
+        asked.append(app)
+        if app == INTAKE:
+            return LocalService(INTAKE, "0.4.1", "http://127.0.0.1:8401")
+        return None
+
+    config = Config()
+    dialog = PreferencesDialog(config, _scanner(), find_service=find)
+    qtbot.addWidget(dialog)
+    assert asked == [], "nothing is probed until the button is pressed"
+
+    dialog.intake_find.click()
+    assert dialog.intake_base_url.text() == "http://127.0.0.1:8401"
+    assert dialog.intake_token.text() == "", "a token is never invented"
+    assert "0.4.1" in dialog.intake_found.text()
+    assert "token" in dialog.intake_found.text()
+
+    dialog.inventory_find.click()
+    assert dialog.inventory_base_url.text() == ""
+    assert "No bench-parts answered" in dialog.inventory_found.text()
+    assert asked == [INTAKE, PARTS]
+
+    dialog.apply_to_config()
+    assert config.intake.base_url == "http://127.0.0.1:8401"
+    assert config.inventory.base_url == ""
+
+
+def test_find_keeps_a_token_that_is_already_there(qtbot) -> None:
+    from benchhud.local_services import PARTS, LocalService
+
+    config = Config()
+    config.inventory.base_url = "http://old.example:8000"
+    config.inventory.token = "kept"
+    dialog = PreferencesDialog(
+        config,
+        _scanner(),
+        find_service=lambda app: LocalService(PARTS, "", "http://127.0.0.1:8402"),
+    )
+    qtbot.addWidget(dialog)
+
+    dialog.inventory_find.click()
+    assert dialog.inventory_base_url.text() == "http://127.0.0.1:8402"
+    assert dialog.inventory_token.text() == "kept"
+    assert "Paste" not in dialog.inventory_found.text()
