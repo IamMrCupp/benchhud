@@ -16,8 +16,9 @@ glows — on the scope image, with the rest of the board left alone.*
 > **Status: running on the reference bench.** Scope capture, the thermal
 > overlay with real temperatures, and virtual-camera output into OBS all run
 > there on Ubuntu, and macOS virtual-camera output is verified on real hardware
-> too. Still off-hardware: the OWON's write commands. Not built yet: Windows
-> virtual-camera output (#124) and the Windows terminal panel (#203). Releases
+> too. Still off-hardware: the OWON's write commands, and the Windows
+> terminal panel, which CI exercises but no Windows bench has run. Not built
+> yet: Windows virtual-camera output (#124). Releases
 > land often, so expect the odd rough edge.
 
 ## What it does
@@ -120,8 +121,9 @@ package shouldn't do them behind your back: join the `video`, `dialout` and
 
 **Windows.** The `.msi` from the latest release. It installs per user, with no
 admin rights. It's ad-hoc signed, so SmartScreen warns on first run. The HUD
-runs, but two pieces aren't there yet: virtual-camera output (#124) and the
-terminal panel (#203).
+runs, with one piece missing: virtual-camera output (#124). The terminal panel
+runs `cmd.exe` or PowerShell there, checked on CI's Windows runner but not yet
+on a Windows bench ([TERMINAL.md](docs/TERMINAL.md#windows)).
 
 **macOS.** No download: macOS grants camera access per app *signature*, so the
 app has to be built and signed with a Developer ID, which

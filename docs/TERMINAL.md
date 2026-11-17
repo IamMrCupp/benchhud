@@ -1,19 +1,41 @@
 # Terminal
 
-A real terminal inside benchhud: your login shell, in a panel beside the scope and
+A real terminal inside benchhud: your own shell, in a panel beside the scope and
 the meter. Flash a board, tail a log or poke a serial tool without leaving the HUD.
 The same terminal can also go on stream as an OBS Browser source, output only.
 
-macOS and Linux. Windows needs a different backend (ConPTY), and it isn't built yet.
+macOS, Linux and Windows. The Windows backend (ConPTY) is new and hasn't been run
+on a Windows bench yet: see [Windows](#windows).
 
 ## Turning it on
 
 Preferences → **Terminal** → *Show a terminal panel*. The panel is a tab on the left,
 beside Jobs and Inventory, and View → Terminal brings it forward. It runs your login
 shell (`$SHELL -l`), so your prompt, aliases and `PATH` are the ones you're used to.
-To run something else, set *Shell* (for example `/bin/zsh`).
+To run something else, set *Shell* (for example `/bin/zsh`). Windows runs a different
+default: see [Windows](#windows).
 
 **Restart shell** starts a fresh one if you `exit` or something hangs.
+
+## Windows
+
+The panel runs `%COMSPEC%`, which is `cmd.exe` unless you've changed it, and falls
+back to `powershell.exe` if the variable is unset. Windows has no login-shell flag,
+so nothing like `-l` is added.
+
+For PowerShell, set *Shell* to `powershell.exe`, or to `pwsh.exe` for PowerShell 7.
+The setting is one program, not a command line: a path with spaces
+(`C:\Program Files\PowerShell\7\pwsh.exe`) works as typed, without quotes, and
+arguments aren't supported there.
+
+It needs Windows 10 version 1809 or later, the first with ConPTY. On anything older
+the panel says it couldn't start the shell.
+
+**What's been checked.** CI runs a real `cmd.exe` in a real pseudo-console on a
+Windows runner (output, typing, resize, exit code, **Restart shell**'s close),
+whenever the Windows build runs. Nobody has used the panel on a Windows machine
+yet: the page in QtWebEngine, PowerShell, full-screen programs and the stream view
+are untried there. If something's off, [open an issue](https://github.com/IamMrCupp/benchhud/issues).
 
 ## Serial consoles
 
@@ -47,7 +69,7 @@ arguments (`flashrom -p ch341a_spi -r dump.bin`) and run it yourself.
 
 - **Attached to a serial port?** benchhud asks before switching the panel back to
   your shell, and the answer defaults to No.
-- **Terminal panel off** (or on Windows): the tool opens in a system terminal
+- **Terminal panel off**: the tool opens in a system terminal
   window instead: Terminal.app on macOS, a console on Windows, and on Linux the
   first of `x-terminal-emulator`, GNOME Terminal, Konsole, Xfce Terminal, kitty,
   Alacritty or xterm. The window stays open at a shell when the tool exits.
@@ -104,10 +126,12 @@ separately: turning on the terminal alone serves only the terminal.
 
 ## How it's built
 
-- **The shell** runs in a POSIX pseudo-terminal (`pty.fork`), so job control, Ctrl-C
-  and resizing work as in any terminal. benchhud strips its own bundled-Python
-  variables (`PYTHONHOME` and friends) from the shell's environment and sets
-  `TERM=xterm-256color`.
+- **The shell** runs in a POSIX pseudo-terminal (`pty.fork`) on macOS and Linux, so
+  job control, Ctrl-C and resizing work as in any terminal. On Windows it runs in a
+  ConPTY pseudo-console, through [pywinpty](https://github.com/andfoy/pywinpty)
+  (MIT), which only installs there. Either way benchhud strips its own
+  bundled-Python variables (`PYTHONHOME` and friends) from the shell's environment
+  and sets `TERM=xterm-256color`.
 - **The screen** is [xterm.js](https://xtermjs.org/) (MIT), the component VS Code
   uses. It's vendored under `resources/web/vendor`, so nothing loads from a CDN.
 - **One page, two surfaces:** the panel shows it in QtWebEngine, and OBS loads the
@@ -123,4 +147,5 @@ separately: turning on the terminal alone serves only the terminal.
 | Panel says *can't start: port … is in use* | Something else has the browser-source port. Change it in Preferences → Output. |
 | Panel says *QtWebEngine didn't load* (Linux) | A system library is missing. Reinstall the `.deb` with `sudo apt install ./benchhud_….deb`, which pulls the dependencies. |
 | Blank panel in a self-built Mac app | The bundle is missing the `allow-jit` entitlement. See [PACKAGING.md](PACKAGING.md). |
+| Panel says *couldn't start cmd.exe* (Windows) | The pseudo-console didn't open; the message carries the reason. Windows before 10 version 1809 has no ConPTY. |
 | OBS source is blank | Sharing is off, the stream is paused, or benchhud isn't running. Check that the link's token matches Preferences. |

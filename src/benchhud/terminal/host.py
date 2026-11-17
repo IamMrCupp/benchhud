@@ -21,6 +21,7 @@ asks for the scrollback again.
 from __future__ import annotations
 
 import secrets
+import sys
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -33,6 +34,21 @@ if TYPE_CHECKING:
 SCROLLBACK_CHARS = 200_000
 
 SessionFactory = Callable[..., "PtySession"]
+
+
+def default_session_factory(platform: str | None = None) -> SessionFactory:
+    """The shell backend for this OS: ConPTY on Windows, a POSIX pty elsewhere.
+
+    Imported here, not at module level: each backend only imports on its own OS
+    (``fcntl`` and ``termios`` on one side, pywinpty on the other).
+    """
+    if (platform or sys.platform) == "win32":
+        from benchhud.terminal.conpty_session import ConPtySession
+
+        return ConPtySession
+    from benchhud.terminal.pty_session import PtySession
+
+    return PtySession
 
 
 @dataclass(frozen=True)
@@ -65,9 +81,7 @@ class TerminalHost:
     ) -> None:
         self._argv = list(argv)
         if session_factory is None:
-            from benchhud.terminal.pty_session import PtySession  # POSIX only
-
-            session_factory = PtySession
+            session_factory = default_session_factory()
         self._session_factory = session_factory
         self._scrollback = max(1024, scrollback)
         self.write_token = secrets.token_urlsafe(24)

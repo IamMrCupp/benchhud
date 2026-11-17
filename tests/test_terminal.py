@@ -26,7 +26,9 @@ from benchhud.shell.preferences import PreferencesDialog
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.events import terminal_events
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX pty only")
+# The pty tests need /bin/sh, and the wiring tests assert POSIX shell argv. The
+# Windows side is tests/test_terminal_windows.py.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX shells and paths")
 
 
 class FakeSession:

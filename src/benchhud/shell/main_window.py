@@ -862,7 +862,7 @@ class MainWindow(QMainWindow):
 
         In the Terminal panel when it's running: the command goes at the shell
         prompt without Enter, so the operator adds arguments and runs it.
-        Otherwise (the terminal is off, or on Windows) in a system terminal window.
+        Otherwise (the terminal is off) in a system terminal window.
         """
         cfg = self._config.terminal
         if not (TERMINAL_SUPPORTED and cfg.enabled and self._terminal is not None):
@@ -2119,7 +2119,7 @@ class MainWindow(QMainWindow):
         cfg = self._config.terminal
         terminal = self._terminal
         if not TERMINAL_SUPPORTED:
-            panel.show_message("The terminal isn't available on Windows yet.", attachable=False)
+            panel.show_message("The terminal isn't available on this platform.", attachable=False)
         elif not cfg.enabled:
             panel.show_message(
                 "The terminal is off. Turn it on in Preferences → Terminal.", attachable=False
