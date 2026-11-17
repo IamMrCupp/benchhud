@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.7](https://github.com/IamMrCupp/benchhud/compare/v0.14.6...v0.14.7) (2026-11-17)
+
+
+### Performance
+
+* **hud:** limit OpenCV to 2 threads by default, set from performance.opencv_threads ([75f43fb](https://github.com/IamMrCupp/benchhud/commit/75f43fb79e066a30f2140de59a08a69ec9c4a154))
+
 ## [0.14.6](https://github.com/IamMrCupp/benchhud/compare/v0.14.5...v0.14.6) (2026-11-17)
 
 
