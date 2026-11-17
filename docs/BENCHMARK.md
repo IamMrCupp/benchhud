@@ -47,12 +47,22 @@ uv run scripts/bench_hud.py --compare before.json after.json
 `--compare` prints both columns and the change, and says so when the two runs
 differ in config, host or clip.
 
-On the bench there's no `uv`. Run a checkout's source on the installed
-package's dependencies, which leaves the running HUD alone:
+On the bench there's no `uv` and no checkout. Copy the script over and run it
+on the installed package:
 
 ```bash
-PYTHONPATH=src:/usr/lib/benchhud/app_packages python3 scripts/bench_hud.py
+scp scripts/bench_hud.py repair-bench:/tmp/
 ```
+
+```bash
+PYTHONPATH=/usr/lib/benchhud/app:/usr/lib/benchhud/app_packages python3 /tmp/bench_hud.py
+```
+
+That measures the version installed there, not the checkout the script came
+from. It opens no camera and no loopback node, so it runs next to the live HUD,
+but the two share the CPU: the default run measured 215% of a core with the HUD
+and OBS running and 194% with the HUD stopped (0.14.0, 2026-11-16). For numbers
+worth keeping, stop the HUD first and start it again after.
 
 ## What runs, and what's swapped
 
@@ -134,9 +144,10 @@ nothing about the bench.
   camera's 30 is decode on demand doing its job (#346), not a drop.
 - **CPU, whole process** is user plus system time over wall time, in percent of
   one core, the unit `top` uses. 250 is two and a half cores.
-- **Per thread.** On Linux every thread is read from `/proc/self/task`, so
-  OpenCV's and Qt's workers show under their own names. Elsewhere only the main
-  thread and the two readers can be read, and the rest is one line, the
+- **Per thread.** On Linux every thread is read from `/proc/self/task` and
+  grouped by thread name. On the bench the workers all carry the process name,
+  so OpenCV's and Qt's come out as one `other: python3` line. Elsewhere only the
+  main thread and the two readers can be read, and the rest is one line, the
   remainder. OpenCV spreads a resize or a blend over its worker threads, so
   work that a main-thread stage asked for can show up there.
 - **Stages** are wall time around each step, mean per call, and `% core` is
