@@ -113,11 +113,29 @@ gh release download --repo IamMrCupp/benchhud --pattern '*.deb'
 sudo apt install ./benchhud_*.deb
 ```
 
+Or from the bench apt repo, which also brings updates with `apt upgrade`:
+
+```sh
+sudo curl -fsSLo /usr/share/keyrings/bench-archive-keyring.gpg https://apt.yolorepair.com/bench-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/bench-archive-keyring.gpg] https://apt.yolorepair.com stable main" \
+  | sudo tee /etc/apt/sources.list.d/bench.list
+sudo apt update
+sudo apt install benchhud        # or bench-suite, for the whole bench (below)
+```
+
 `apt install` (not `dpkg -i`) pulls in the libraries Qt needs. It shows up in
 the app menu as **benchhud**. Two one-time steps are left to you, since a
 package shouldn't do them behind your back: join the `video`, `dialout` and
 `plugdev` groups, and load v4l2loopback for virtual-camera output. Both are in
 [BENCH-SETUP.md](docs/BENCH-SETUP.md).
+
+**The whole bench in one go (optional).** `sudo apt install bench-suite` from
+that repo installs benchhud with the three services below, and
+`sudo bench-setup` then walks through the rest: one password for the services,
+their tokens written into benchhud's config, the virtual-camera node, the
+camera names, and what to tell OBS. It asks before it changes anything, and
+`bench-setup doctor` checks the result. Nothing here needs it; it saves the
+copying. See [bench-suite](https://github.com/IamMrCupp/bench-suite#readme).
 
 **Windows.** The `.msi` from the latest release. It installs per user, with no
 admin rights. It's ad-hoc signed, so SmartScreen warns on first run. The HUD
@@ -138,9 +156,8 @@ Windows and macOS tray apps, Docker, Kubernetes):
 [bench-parts](https://github.com/IamMrCupp/bench-parts) for parts inventory.
 [bench-recon](https://github.com/IamMrCupp/bench-recon) sits beside them as the
 system of record for hardware pentest engagements. Each one shows up as a panel
-in the HUD once you point benchhud at it, and
-[bench-suite](https://github.com/IamMrCupp/bench-suite) sets up the lot and
-wires them to each other in one go.
+in the HUD once you point benchhud at it — by hand in Preferences, or with
+[bench-suite](https://github.com/IamMrCupp/bench-suite), above.
 
 ## Hardware
 
