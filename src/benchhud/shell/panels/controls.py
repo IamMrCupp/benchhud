@@ -36,7 +36,7 @@ from benchhud.overlay.config_adapter import (
 from benchhud.overlay.reference import CompareMode, ReferenceSettings
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.panel import PANEL_MARGINS, Panel
-from benchhud.shell.qt_util import fit_combo_popup, grow_fields
+from benchhud.shell.qt_util import fit_combo_popup, grow_fields, hint, section_label
 
 
 class ControlsPanel(Panel):
@@ -108,6 +108,7 @@ class ControlsPanel(Panel):
         range_row.setContentsMargins(0, 0, 0, 0)
         self._range_row.setLayout(range_row)
 
+        form.addRow(section_label("Thermal overlay"))
         form.addRow("Mode", self.mode_combo)
         form.addRow("Range", self.range_combo)
         form.addRow("", self._range_row)
@@ -122,13 +123,14 @@ class ControlsPanel(Panel):
         self.undo_button.setToolTip("Go back to the alignment before the last calibration")
         self.undo_button.setEnabled(False)
         self.undo_button.clicked.connect(self.undo_requested)
-        self.calibration_status = QLabel()
+        self.calibration_status = hint(QLabel())
         self.calibration_status.setWordWrap(True)
         self.calibration_status.setVisible(False)
         calibrate_row = QHBoxLayout()
         calibrate_row.addWidget(self.calibrate_button, stretch=1)
         calibrate_row.addWidget(self.undo_button)
 
+        form.addRow(section_label("Alignment"))
         form.addRow(calibrate_row)
         form.addRow(self.calibration_status)
         form.addRow("Scale", self.scale_spin)
@@ -168,12 +170,12 @@ class ControlsPanel(Panel):
         self.reference_capture_button.clicked.connect(self.reference_capture_requested)
         self.reference_load_button = QPushButton("Load photo…")
         self.reference_load_button.clicked.connect(self.reference_load_requested)
-        self.reference_status = QLabel("No reference for this board.")
+        self.reference_status = hint(QLabel("No reference for this board."))
         self.reference_status.setWordWrap(True)
         reference_buttons = QHBoxLayout()
         reference_buttons.addWidget(self.reference_capture_button, stretch=1)
         reference_buttons.addWidget(self.reference_load_button, stretch=1)
-        form.addRow(QLabel("Known-good board"))
+        form.addRow(section_label("Known-good board"))
         form.addRow("Compare", self.reference_mode)
         form.addRow("Opacity", self.reference_opacity)
         form.addRow(reference_buttons)

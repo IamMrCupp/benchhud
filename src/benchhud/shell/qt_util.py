@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QFormLayout, QMainWindow, QTabBar
+from PySide6.QtWidgets import QComboBox, QFormLayout, QLabel, QMainWindow, QTabBar
 
 # Room for the dropdown indicator, item padding and a scrollbar.
 _POPUP_CHROME_PX = 44
@@ -21,6 +21,19 @@ def fit_combo_popup(combo: QComboBox) -> None:
         default=0,
     )
     combo.view().setMinimumWidth(widest + _POPUP_CHROME_PX)
+
+
+def section_label(text: str) -> QLabel:
+    """A heading for a run of controls inside a panel; the theme styles it."""
+    label = QLabel(text)
+    label.setObjectName("sectionLabel")
+    return label
+
+
+def hint(label: QLabel) -> QLabel:
+    """Mark ``label`` as secondary text, which the theme draws muted."""
+    label.setObjectName("hint")
+    return label
 
 
 def grow_fields(form: QFormLayout) -> None:
