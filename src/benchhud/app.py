@@ -11,7 +11,7 @@ import sys
 from benchhud import __version__
 
 #: First arguments that are a command, answered on the terminal with no window.
-COMMANDS = frozenset({"-V", "--version", "udev-rules", "config"})
+COMMANDS = frozenset({"-V", "--version", "udev-rules", "config", "virtual-camera"})
 
 
 def use_terminal_streams() -> None:
@@ -57,6 +57,11 @@ def main(argv: list[str] | None = None) -> int:
         from benchhud.cli_config import main as config_main
 
         return config_main(argv[1:])
+    if argv and argv[0] == "virtual-camera":
+        # Register the Windows virtual camera (#124). Display-free as well.
+        from benchhud.output.softcam_register import main as virtual_camera_main
+
+        return virtual_camera_main(argv[1:])
 
     # Import Qt + shell lazily so ``--version`` stays display-free.
     from PySide6.QtCore import QCoreApplication, Qt

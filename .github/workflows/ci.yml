@@ -178,17 +178,97 @@ jobs:
             exit 1
           fi
 
+  # softcam.dll, the Windows virtual camera (#124). Built from pinned source
+  # (packaging/windows/build-softcam.ps1), then proved the way a camera app
+  # would use it: benchhud publishes a known picture and a DirectShow reader
+  # has to get the same picture back. The MSI ships the DLL this job built, so
+  # an MSI is only made from a DLL that passed.
+  softcam:
+    # Windows runners cost 2x Linux minutes, so this runs when the MSI does.
+    if: inputs.full || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Build softcam.dll
+        run: ./packaging/windows/build-softcam.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchhud-softcam
+          path: packaging/windows/softcam/softcam.dll
+          if-no-files-found: error
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Sync (frozen)
+        run: uv sync --frozen
+
+      # Before it's registered a sender would still take frames, and no camera
+      # app could see them. benchhud has to refuse and say what to do.
+      - name: Unregistered, benchhud says so
+        env:
+          BENCHHUD_REQUIRE_SOFTCAM: unregistered
+        run: |
+          uv run benchhud virtual-camera status
+          if ($LASTEXITCODE -eq 0) { throw "softcam is already registered on a clean runner" }
+          uv run pytest -v -rs tests/test_softcam_windows.py -k unregistered
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # The same call the Preferences button makes. The runner is already an
+      # administrator, so Windows has nothing to ask.
+      - name: Register it
+        run: |
+          uv run benchhud virtual-camera register
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run benchhud virtual-camera status
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      # -rs lists every skip: a test that skipped here didn't run anywhere.
+      - name: A camera app sees what benchhud sends
+        env:
+          BENCHHUD_REQUIRE_SOFTCAM: registered
+        run: uv run pytest -v -rs tests/test_softcam_windows.py
+
+      - name: Unregister it
+        run: |
+          uv run benchhud virtual-camera unregister
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run benchhud virtual-camera status
+          if ($LASTEXITCODE -eq 0) { throw "softcam is still registered after unregister" }
+          exit 0
+
   # The Windows build (#207). There's no Windows bench yet, so this is the only
   # proof the app packages and starts there. Briefcase fetches WiX itself.
   msi:
     # macOS and Windows runners cost 10x and 2x Linux minutes, so this runs
     # for releases, by hand, or on a PR labelled full-ci, not on every push.
     if: inputs.full || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    needs: softcam
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
+
+      # The virtual camera's DLL, as built and checked by the softcam job.
+      # pyproject lists it as a Windows source, so it has to be here first.
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchhud-softcam
+          path: packaging/windows/softcam
 
       # Briefcase bundles the build host's Python version, so pin it here
       # rather than taking whatever the runner image defaults to.
@@ -204,6 +284,15 @@ jobs:
           briefcase create  windows app --no-input
           briefcase build   windows app --no-input
           briefcase package windows app --adhoc-sign --no-input
+
+      - name: softcam.dll, LICENSE and NOTICES are in the app
+        shell: pwsh
+        run: |
+          $app = "build\benchhud\windows\app\src\app"
+          foreach ($f in 'softcam.dll', 'LICENSE', 'NOTICES') {
+            if (-not (Test-Path "$app\$f")) { Get-ChildItem $app; throw "$f missing from $app" }
+          }
+          Write-Host "all three in $app"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -475,3 +564,63 @@ jobs:
           if ($p.HasExited) { throw "benchhud exited with $($p.ExitCode); expected to still be running" }
           Write-Host "still running after 45s (pid $($p.Id))"
           Stop-Process -Id $p.Id -Force
+
+      # The installer's post-install step registers softcam.dll (#124). The
+      # runner installs as an administrator, so it can; a per-user install by
+      # someone who isn't leaves this to the Preferences button.
+      - name: The installer registered the virtual camera
+        run: |
+          $dir = Split-Path $env:BENCHHUD_EXE
+          $dll = Join-Path $dir 'app\softcam.dll'
+          foreach ($f in $dll, (Join-Path $dir 'app\LICENSE'), (Join-Path $dir 'app\NOTICES')) {
+            if (-not (Test-Path $f)) { throw "$f is not in the install" }
+          }
+          $key = 'Registry::HKEY_CLASSES_ROOT\CLSID\{AEF3B972-5FA5-4647-9571-358EB472BC9E}\InprocServer32'
+          if (-not (Test-Path $key)) {
+            Select-String -Path msi.log -Pattern 'benchhud:' | Select-Object -Last 10
+            throw "softcam is not registered after the install"
+          }
+          $registered = (Get-Item $key).GetValue('')
+          Write-Host "registered: $registered"
+          if ($registered -ine $dll) { throw "registered $registered, expected $dll" }
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          sparse-checkout: packaging/windows
+          path: repo
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The whole path a streamer uses, short of OBS itself: the installed app
+      # with output on, and a DirectShow reader getting its picture.
+      - name: A camera app gets the installed app's picture
+        run: |
+          python -m pip install --quiet opencv-python-headless numpy
+          $cfg = Join-Path $env:RUNNER_TEMP 'benchhud.toml'
+          Set-Content -Path $cfg -Value "[output]`nenabled = true`nwidth = 1280`nheight = 720`n`n[panels.scope]`nenabled = true`ndevice = `"`"`n"
+          $env:BENCHHUD_CONFIG = $cfg
+          $p = Start-Process $env:BENCHHUD_EXE -PassThru
+          try {
+            python repo\packaging\windows\read_virtual_camera.py 1280 720 90
+            $code = $LASTEXITCODE
+            if ($p.HasExited) { throw "benchhud exited with $($p.ExitCode) while publishing" }
+          } finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
+          if ($code -ne 0) { throw "no picture from the installed app's virtual camera" }
+
+      - name: Uninstalling takes the registration with it
+        run: |
+          $msi = (Get-ChildItem dist\*.msi | Select-Object -First 1).FullName
+          $p = Start-Process msiexec.exe -Wait -PassThru `
+            -ArgumentList '/x', "`"$msi`"", '/qn', '/l*v', 'msi-uninstall.log'
+          if ($p.ExitCode -ne 0) {
+            Get-Content msi-uninstall.log -Tail 80
+            throw "msiexec /x exited with $($p.ExitCode)"
+          }
+          $key = 'Registry::HKEY_CLASSES_ROOT\CLSID\{AEF3B972-5FA5-4647-9571-358EB472BC9E}\InprocServer32'
+          if (Test-Path $key) { throw "softcam is still registered after the uninstall" }
+          Write-Host "registration removed"
