@@ -7,6 +7,16 @@ the cameras and instrument work the same but output goes into OBS's own virtual
 camera instead of a loopback node — see [MACOS-SETUP.md](MACOS-SETUP.md). Windows
 has no output backend yet.
 
+> **The guided way.** If benchhud came from the bench apt repo,
+> [`bench-setup`](https://github.com/IamMrCupp/bench-suite#readme) does the host
+> steps on this page as prompts. `sudo bench-setup host` covers the
+> virtual-camera output, torn frames and the two-card ARP settings;
+> `sudo bench-setup cameras` covers the `/dev/cam-*` names and the thermal
+> camera's autosuspend; `bench-setup obs` says what to point OBS at; and
+> `bench-setup doctor` checks the lot without changing anything. Each shows the
+> file it would write and asks first. This page stays the reference: it's what
+> those commands do, and why.
+
 The verified reference bench (Ubuntu 26.04): a Sipeed T256s thermal camera, a
 BTER 4K scope camera, and an OWON SPM8104 combined PSU/DMM. Your device numbers
 and model names will differ — identify them (step 2) rather than copying paths.
