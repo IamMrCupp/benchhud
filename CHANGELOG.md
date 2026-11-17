@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/IamMrCupp/benchhud/compare/v0.14.8...v0.15.0) (2026-11-17)
+
+
+### Features
+
+* **preferences:** find intake and bench-parts on this machine ([#424](https://github.com/IamMrCupp/benchhud/issues/424)) ([aa04d1d](https://github.com/IamMrCupp/benchhud/commit/aa04d1d2c54b46b824660f3baa5a545f297b1890))
+* **ui:** give the composite the window and tidy the theme ([#422](https://github.com/IamMrCupp/benchhud/issues/422)) ([594d47c](https://github.com/IamMrCupp/benchhud/commit/594d47c5401018508edf24ce109744d7ee497d9a))
+
 ## [0.14.8](https://github.com/IamMrCupp/benchhud/compare/v0.14.7...v0.14.8) (2026-11-17)
 
 
