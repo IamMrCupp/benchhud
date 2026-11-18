@@ -31,7 +31,9 @@ class PanelManager:
         if panel.panel_id in self._docks:
             raise ValueError(f"duplicate panel id: {panel.panel_id!r}")
 
-        dock = QDockWidget(panel.panel_title, self._window)
+        # Qt reads a lone "&" in a dock's title as a shortcut marker and drops
+        # it: "Pinout & protocols" showed as "Pinout _protocols" (#430).
+        dock = QDockWidget(panel.panel_title.replace("&", "&&"), self._window)
         dock.setObjectName(f"dock__{panel.panel_id}")
 
         # Wrap in a scroll area so a short/narrow dock scrolls instead of

@@ -15,6 +15,11 @@ class _TwoPanel(Panel):
     panel_title = "Two"
 
 
+class _AmpersandPanel(Panel):
+    panel_id = "amp"
+    panel_title = "Pins & protocols"
+
+
 class _NoIdPanel(Panel):
     pass  # panel_id left empty on purpose
 
@@ -88,3 +93,12 @@ def test_layout_persists_and_restores_without_error(qtbot) -> None:
     second = MainWindow(config)
     qtbot.addWidget(second)
     assert "scope" in second.panels.panel_ids()
+
+
+def test_an_ampersand_in_a_title_is_shown_not_eaten(qtbot) -> None:
+    """Qt takes a lone "&" for a shortcut marker and drops it (#430)."""
+    window = MainWindow()
+    qtbot.addWidget(window)
+    dock = PanelManager(window).add_panel(_AmpersandPanel())
+    assert dock.windowTitle() == "Pins && protocols"
+    assert window.panels.dock("pinout").windowTitle() == "Pinout && protocols"
