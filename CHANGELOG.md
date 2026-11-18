@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/IamMrCupp/benchhud/compare/v0.16.0...v0.16.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* **ui:** show the ampersand in the Pinout & protocols title ([#430](https://github.com/IamMrCupp/benchhud/issues/430)) ([01d237e](https://github.com/IamMrCupp/benchhud/commit/01d237e65e57085f914357f4049c2a3e8e146e88))
+
 ## [0.16.0](https://github.com/IamMrCupp/benchhud/compare/v0.15.0...v0.16.0) (2026-11-17)
 
 
