@@ -21,7 +21,8 @@ never touches the GUI thread. Routes:
 * ``/control/jobs`` — job control for ``benchhud job …`` (#433), when a
   :class:`~benchhud.browser_sources.control.JobControl` is attached. ``GET``
   lists the jobs, ``POST`` creates and selects one, ``POST /control/jobs/select``
-  selects one. Every request needs the run's token in an ``Authorization``
+  selects one, ``POST /control/jobs/set`` changes a job's fields (#436). Every
+  request needs the run's token in an ``Authorization``
   header, and one that carries an ``Origin`` must carry this server's. Replies
   hold the job card's whitelisted fields only.
 
@@ -45,7 +46,7 @@ from importlib.resources import files
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlsplit
 
-from benchhud.browser_sources.control import MAX_DEVICE_CHARS, JobControl
+from benchhud.browser_sources.control import JobControl, clean_fields
 from benchhud.browser_sources.hub import TopicHub
 
 if TYPE_CHECKING:
@@ -272,17 +273,27 @@ class _Handler(BaseHTTPRequestHandler):
             if (method, path) == ("GET", "/control/jobs"):
                 reply = jobs.list_jobs()
             elif (method, path) == ("POST", "/control/jobs"):
-                device = self._json_body().get("device")
-                if not isinstance(device, str) or not device.strip():
+                fields = clean_fields(self._json_body())
+                if "device" not in fields:
                     raise ValueError("a job needs a device name")
-                if len(device) > MAX_DEVICE_CHARS:
-                    raise ValueError(f"device name is over {MAX_DEVICE_CHARS} characters")
-                reply = jobs.create_job(device.strip())
+                reply = jobs.create_job(fields)
             elif (method, path) == ("POST", "/control/jobs/select"):
                 job_id = self._json_body().get("id")
                 if isinstance(job_id, bool) or not isinstance(job_id, int):
                     raise ValueError("select takes a job id, a whole number")
                 reply = jobs.select_job(job_id)
+                if reply is None:
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": f"no job #{job_id}"})
+                    return
+            elif (method, path) == ("POST", "/control/jobs/set"):
+                body = self._json_body()
+                job_id = body.pop("id", None)
+                if isinstance(job_id, bool) or not isinstance(job_id, int):
+                    raise ValueError("set takes a job id, a whole number")
+                fields = clean_fields(body)
+                if not fields:
+                    raise ValueError("nothing to set")
+                reply = jobs.update_job(job_id, fields)
                 if reply is None:
                     self._send_json(HTTPStatus.NOT_FOUND, {"error": f"no job #{job_id}"})
                     return

@@ -2024,8 +2024,11 @@ class MainWindow(QMainWindow):
             return None
         return JobControl(
             list_jobs=lambda: self._on_gui_thread(self._control_list_jobs),
-            create_job=lambda device: self._on_gui_thread(lambda: self._control_new_job(device)),
+            create_job=lambda fields: self._on_gui_thread(lambda: self._control_new_job(fields)),
             select_job=lambda job_id: self._on_gui_thread(lambda: self._control_select(job_id)),
+            update_job=lambda job_id, fields: self._on_gui_thread(
+                lambda: self._control_set(job_id, fields)
+            ),
         )
 
     def _publish_job_control(self, server: BrowserSourceServer) -> None:
@@ -2072,10 +2075,17 @@ class MainWindow(QMainWindow):
     def _control_list_jobs(self) -> dict[str, Any]:
         return jobs_payload(self._job_store.list_jobs(), self.jobs_panel.selected_job_id())
 
-    def _control_new_job(self, device: str) -> dict[str, Any]:
-        job = self.jobs_panel.create_job_named(device)
+    def _control_new_job(self, fields: dict[str, str]) -> dict[str, Any]:
+        rest = {name: value for name, value in fields.items() if name != "device"}
+        job = self.jobs_panel.create_job_named(fields.get("device", ""), **rest)
         if job is None:
             raise ValueError("a job needs a device name")
+        return job_reply(job, self.jobs_panel.selected_job_id())
+
+    def _control_set(self, job_id: int, fields: dict[str, str]) -> dict[str, Any] | None:
+        job = self.jobs_panel.update_job_fields(job_id, **fields)
+        if job is None:
+            return None
         return job_reply(job, self.jobs_panel.selected_job_id())
 
     def _control_select(self, job_id: int) -> dict[str, Any] | None:

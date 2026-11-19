@@ -87,7 +87,7 @@ which keeps out a web page in a local browser trying to reach the port under its
 own name (DNS rebinding). OBS on the same machine is the audience; OBS on a
 second streaming PC isn't supported.
 
-The same server takes `benchhud job list | new | select` — the one thing here
+The same server takes `benchhud job list | new | select | set` — the one thing here
 that changes anything. Those need a token that's new every launch, kept in an
 owner-only file beside the config, and they're refused from any other origin. The
 pages above stay read-only. See [JOBS.md](JOBS.md#from-a-terminal).
