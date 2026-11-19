@@ -36,7 +36,8 @@ glows — on the scope image, with the rest of the board left alone.*
 - **Repair jobs** — a local-first log of what's on the bench. One button attaches
   the current scope frame, thermal frame, and meter readings to the job timeline,
   and an over-current trip logs itself. Export a customer-facing report when it's
-  done. [More →](docs/JOBS.md)
+  done. `benchhud job new | select` picks the job from a terminal, so the job
+  card on stream doesn't need a walk to the bench. [More →](docs/JOBS.md)
 - **Ticket import** — optionally pull the open queue from a shop intake system
   and drop a ticket onto the bench as a job. Runs standalone without one.
   [More →](docs/INTAKE.md)

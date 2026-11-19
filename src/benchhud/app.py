@@ -11,7 +11,7 @@ import sys
 from benchhud import __version__
 
 #: First arguments that are a command, answered on the terminal with no window.
-COMMANDS = frozenset({"-V", "--version", "udev-rules", "config", "virtual-camera"})
+COMMANDS = frozenset({"-V", "--version", "udev-rules", "config", "job", "virtual-camera"})
 
 
 def use_terminal_streams() -> None:
@@ -57,6 +57,11 @@ def main(argv: list[str] | None = None) -> int:
         from benchhud.cli_config import main as config_main
 
         return config_main(argv[1:])
+    if argv and argv[0] == "job":
+        # Create or select a job on the running app (#433). Qt-free too.
+        from benchhud.cli_job import main as job_main
+
+        return job_main(argv[1:])
     if argv and argv[0] == "virtual-camera":
         # Register the Windows virtual camera (#124). Display-free as well.
         from benchhud.output.softcam_register import main as virtual_camera_main
@@ -90,7 +95,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setWindowIcon(app_icon())
     apply_theme(app)
 
-    window = MainWindow(config, on_persist=config_module.save)
+    from benchhud.browser_sources.control import default_control_path
+
+    window = MainWindow(config, on_persist=config_module.save, control_file=default_control_path())
     window.show()
     window.start_preview()
     window.start_thermal()  # no-op unless a thermal camera is chosen

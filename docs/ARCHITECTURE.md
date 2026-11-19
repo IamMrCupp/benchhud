@@ -54,7 +54,10 @@ ticket system is a protocol with a fake, not a dependency.
   objects the docks draw; the job card is a field whitelist), and `server`
   (`BrowserSourceServer`, stdlib `ThreadingHTTPServer` on `127.0.0.1`, one page
   per panel plus a Server-Sent Events feed). The pages live in
-  `resources/web/`. See [BROWSER-SOURCES.md](BROWSER-SOURCES.md).
+  `resources/web/`. See [BROWSER-SOURCES.md](BROWSER-SOURCES.md). `control`
+  is the one write path: job control for `benchhud job …` (`cli_job`, Qt-free),
+  token-gated, with each command queued onto the GUI thread by a signal. See
+  [JOBS.md](JOBS.md#from-a-terminal).
 - **`terminal/`** — the in-app terminal (#194): `pty_session` (`PtySession`, a
   shell in a POSIX pseudo-terminal, read on its own thread), `host`
   (`TerminalHost`: bounded scrollback by absolute position, size/exit/share
