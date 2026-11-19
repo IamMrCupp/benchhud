@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/IamMrCupp/benchhud/compare/v0.17.0...v0.18.0) (2026-11-19)
+
+
+### Features
+
+* **jobs:** set every job field from the command line ([#436](https://github.com/IamMrCupp/benchhud/issues/436)) ([30ed6a8](https://github.com/IamMrCupp/benchhud/commit/30ed6a82f2dd1201ca823ee88025419f00a529d6))
+
 ## [0.17.0](https://github.com/IamMrCupp/benchhud/compare/v0.16.1...v0.17.0) (2026-11-19)
 
 
