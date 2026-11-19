@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/IamMrCupp/benchhud/compare/v0.16.1...v0.17.0) (2026-11-19)
+
+
+### Features
+
+* **jobs:** create and select a job from the command line ([#433](https://github.com/IamMrCupp/benchhud/issues/433)) ([147aeba](https://github.com/IamMrCupp/benchhud/commit/147aebaea44c3a7843f21d10cb61cdaad07bd280))
+
 ## [0.16.1](https://github.com/IamMrCupp/benchhud/compare/v0.16.0...v0.16.1) (2026-11-18)
 
 
