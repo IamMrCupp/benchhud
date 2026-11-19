@@ -15,7 +15,7 @@ symptoms are free text typed from a customer's description.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict
 from typing import Any
 
@@ -77,3 +77,20 @@ def job_payload(job: Job | None) -> dict[str, Any]:
     if job is None:
         return {"job": None}
     return {"job": {name: getattr(job, name) for name in JOB_FIELDS}}
+
+
+def jobs_payload(jobs: Iterable[Job], selected_id: int | None) -> dict[str, Any]:
+    """The job list for ``benchhud job list`` (#433): the same whitelist, per job.
+
+    A remote command's reply ends up in a terminal that may itself be on
+    stream, so it gets the job card's fields and nothing more.
+    """
+    return {
+        "jobs": [job_payload(job)["job"] for job in jobs],
+        "selected": selected_id,
+    }
+
+
+def job_reply(job: Job, selected_id: int | None) -> dict[str, Any]:
+    """One job after ``job new`` or ``job select``, and which job is selected now."""
+    return {**job_payload(job), "selected": selected_id}

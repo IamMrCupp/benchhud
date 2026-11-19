@@ -122,6 +122,52 @@ timestamp — nothing in it reads the clock, so it's deterministic under test.
 
 ---
 
+## From a terminal
+
+Selecting a job used to be a click in the list and nothing else. Fine at the
+bench — no use from the couch with the stream already live and the job card
+sitting empty. So the running app takes three commands:
+
+```
+benchhud job list
+benchhud job new MacBook Pro A1708
+benchhud job select 12
+```
+
+- **`list`** — the jobs, newest first. The `*` marks the selected one.
+- **`new`** — creates the job and selects it, same as the **New job** button. No
+  quotes needed around the device name.
+- **`select`** — same as clicking the row. The Jobs dock moves, and so does the
+  job card on stream.
+
+Add `--json` to any of them for a script or a Stream Deck button. Over SSH it's
+the same thing: `ssh bench benchhud job select 12`.
+
+**It talks to the app that's already running.** The commands go to benchhud's
+local server — the one behind the [browser sources](BROWSER-SOURCES.md) — so that
+server has to be on (Preferences → Output → **Serve panels to OBS as Browser
+sources**, or the terminal panel). If benchhud isn't running, the command says so
+and exits 1. It never opens `jobs.db` itself — a row written behind the app's
+back wouldn't show in the list anyway.
+
+**Who's allowed.** The server listens on `127.0.0.1` only, and every command
+needs a token. benchhud makes a new one each time the server starts and writes it,
+with the port, to `control.json` beside the config — owner-only (`0600`), gone
+again when the app closes. The CLI reads that file, so "can read your config
+dir" is the whole permission model: you, on that machine. The token goes in a
+request header, never the URL, and is never logged or printed. A web page in a
+local browser can't use it — it can't read the file, and a request carrying
+another site's `Origin` or a `Host` that isn't loopback is refused before the
+token is even looked at.
+
+**What comes back** is what the job card gets: `id`, `device`, `board_id`,
+`status`, `external_ref`, plus which job is selected. Never `customer`, `serial`
+or `symptoms` — the terminal you typed it in might be on stream too.
+
+Jobs only. It doesn't drive outputs, scenes or instruments.
+
+---
+
 ## Where the data lives
 
 Beside your live config file:
@@ -129,6 +175,7 @@ Beside your live config file:
 ```
 <config dir>/jobs.db                     # the SQLite store
 <config dir>/job_attachments/<job_id>/   # capture images
+<config dir>/control.json                # port + token for `benchhud job`, while the app runs
 ```
 
 Schema migrations are **additive only** — new columns get added to an existing

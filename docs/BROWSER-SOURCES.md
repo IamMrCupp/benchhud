@@ -87,6 +87,11 @@ which keeps out a web page in a local browser trying to reach the port under its
 own name (DNS rebinding). OBS on the same machine is the audience; OBS on a
 second streaming PC isn't supported.
 
+The same server takes `benchhud job list | new | select` — the one thing here
+that changes anything. Those need a token that's new every launch, kept in an
+owner-only file beside the config, and they're refused from any other origin. The
+pages above stay read-only. See [JOBS.md](JOBS.md#from-a-terminal).
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -94,4 +99,4 @@ second streaming PC isn't supported.
 | Status bar: *browser sources off — port 8780 is in use* | Something else has the port. Pick another in Preferences and update the OBS URLs. |
 | Page is blank in OBS | Check the URL starts `http://127.0.0.1:` and that the option is on. `http://127.0.0.1:8780/` in a normal browser should list the panels. |
 | Page shows "—" everywhere | benchhud isn't running, or has no readings yet. The meter reads "—" until the PSU answers. |
-| Job card is empty | No job is selected in the Jobs panel. |
+| Job card is empty | No job is selected in the Jobs panel. Click one, or `benchhud job select <id>` from anywhere. |

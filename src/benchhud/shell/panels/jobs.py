@@ -239,13 +239,22 @@ class JobsPanel(Panel):
 
     def create_job(self) -> None:
         """Create a job from the device box (ignored when empty)."""
-        device = self.new_device_edit.text().strip()
+        if self.create_job_named(self.new_device_edit.text()) is not None:
+            self.new_device_edit.clear()
+
+    def create_job_named(self, device: str) -> Job | None:
+        """Create a job for ``device`` and select it; None when the name is empty.
+
+        What **New job** does, without the device box: ``benchhud job new``
+        lands here (#433) and leaves whatever is being typed in the box alone.
+        """
+        device = device.strip()
         if not device:
-            return
+            return None
         job = self._store.create_job(device)
-        self.new_device_edit.clear()
         self.refresh_jobs()
         self.select_job(job.id)
+        return job
 
     def import_from_ticket(self) -> TicketPickerDialog | None:
         """Open the intake queue, let the operator pick a ticket, import it."""

@@ -22,8 +22,11 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -37,7 +40,18 @@ from benchhud.boards.library import BoardLibrary
 from benchhud.boards.opener import open_board, open_schematic
 from benchhud.boards.worklist import boards_to_source
 from benchhud.browser_sources import BrowserSourceServer, TopicHub
-from benchhud.browser_sources.payloads import graph_payload, job_payload, meter_payload
+from benchhud.browser_sources.control import (
+    JobControl,
+    remove_control_file,
+    write_control_file,
+)
+from benchhud.browser_sources.payloads import (
+    graph_payload,
+    job_payload,
+    job_reply,
+    jobs_payload,
+    meter_payload,
+)
 from benchhud.capture.camera import CameraFrameSource, full_size_of
 from benchhud.capture.fallback import FallbackFrameSource, SourceStatus
 from benchhud.capture.frame_source import FrameSource, SyntheticFrameSource
@@ -274,6 +288,10 @@ def largest_screen(screens):
     return best
 
 
+#: How long a job command waits for the GUI thread before giving up (#433).
+JOB_COMMAND_TIMEOUT_S = 5.0
+
+
 class MainWindow(QMainWindow):
     """Top-level HUD window."""
 
@@ -282,6 +300,9 @@ class MainWindow(QMainWindow):
     control_done = Signal(str, object)
     #: A Recovery Mode check's answer, sent from its thread to this one (#370).
     _recovery_probed = Signal(object, str, float)
+    #: A job command from the local server's thread, to run on this one (#433):
+    #: (the work, the Future its answer goes in).
+    _job_command = Signal(object, object)
 
     def __init__(
         self,
@@ -292,9 +313,15 @@ class MainWindow(QMainWindow):
         job_store: JobStore | None = None,
         terminal_view_factory: ViewFactory | None = None,
         terminal_session_factory=None,
+        control_file: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        #: Where the job-control token is written for ``benchhud job …`` (#433).
+        #: None (the default, and what tests get) leaves job control off.
+        self._control_file = control_file
+        self._job_control: JobControl | None = None
+        self._job_command.connect(self._run_job_command)
         self._config = config or Config()
         self._terminal: TerminalHost | None = None
         self._terminal_session_factory = terminal_session_factory
@@ -1959,6 +1986,7 @@ class MainWindow(QMainWindow):
                 panels=cfg.enabled,
                 terminal=self._terminal,
                 now_playing_art=self._now_playing.art if self._now_playing else None,
+                jobs=self._make_job_control(),
             )
             try:
                 server.start()
@@ -1968,6 +1996,7 @@ class MainWindow(QMainWindow):
             else:
                 self._browser_server = server
                 self._browser_warning = None
+                self._publish_job_control(server)
                 self._publish_telemetry()
                 self._publish_job()
                 if self._now_playing is not None:
@@ -1983,8 +2012,82 @@ class MainWindow(QMainWindow):
             self._now_playing = None
         if self._browser_server is None:
             return
+        self._withdraw_job_control()
         self._browser_server.stop()
         self._browser_server = None
+
+    # --- job control (#433) ---------------------------------------------------
+
+    def _make_job_control(self) -> JobControl | None:
+        """The hooks behind ``benchhud job …``, with a token that's new every start."""
+        if self._control_file is None:
+            return None
+        return JobControl(
+            list_jobs=lambda: self._on_gui_thread(self._control_list_jobs),
+            create_job=lambda device: self._on_gui_thread(lambda: self._control_new_job(device)),
+            select_job=lambda job_id: self._on_gui_thread(lambda: self._control_select(job_id)),
+        )
+
+    def _publish_job_control(self, server: BrowserSourceServer) -> None:
+        """Write the port and token where the CLI looks, owner-only."""
+        self._job_control = server.jobs
+        if self._job_control is None or self._control_file is None:
+            return
+        try:
+            write_control_file(self._control_file, server.port, self._job_control.token)
+        except OSError as exc:
+            # The HUD carries on; `benchhud job` will say it can't find the app.
+            log.warning("job control off: could not write %s: %s", self._control_file, exc)
+
+    def _withdraw_job_control(self) -> None:
+        if self._job_control is not None and self._control_file is not None:
+            remove_control_file(self._control_file, self._job_control.token)
+        self._job_control = None
+
+    def _on_gui_thread(self, work: Callable[[], Any]) -> Any:
+        """Run ``work`` on the GUI thread and wait for its answer.
+
+        Called from the server's threads. The signal queues the call onto this
+        window's thread, as the panel's own slots run; a GUI that doesn't get to
+        it in time is a ``TimeoutError``, and the call is cancelled so a job
+        isn't made after the caller was told it failed.
+        """
+        future: Future = Future()
+        self._job_command.emit(work, future)
+        try:
+            return future.result(timeout=JOB_COMMAND_TIMEOUT_S)
+        except TimeoutError:
+            if future.cancel():
+                raise
+            return future.result()  # it started just as the wait ran out
+
+    def _run_job_command(self, work: Callable[[], Any], future: Future) -> None:
+        if not future.set_running_or_notify_cancel():
+            return
+        try:
+            future.set_result(work())
+        except Exception as exc:  # handed to the waiting server thread
+            future.set_exception(exc)
+
+    def _control_list_jobs(self) -> dict[str, Any]:
+        return jobs_payload(self._job_store.list_jobs(), self.jobs_panel.selected_job_id())
+
+    def _control_new_job(self, device: str) -> dict[str, Any]:
+        job = self.jobs_panel.create_job_named(device)
+        if job is None:
+            raise ValueError("a job needs a device name")
+        return job_reply(job, self.jobs_panel.selected_job_id())
+
+    def _control_select(self, job_id: int) -> dict[str, Any] | None:
+        job = self._job_store.get_job(job_id)
+        if job is None:
+            return None
+        self.jobs_panel.select_job(job_id)
+        if self.jobs_panel.selected_job_id() != job_id:
+            # The list predates this job (imported or made elsewhere): reload it.
+            self.jobs_panel.refresh_jobs()
+            self.jobs_panel.select_job(job_id)
+        return job_reply(job, self.jobs_panel.selected_job_id())
 
     def _make_now_playing(self) -> NowPlayingWatcher | None:
         """The now-playing banner's watcher (#251), when it's on and can work here."""

@@ -10,6 +10,8 @@ Server-Sent Events from the same readings that feed the Qt docks.
 * :mod:`~benchhud.browser_sources.payloads` — what each page receives. The job
   card is a whitelist, so ``customer`` can't reach a stream by accident.
 * :mod:`~benchhud.browser_sources.server` — the HTTP server itself.
+* :mod:`~benchhud.browser_sources.control` — job control for ``benchhud job …``
+  (#433): the per-launch token, its owner-only file, and the hooks the server calls.
 """
 
 from benchhud.browser_sources.hub import TopicHub

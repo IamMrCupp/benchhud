@@ -18,6 +18,12 @@ never touches the GUI thread. Routes:
   its feed (#194), when a :class:`~benchhud.terminal.TerminalHost` is attached.
   The in-app token may also ``POST /terminal/input`` and ``/terminal/resize``;
   the share token only watches. Posts must come from this origin.
+* ``/control/jobs`` — job control for ``benchhud job …`` (#433), when a
+  :class:`~benchhud.browser_sources.control.JobControl` is attached. ``GET``
+  lists the jobs, ``POST`` creates and selects one, ``POST /control/jobs/select``
+  selects one. Every request needs the run's token in an ``Authorization``
+  header, and one that carries an ``Origin`` must carry this server's. Replies
+  hold the job card's whitelisted fields only.
 
 The data panels (:data:`PANELS`) and the terminal are switched separately: the
 server can run for the terminal alone, and then the panels 404.
@@ -39,6 +45,7 @@ from importlib.resources import files
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlsplit
 
+from benchhud.browser_sources.control import MAX_DEVICE_CHARS, JobControl
 from benchhud.browser_sources.hub import TopicHub
 
 if TYPE_CHECKING:
@@ -93,8 +100,11 @@ class BrowserSourceServer:
         panels: bool = True,
         terminal: TerminalHost | None = None,
         now_playing_art: Callable[[], tuple[bytes, str] | None] | None = None,
+        jobs: JobControl | None = None,
     ) -> None:
         self._hub = hub
+        #: Job control for ``benchhud job …`` (#433), or None when it's off.
+        self.jobs = jobs
         self.panels_enabled = panels
         self.terminal = terminal
         #: The now-playing artwork as (bytes, content type), or None (#251).
@@ -180,7 +190,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         panels = self.owner.panels_enabled
-        if path == "/" and panels:
+        if path.startswith("/control/"):
+            self._control("GET", path)
+        elif path == "/" and panels:
             self._send(HTTPStatus.OK, "text/html; charset=utf-8", self._index().encode())
         elif path == "/panel/nowplaying/art" and panels:
             art = self.owner.now_playing_art() if self.owner.now_playing_art else None
@@ -213,6 +225,9 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._host_ok() or not self._origin_ok():
             self.send_error(HTTPStatus.FORBIDDEN, "loopback only")
             return
+        if path.startswith("/control/"):
+            self._control("POST", path)
+            return
         if path not in ("/terminal/input", "/terminal/resize"):
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -237,6 +252,64 @@ class _Handler(BaseHTTPRequestHandler):
                 return
         self.send_response(HTTPStatus.NO_CONTENT)
         self.end_headers()
+
+    def _control(self, method: str, path: str) -> None:
+        """Run one job command (#433). The Host check has already passed.
+
+        The token is checked before the path, so a caller without it learns
+        nothing about what's here. It's read from a header: the request line is
+        what gets logged, and the token is never in it.
+        """
+        jobs = self.owner.jobs
+        if (
+            jobs is None
+            or not self._origin_ok()
+            or not jobs.authorised(self.headers.get("Authorization"))
+        ):
+            self.send_error(HTTPStatus.FORBIDDEN, "bad or missing token")
+            return
+        try:
+            if (method, path) == ("GET", "/control/jobs"):
+                reply = jobs.list_jobs()
+            elif (method, path) == ("POST", "/control/jobs"):
+                device = self._json_body().get("device")
+                if not isinstance(device, str) or not device.strip():
+                    raise ValueError("a job needs a device name")
+                if len(device) > MAX_DEVICE_CHARS:
+                    raise ValueError(f"device name is over {MAX_DEVICE_CHARS} characters")
+                reply = jobs.create_job(device.strip())
+            elif (method, path) == ("POST", "/control/jobs/select"):
+                job_id = self._json_body().get("id")
+                if isinstance(job_id, bool) or not isinstance(job_id, int):
+                    raise ValueError("select takes a job id, a whole number")
+                reply = jobs.select_job(job_id)
+                if reply is None:
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": f"no job #{job_id}"})
+                    return
+            else:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+        except ValueError as exc:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except TimeoutError:
+            self._send_json(
+                HTTPStatus.SERVICE_UNAVAILABLE, {"error": "benchhud didn't answer in time"}
+            )
+        else:
+            self._send_json(HTTPStatus.OK, reply)
+
+    def _json_body(self) -> dict:
+        """The request body as a JSON object; ``ValueError`` when it isn't one."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_POST_BYTES:
+            raise ValueError("request body is too large")
+        body = json.loads(self.rfile.read(length).decode("utf-8", errors="replace") or "{}")
+        if not isinstance(body, dict):
+            raise ValueError("the body must be a JSON object")
+        return body
+
+    def _send_json(self, status: HTTPStatus, payload: dict) -> None:
+        self._send(status, "application/json; charset=utf-8", json.dumps(payload).encode())
 
     def _terminal_mode(self) -> str | None:
         """What this request's token may do with the terminal, if anything."""
