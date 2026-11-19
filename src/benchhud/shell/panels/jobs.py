@@ -60,6 +60,11 @@ def _short_stamp(iso: str) -> str:
     return iso[:16].replace("T", " ")
 
 
+def _row_text(job: Job) -> str:
+    """A job's line in the list: ``#12  MacBook Pro — open``."""
+    return f"#{job.id}  {job.device} — {job.status}"
+
+
 def _slug(text: str) -> str:
     """A filename-safe slug for the export default name (dashes collapsed)."""
     out: list[str] = []
@@ -242,18 +247,44 @@ class JobsPanel(Panel):
         if self.create_job_named(self.new_device_edit.text()) is not None:
             self.new_device_edit.clear()
 
-    def create_job_named(self, device: str) -> Job | None:
+    def create_job_named(self, device: str, **fields: str) -> Job | None:
         """Create a job for ``device`` and select it; None when the name is empty.
 
         What **New job** does, without the device box: ``benchhud job new``
         lands here (#433) and leaves whatever is being typed in the box alone.
+        ``fields`` are the other columns to fill in at the same time (#436).
         """
         device = device.strip()
         if not device:
             return None
-        job = self._store.create_job(device)
+        job = self._store.create_job(device, **fields)
         self.refresh_jobs()
         self.select_job(job.id)
+        return job
+
+    def update_job_fields(self, job_id: int, **fields: str) -> Job | None:
+        """Save ``fields`` on a job, as **Save** does; None when there's no such job.
+
+        ``benchhud job set`` lands here (#436). The selection stays where it
+        is. When the job is the one open in the detail form, the form is
+        reloaded, so a later **Save** can't write the old values back; an edit
+        to any other job leaves the form, and whatever's half-typed in it, alone.
+        """
+        if self._store.get_job(job_id) is None:
+            return None
+        job = self._store.update_job(job_id, **fields)
+        assert job is not None  # it existed a moment ago, on this thread
+        item = self._item_for(job_id)
+        if item is None:
+            # The list predates this job: reload it, and keep the selection.
+            selected = self.selected_job_id()
+            self.refresh_jobs()
+            if selected is not None:
+                self.select_job(selected)
+            return job
+        item.setText(_row_text(job))
+        if self.selected_job_id() == job_id:
+            self._load_selected()
         return job
 
     def import_from_ticket(self) -> TicketPickerDialog | None:
@@ -348,7 +379,7 @@ class JobsPanel(Panel):
         self.job_list.blockSignals(True)
         self.job_list.clear()
         for job in self._store.list_jobs():
-            item = QListWidgetItem(f"#{job.id}  {job.device} — {job.status}")
+            item = QListWidgetItem(_row_text(job))
             item.setData(Qt.ItemDataRole.UserRole, job.id)
             self.job_list.addItem(item)
         self.job_list.blockSignals(False)
@@ -367,11 +398,16 @@ class JobsPanel(Panel):
         return None if item is None else int(item.data(Qt.ItemDataRole.UserRole))
 
     def select_job(self, job_id: int) -> None:
+        item = self._item_for(job_id)
+        if item is not None:
+            self.job_list.setCurrentItem(item)
+
+    def _item_for(self, job_id: int) -> QListWidgetItem | None:
         for row in range(self.job_list.count()):
             item = self.job_list.item(row)
             if int(item.data(Qt.ItemDataRole.UserRole)) == job_id:
-                self.job_list.setCurrentRow(row)
-                return
+                return item
+        return None
 
     def _load_selected(self) -> None:
         job_id = self.selected_job_id()

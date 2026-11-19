@@ -32,6 +32,49 @@ FILE_NAME = "control.json"
 #: Longest device name ``job new`` accepts. A name, not a paste.
 MAX_DEVICE_CHARS = 200
 
+#: The job fields ``job new`` and ``job set`` may write (#436), and the longest
+#: value each takes. What the detail form saves, plus the board number.
+FIELD_LIMITS: dict[str, int] = {
+    "device": MAX_DEVICE_CHARS,
+    "board_id": 64,
+    "serial": 128,
+    "customer": 200,
+    "symptoms": 4000,
+    "status": 32,
+}
+
+#: The statuses a job can have: the store's ``JobStatus``, spelled out here so
+#: the CLI doesn't import the store. A test holds the two together.
+STATUSES = ("open", "in_progress", "waiting", "done", "scrapped")
+
+
+def clean_fields(raw: dict[str, Any]) -> dict[str, str]:
+    """Check the fields of a ``job new`` or ``job set`` request; return them stripped.
+
+    Raises ``ValueError`` naming the problem: a field that can't be set, a value
+    that isn't text or is too long, an empty device, a status the store doesn't
+    know. Every other field may be set to nothing, which clears it. The message
+    names the field and never repeats the value — it may be a customer's name.
+    """
+    unknown = sorted(set(raw) - set(FIELD_LIMITS))
+    if unknown:
+        raise ValueError(
+            f"can't set {', '.join(unknown)}; the fields are {', '.join(FIELD_LIMITS)}"
+        )
+    fields: dict[str, str] = {}
+    for name, value in raw.items():
+        if not isinstance(value, str):
+            raise ValueError(f"{name} must be text")
+        value = value.strip()
+        if len(value) > FIELD_LIMITS[name]:
+            raise ValueError(f"{name} is over {FIELD_LIMITS[name]} characters")
+        fields[name] = value
+    if "device" in fields and not fields["device"]:
+        raise ValueError("a job needs a device name")
+    if "status" in fields and fields["status"] not in STATUSES:
+        raise ValueError(f"status must be one of {', '.join(STATUSES)}")
+    return fields
+
 
 def default_control_path() -> Path:
     """``control.json`` beside the live config file."""
@@ -49,15 +92,16 @@ class JobControl:
     """The job commands the server may run, and the token that allows them.
 
     Each hook returns a JSON-ready dict built from the job-card whitelist
-    (:mod:`~benchhud.browser_sources.payloads`). ``create_job`` raises
-    ``ValueError`` for a name it won't take; ``select_job`` returns None for an
-    id that doesn't exist; any of them raises ``TimeoutError`` when the GUI
-    thread didn't answer.
+    (:mod:`~benchhud.browser_sources.payloads`). ``create_job`` and
+    ``update_job`` take fields already through :func:`clean_fields`;
+    ``select_job`` and ``update_job`` return None for an id that doesn't exist;
+    any of them raises ``TimeoutError`` when the GUI thread didn't answer.
     """
 
     list_jobs: Callable[[], dict[str, Any]]
-    create_job: Callable[[str], dict[str, Any]]
+    create_job: Callable[[dict[str, str]], dict[str, Any]]
     select_job: Callable[[int], dict[str, Any] | None]
+    update_job: Callable[[int, dict[str, str]], dict[str, Any] | None]
     token: str = field(default_factory=new_token, repr=False)
 
     def authorised(self, header: str | None) -> bool:

@@ -126,12 +126,13 @@ timestamp — nothing in it reads the clock, so it's deterministic under test.
 
 Selecting a job used to be a click in the list and nothing else. Fine at the
 bench — no use from the couch with the stream already live and the job card
-sitting empty. So the running app takes three commands:
+sitting empty. So the running app takes four commands:
 
 ```
 benchhud job list
-benchhud job new MacBook Pro A1708
+benchhud job new MacBook Pro A1708 --board-id 820-00840
 benchhud job select 12
+benchhud job set 12 --status waiting
 ```
 
 - **`list`** — the jobs, newest first. The `*` marks the selected one.
@@ -139,6 +140,34 @@ benchhud job select 12
   quotes needed around the device name.
 - **`select`** — same as clicking the row. The Jobs dock moves, and so does the
   job card on stream.
+- **`set`** — same as editing the detail form and hitting **Save**, for any job by
+  id. It changes only what you name, and it doesn't move the selection.
+
+**The fields.** `new` and `set` take the same flags — everything the detail form
+saves, plus the board number, which the form doesn't have:
+
+| Flag | Field | Longest |
+|---|---|---|
+| `--device` (`set` only — on `new` it's the name itself) | `device` | 200 |
+| `--board-id` | `board_id` | 64 |
+| `--serial` | `serial` | 128 |
+| `--customer` | `customer` | 200 |
+| `--symptoms` | `symptoms` | 4000 |
+| `--status` | `status` | one of the five |
+
+So the board number read off the silkscreen goes in with the job, or after it:
+
+```
+benchhud job new Grandstream HT801 --board-id "HT801_MB V1.1A"
+benchhud job set 12 --board-id "HT801_MB V1.1A" --symptoms "no dial tone"
+```
+
+`--status` takes `open`, `in_progress`, `waiting`, `done` or `scrapped`, and
+anything else is refused with that list. An empty value clears a field
+(`--serial ""`) — except the device, which a job can't be without. If the job
+you `set` is the one open in the detail form, the form reloads with the new
+values, so a later **Save** can't put the old ones back. Any other job, and the
+form — half-typed edits included — is left alone.
 
 Add `--json` to any of them for a script or a Stream Deck button. Over SSH it's
 the same thing: `ssh bench benchhud job select 12`.
@@ -162,9 +191,13 @@ token is even looked at.
 
 **What comes back** is what the job card gets: `id`, `device`, `board_id`,
 `status`, `external_ref`, plus which job is selected. Never `customer`, `serial`
-or `symptoms` — the terminal you typed it in might be on stream too.
+or `symptoms` — the terminal you typed it in might be on stream too. That holds
+for the ones you just wrote: `--customer` goes in and doesn't come back, from
+`set`, from `list`, or in an error. What you typed is still on your screen and in
+your shell history, though — that part's on you.
 
-Jobs only. It doesn't drive outputs, scenes or instruments.
+Job fields only. No notes, captures or deletes from here, and it doesn't drive
+outputs, scenes or instruments.
 
 ---
 
