@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/IamMrCupp/benchhud/compare/v0.18.0...v0.19.0) (2026-11-20)
+
+
+### Features
+
+* **ui:** match burnwright's palette and panel look ([#440](https://github.com/IamMrCupp/benchhud/issues/440)) ([c498fba](https://github.com/IamMrCupp/benchhud/commit/c498fbac9180861ce1b4a70f5afb5264e7a551de))
+
 ## [0.18.0](https://github.com/IamMrCupp/benchhud/compare/v0.17.0...v0.18.0) (2026-11-19)
 
 
