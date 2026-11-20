@@ -136,6 +136,7 @@ from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 from benchhud.shell.qt_util import unelide_tabs
 from benchhud.shell.signature_image import render_signature
+from benchhud.shell.theme import style_headings
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
@@ -528,6 +529,7 @@ class MainWindow(QMainWindow):
 
         self._apply_config()
         unelide_tabs(self)
+        style_headings(self)
 
     def _stabilise_camera_paths(
         self,
