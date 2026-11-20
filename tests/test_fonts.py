@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from importlib.resources import files
 
-from benchhud.shell.fonts import seven_segment_family
+from PySide6.QtGui import QFontDatabase
+
+from benchhud.overlay.graph import _legend_font
+from benchhud.overlay.telemetry import _label_font
+from benchhud.shell.fonts import apply_ui_font, seven_segment_family, stream_font, ui_font_family
 from benchhud.shell.panels.power import _build_style, _lcd_font_family
 
 
@@ -44,3 +48,34 @@ def test_style_falls_back_without_the_font() -> None:
     style = _build_style(None)
     assert "DSEG" not in style
     assert "monospace" in style
+
+
+def test_inter_and_its_license_are_bundled() -> None:
+    fonts = files("benchhud.resources").joinpath("fonts")
+    assert fonts.joinpath("Inter-Regular.ttf").is_file()
+    assert fonts.joinpath("Inter-SemiBold.ttf").is_file()
+    assert fonts.joinpath("Inter-OFL.txt").is_file()
+
+
+def test_the_interface_font_is_inter(qapp) -> None:
+    previous = qapp.font()
+    apply_ui_font(qapp)
+    try:
+        assert ui_font_family() == "Inter"
+        assert qapp.font().family() == "Inter"
+        assert qapp.font().pointSizeF() == previous.pointSizeF()  # the platform's size
+    finally:
+        qapp.setFont(previous)
+
+
+def test_stream_text_keeps_the_platform_font(qapp) -> None:
+    """Restyling the interface mustn't change what viewers see (#429)."""
+    previous = qapp.font()
+    system = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family()
+    apply_ui_font(qapp)
+    try:
+        assert stream_font().family() == system
+        assert _label_font(14).family() == system
+        assert _legend_font(14).family() == system
+    finally:
+        qapp.setFont(previous)

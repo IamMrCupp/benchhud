@@ -32,6 +32,7 @@ from benchhud.config import GraphOverlayConfig
 from benchhud.instruments.power_history import PowerSample
 from benchhud.overlay.telemetry import _qimage_to_bgra, auto_scale, blit_rgba
 from benchhud.palette import SeriesPalette, palette
+from benchhud.shell.fonts import stream_font
 
 #: (legend label, unit), in the dock chart's order: voltage, current, power.
 SERIES = (("V", "V"), ("A", "A"), ("W", "W"))
@@ -153,7 +154,7 @@ def _legend_texts(latest: tuple[float, float, float] | None) -> list[str]:
 
 
 def _legend_font(px: int) -> QFont:
-    font = QFont()
+    font = stream_font()
     font.setPixelSize(px)
     font.setBold(True)
     return font
