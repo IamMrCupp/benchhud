@@ -44,6 +44,8 @@ from benchhud.shell.panels.flash import (
     _thread_executor,
     short_hash,
 )
+from benchhud.shell.qt_util import mark_danger
+from benchhud.shell.theme import DANGER
 
 _LOG_LINES = 2000
 
@@ -112,9 +114,9 @@ class MiniproPanel(Panel):
         self.read_button = QPushButton("Read backup")
         self.read_button.setToolTip("Read the chip twice; keep it only if both reads match")
         self.read_button.clicked.connect(self.read_backup)
-        self.write_button = QPushButton("Write…")
+        self.write_button = mark_danger(QPushButton("Write…"))
         self.write_button.clicked.connect(self.write)
-        self.erase_button = QPushButton("Erase…")
+        self.erase_button = mark_danger(QPushButton("Erase…"))
         self.erase_button.clicked.connect(self.erase)
         self.cancel_button = QPushButton("Stop")
         self.cancel_button.clicked.connect(self.cancel)
@@ -181,7 +183,7 @@ class MiniproPanel(Panel):
 
     def _say(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet("color: #ff7a7a;" if error else "")
+        self.status.setStyleSheet(f"color: {DANGER};" if error else "")
 
     def _start(self, operation: str, job: Callable[[], Any], message: str) -> None:
         self._busy = operation
