@@ -14,11 +14,11 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSlider,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -36,7 +36,7 @@ from benchhud.overlay.config_adapter import (
 from benchhud.overlay.reference import CompareMode, ReferenceSettings
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.panel import PANEL_MARGINS, Panel
-from benchhud.shell.qt_util import fit_combo_popup, grow_fields, hint, section_label
+from benchhud.shell.qt_util import card, fit_combo_popup, hint, notice
 
 
 class ControlsPanel(Panel):
@@ -96,10 +96,11 @@ class ControlsPanel(Panel):
         # the spin boxes round what they show (#318).
         self._precise: RegistrationTransform | None = transform
 
-        form = QFormLayout(self)
-        form.setContentsMargins(*PANEL_MARGINS)
-
-        grow_fields(form)
+        # One card per section, burnwright-style (#429).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(*PANEL_MARGINS)
+        outer.setSpacing(12)
+        overlay_box, form = card("Thermal overlay")
         range_row = QHBoxLayout()
         range_row.addWidget(self.tmin_spin)
         range_row.addWidget(QLabel("to"))
@@ -108,7 +109,6 @@ class ControlsPanel(Panel):
         range_row.setContentsMargins(0, 0, 0, 0)
         self._range_row.setLayout(range_row)
 
-        form.addRow(section_label("Thermal overlay"))
         form.addRow("Mode", self.mode_combo)
         form.addRow("Range", self.range_combo)
         form.addRow("", self._range_row)
@@ -130,7 +130,7 @@ class ControlsPanel(Panel):
         calibrate_row.addWidget(self.calibrate_button, stretch=1)
         calibrate_row.addWidget(self.undo_button)
 
-        form.addRow(section_label("Alignment"))
+        alignment_box, form = card("Alignment")
         form.addRow(calibrate_row)
         form.addRow(self.calibration_status)
         form.addRow("Scale", self.scale_spin)
@@ -170,16 +170,18 @@ class ControlsPanel(Panel):
         self.reference_capture_button.clicked.connect(self.reference_capture_requested)
         self.reference_load_button = QPushButton("Load photo…")
         self.reference_load_button.clicked.connect(self.reference_load_requested)
-        self.reference_status = hint(QLabel("No reference for this board."))
-        self.reference_status.setWordWrap(True)
+        self.reference_status = notice(QLabel("No reference for this board."))
         reference_buttons = QHBoxLayout()
         reference_buttons.addWidget(self.reference_capture_button, stretch=1)
         reference_buttons.addWidget(self.reference_load_button, stretch=1)
-        form.addRow(section_label("Known-good board"))
+        reference_box, form = card("Known-good board")
         form.addRow("Compare", self.reference_mode)
         form.addRow("Opacity", self.reference_opacity)
         form.addRow(reference_buttons)
         form.addRow(self.reference_status)
+        for box in (overlay_box, alignment_box, reference_box):
+            outer.addWidget(box)
+        outer.addStretch(1)
         self.reference_mode.currentIndexChanged.connect(lambda _i: self.changed.emit())
         self.reference_opacity.valueChanged.connect(lambda _v: self.changed.emit())
 
