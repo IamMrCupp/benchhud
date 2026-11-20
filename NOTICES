@@ -37,6 +37,12 @@ DSEG font (DSEG7 Classic)
   License: SIL Open Font License 1.1
   Full text: src/benchhud/resources/fonts/OFL.txt (installed alongside the font)
 
+Inter (interface font)
+  Copyright (c) 2016 The Inter Project Authors
+  https://github.com/rsms/inter
+  License: SIL Open Font License 1.1
+  Full text: src/benchhud/resources/fonts/Inter-OFL.txt (installed alongside the font)
+
 NumPy
   https://numpy.org/
   License: BSD 3-Clause

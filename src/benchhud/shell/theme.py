@@ -1,9 +1,10 @@
 """Application dark theme.
 
 A single QSS stylesheet applied at startup so the HUD reads as one dark
-bench/stream app rather than default-Qt light. Teal accent deliberately echoes
-the meter's cyan LCD, which stays light on purpose — it looks like an instrument
-screen glowing against dark equipment.
+bench/stream app rather than default-Qt light. The palette is burnwright's dark
+set (its ``--bw-*`` properties in ``src/App.css``), so the two apps look like one
+family (#429). The meter's LCD cells keep their own colours: they match the
+on-stream readout.
 """
 
 from __future__ import annotations
@@ -12,22 +13,31 @@ from importlib.resources import files
 
 from PySide6.QtWidgets import QApplication
 
+from benchhud.shell.fonts import apply_ui_font
+
 #: The palette, in one place. ``@name`` in the stylesheets below is replaced
-#: with these, longest name first.
+#: with these, longest name first. Values follow burnwright's dark theme.
 COLOURS = {
-    "window": "#1c1f25",  # behind everything: the gaps between panels
-    "chrome": "#16181d",  # menu bar, status bar, the composite's surround
-    "panel": "#23262d",  # a dock's body
-    "raised": "#2b2f38",  # cards, fields, buttons
-    "hover": "#353a45",
-    "border": "#343945",
-    "text": "#d8dee9",
-    "bright": "#f0f4f8",
-    "muted": "#8f9aab",
-    "faint": "#636b7a",
-    "accent": "#4a9db5",
-    "accent-soft": "#2c4f5b",
-    "accent-ink": "#0e1418",
+    "window": "#151517",  # behind everything: the gaps between panels (--bw-bg)
+    "chrome": "#111113",  # menu bar, status bar, the composite's surround
+    "panel": "#1f1f22",  # a dock's body (--bw-panel)
+    "raised": "#2a2a2e",  # cards, fields, buttons (--bw-control-bg)
+    "hover": "#34343a",  # (--bw-control-hover)
+    "border": "#3a3a40",  # (--bw-border)
+    "text": "#e4e4e8",
+    "bright": "#f4f4f6",  # (--bw-fg is between the two)
+    "muted": "#a3a3ab",  # (--bw-muted)
+    "faint": "#6b6b73",
+    "accent": "#8fb0ff",  # (--bw-accent)
+    "accent-soft": "#24345c",  # (--bw-accent-soft)
+    "accent-ink": "#10162a",  # text on a filled accent
+    "danger": "#ff9a92",
+    "danger-soft": "#4a1f1c",
+    "warning": "#ffc66b",
+    "warning-soft": "#3d2e10",
+    "warning-edge": "#f59e0b",  # (--bw-warning-border)
+    "ok": "#7fd6a0",
+    "ok-soft": "#173624",
 }
 
 DARK_QSS = """
@@ -43,11 +53,14 @@ QMenu::item:selected { background: @accent-soft; color: @bright; }
 QMenu::separator { height: 1px; background: @border; margin: 4px 8px; }
 
 /* A dock's title is a quiet heading, not a boxed bar: the panel under it is
-   what should draw the eye. */
+   what should draw the eye. Grouped docks show their group's name once, in
+   small capitals (DockTitleBar, #429). */
 QDockWidget { titlebar-close-icon: none; color: @muted; font-weight: 600; }
 QDockWidget::title {
     background: @panel; padding: 7px 10px; border-bottom: 1px solid @border;
 }
+QWidget#dockTitleBar { background: @panel; }
+QLabel#dockTitle { color: @muted; font-weight: 600; font-size: 11px; }
 /* The drag handles between docks: the window colour, so each column reads as
    its own surface. */
 QMainWindow::separator { background: @window; width: 5px; height: 5px; }
@@ -71,6 +84,21 @@ QLabel, QCheckBox, QRadioButton { background: transparent; }
 /* A heading inside a panel (see qt_util.section_label), and secondary text. */
 QLabel#sectionLabel { color: @muted; font-weight: 600; padding-top: 6px; }
 QLabel#hint, QLabel#SupplyStatus, QLabel#SignatureStatus { color: @muted; }
+/* A status line that's gone wrong (qt_util.set_tone). */
+QLabel[tone="error"] { color: @danger; }
+QLabel[tone="warning"] { color: @warning; }
+QLabel[tone="ok"] { color: @ok; }
+/* A notice: a tinted line with a stripe down its left edge, burnwright-style. */
+QLabel#notice {
+    background-color: @window; color: @text;
+    border-left: 3px solid @border; border-radius: 4px; padding: 5px 8px;
+}
+QLabel#notice[tone="warning"] {
+    background-color: @warning-soft; color: @warning; border-left-color: @warning-edge;
+}
+QLabel#notice[tone="error"] {
+    background-color: @danger-soft; color: @danger; border-left-color: @danger;
+}
 
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
     background-color: @raised; border: 1px solid @border;
@@ -123,6 +151,8 @@ QComboBox QAbstractItemView {
    that touches its panel. */
 QTabWidget::pane { border: 1px solid @border; border-radius: 6px; }
 QTabBar { background: @panel; }
+/* A group's tab row runs along the foot of its panels; a hairline sets it off. */
+QMainWindow > QTabBar { border-top: 1px solid @border; }
 QTabBar::tab {
     background: transparent; padding: 6px 10px; color: @muted;
     border: none; border-top: 2px solid transparent; border-bottom: 2px solid transparent;
@@ -213,5 +243,6 @@ def stylesheet() -> str:
 
 
 def apply_theme(app: QApplication) -> None:
-    """Apply the dark theme to the application."""
+    """Apply the dark theme and the interface font (Inter) to the application."""
+    apply_ui_font(app)
     app.setStyleSheet(stylesheet())

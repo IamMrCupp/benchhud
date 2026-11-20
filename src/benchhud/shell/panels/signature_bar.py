@@ -9,6 +9,8 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from benchhud.shell.qt_util import set_tone
+
 
 class SignatureBar(QGroupBox):
     record_requested = Signal()
@@ -40,4 +42,4 @@ class SignatureBar(QGroupBox):
 
     def show_status(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet("color: #ff7a7a;" if error else "")
+        set_tone(self.status, "error" if error else None)
