@@ -118,8 +118,13 @@ ticket system is a protocol with a fake, not a dependency.
   `UsedIn` records, field for field one chip in chip-data's `index.json`;
   identity is the full part number, case ignored), `marking` (`match_markings`
   — a typed top mark to ranked candidates, never one answer), `source`
-  (`ChipSource`, null / in-memory). No file reader and no UI yet. Pure Python;
-  no network, no git.
+  (`ChipSource`, null / in-memory), `dir_source` (`DirChipSource` — a chip-data
+  checkout, a build of one, or a private overlay: the built `index.json` when
+  it's there and no older than the chip files, else the `chips/**/*.toml`
+  files with `package_family` and replaced function slugs worked out from the
+  checkout's `vocab/`; read on first lookup and kept, `reload()` to re-read;
+  a bad file is skipped with a log line). No UI yet. Pure Python; no network,
+  no git.
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
 ## Measuring it
