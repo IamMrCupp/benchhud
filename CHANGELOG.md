@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/IamMrCupp/benchhud/compare/v0.21.0...v0.22.0) (2026-11-21)
+
+
+### Features
+
+* **tools:** pick OBS's scene from the Tools dock, and a scene per tool ([#455](https://github.com/IamMrCupp/benchhud/issues/455)) ([3872612](https://github.com/IamMrCupp/benchhud/commit/38726121c982f0f412f06f41fb7c2c1be630e697))
+
 ## [0.21.0](https://github.com/IamMrCupp/benchhud/compare/v0.20.1...v0.21.0) (2026-11-21)
 
 
