@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import socket
 import threading
 
@@ -171,6 +172,33 @@ def test_pages_are_transparent_and_load_nothing_remote(served) -> None:
     for panel in PANELS:
         _, page = _get(server, f"/panel/{panel}")
         assert "http://" not in page.decode() and "https://" not in page.decode()
+
+
+def test_hidden_beats_every_panels_own_display(served) -> None:
+    """A hidden card must not be displayed, whatever its panel's rule says (#444).
+
+    `.nowplaying { display: flex }` sat after `.hidden { display: none }` with the
+    same specificity, so the banner stayed on stream as an empty box.
+    """
+    _, server = served
+    _, body = _get(server, "/static/panel.css")
+    css = re.sub(r"/\*.*?\*/", "", body.decode(), flags=re.S)
+    rules = dict(re.findall(r"(?m)^([^{}@\n]+?)\s*\{([^}]*)\}", css))
+    hidden = rules[".hidden"]
+    assert re.search(r"display:\s*none\s*!important", hidden), hidden
+    # ...and nothing else claims `display` with !important, which would tie it again.
+    rivals = [
+        sel
+        for sel, decl in rules.items()
+        if sel != ".hidden" and re.search(r"display:[^;]*!important", decl)
+    ]
+    assert rivals == []
+    # every page that starts hidden relies on that one rule
+    for panel in PANELS:
+        _, page = _get(server, f"/panel/{panel}")
+        for classes in re.findall(r'class="([^"]*\bhidden\b[^"]*)"', page.decode()):
+            others = [c for c in classes.split() if c != "hidden"]
+            assert others, "a hidden element with no panel class has nothing to override"
 
 
 def test_static_assets_are_served(served) -> None:
