@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/IamMrCupp/benchhud/compare/v0.22.0...v0.22.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **chips:** keep the directory source from raising on files it can't read ([ec921cb](https://github.com/IamMrCupp/benchhud/commit/ec921cbea8a018aeafb8173c60e40b9da6cfe104))
+
 ## [0.22.0](https://github.com/IamMrCupp/benchhud/compare/v0.21.0...v0.22.0) (2026-11-21)
 
 
