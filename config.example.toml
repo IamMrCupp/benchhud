@@ -223,6 +223,7 @@ programmer = "ch341a_spi" # flashrom's -p value; the panel remembers the last on
 [[tools]]
 name = "OpenBoardView"
 command = "openboardview"
+# scene = "Board View"   # the OBS scene its window is in; see [obs] below
 
 [[tools]]
 name = "minipro-gui"
@@ -232,6 +233,19 @@ command = "minipro-gui"
 name = "flashrom"
 command = "flashrom"
 terminal = true
+
+# Choosing OBS's live scene from the Tools dock, over obs-websocket. OBS still
+# owns the pictures (window captures, browser sources); this only picks which
+# scene is on. In OBS: Tools -> WebSocket Server Settings -> Enable.
+# auto_switch is a second opt-in: with it, starting a tool that has a `scene`
+# shows that scene, and the tool's exit goes back to the one before, unless
+# the scene was changed by hand in between.
+[obs]
+enabled = false
+host = "127.0.0.1"
+port = 4455
+password = ""        # empty: read it from the OBS on this machine
+auto_switch = false
 
 # Stream cameras the Cameras panel can aim (#330): pan, tilt and zoom over V4L2,
 # Linux only. benchhud only moves the camera; OBS keeps the picture. The panel's

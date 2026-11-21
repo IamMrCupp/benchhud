@@ -102,6 +102,9 @@ from benchhud.jobs.fault import FaultMonitor, format_fault_note
 from benchhud.jobs.store import JobStore, StoredSignature, default_db_path
 from benchhud.media import now_playing
 from benchhud.media.now_playing import NowPlayingWatcher
+from benchhud.obs.client import ObsClient
+from benchhud.obs.protocol import local_password
+from benchhud.obs.tool_scenes import ToolScenes
 from benchhud.output.feeds import fit_frame, thermal_frame, thermal_size
 from benchhud.output.onair import Layer, compose_on_air, compose_preview, excluded
 from benchhud.output.sink import OutputSink, open_output_sink
@@ -447,6 +450,17 @@ class MainWindow(QMainWindow):
         self.panels.add_panel(self.controls_panel, None)
         self.launcher_panel = LauncherPanel(self._config.tools)
         self.launcher_panel.terminal_tool_requested.connect(self.run_tool_in_terminal)
+        # OBS's live scene, chosen from the Tools dock (#455). The client only
+        # exists while [obs] is on; the rules for tools' scenes are ToolScenes'.
+        self._obs: ObsClient | None = None
+        #: Builds the OBS connection (a seam so tests needn't open a socket).
+        self.obs_client_factory: Callable[[], ObsClient] = self._make_obs_client
+        self._tool_scenes = ToolScenes(self._obs_set_scene, self._obs_scene)
+        self._tool_scene_timer = QTimer(self)
+        self._tool_scene_timer.setInterval(1000)
+        self._tool_scene_timer.timeout.connect(self._poll_tool_scenes)
+        self.launcher_panel.tool_launched.connect(self._on_tool_launched)
+        self.launcher_panel.scene_requested.connect(self._obs_set_scene)
         # Asked before a CLI tool takes the terminal from a serial console. A
         # seam so tests needn't click a dialog: (current target) -> go ahead?
         self.confirm_terminal_switch = self._ask_terminal_switch
@@ -1024,6 +1038,58 @@ class MainWindow(QMainWindow):
     def reconfigure_tools(self) -> None:
         """Rebuild the Tools pane from config (after Preferences edits it)."""
         self.launcher_panel.set_tools(self._config.tools)
+        self.restart_obs()
+
+    # --- OBS scenes (#455) ------------------------------------------------
+
+    def _make_obs_client(self) -> ObsClient:
+        obs = self._config.obs
+        return ObsClient(obs.host, obs.port, lambda: obs.password or local_password(), parent=self)
+
+    def start_obs(self) -> None:
+        """Connect to OBS if [obs] is on. Safe to call when it isn't."""
+        if self._obs is not None or not self._config.obs.enabled:
+            return
+        client = self.obs_client_factory()
+        client.scenes_changed.connect(self._show_obs_scenes)
+        client.scene_changed.connect(self.launcher_panel.set_current_scene)
+        client.connected_changed.connect(lambda _on: self._show_obs_scenes(client.scenes))
+        self._obs = client
+        client.start()
+
+    def stop_obs(self) -> None:
+        client, self._obs = self._obs, None
+        if client is not None:
+            client.stop()
+            client.deleteLater()
+        self.launcher_panel.set_scenes([])
+
+    def restart_obs(self) -> None:
+        self.stop_obs()
+        self.start_obs()
+
+    def _show_obs_scenes(self, scenes: list[str]) -> None:
+        self.launcher_panel.set_scenes(scenes, self._obs_scene())
+
+    def _obs_scene(self) -> str | None:
+        return self._obs.scene if self._obs is not None else None
+
+    def _obs_set_scene(self, scene: str) -> bool:
+        return self._obs.set_scene(scene) if self._obs is not None else False
+
+    def _on_tool_launched(self, tool, process) -> None:
+        """Show a started tool's scene, when that's been asked for."""
+        obs = self._config.obs
+        if not (obs.enabled and obs.auto_switch and tool.scene):
+            return
+        self._tool_scenes.tool_started(tool.scene, process)
+        if self._tool_scenes.watching:
+            self._tool_scene_timer.start()
+
+    def _poll_tool_scenes(self) -> None:
+        self._tool_scenes.poll()
+        if not self._tool_scenes.watching:
+            self._tool_scene_timer.stop()
 
     def open_about(self) -> QMessageBox:
         """Show the About dialog (non-blocking; returned for tests)."""
@@ -2393,6 +2459,7 @@ class MainWindow(QMainWindow):
         self.stop_thermal()
         self.stop_output()
         self.stop_browser_sources()
+        self.stop_obs()
         self.stop_terminal()
         self.persist_into_config()
         if self._on_persist is not None:
