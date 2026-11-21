@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGroupBox,
     QLabel,
     QMainWindow,
+    QPushButton,
     QTabBar,
     QWidget,
 )
@@ -31,11 +33,48 @@ def fit_combo_popup(combo: QComboBox) -> None:
     combo.view().setMinimumWidth(widest + _POPUP_CHROME_PX)
 
 
+#: A heading's letter spacing, as a percentage of the font's own.
+_HEADING_SPACING = 106.0
+#: A heading's size against the text around it.
+_HEADING_SCALE = 0.88
+
+
+def heading_font(base: QFont) -> QFont:
+    """``base`` as a panel heading: small caps, a little letter spacing."""
+    font = QFont(base)
+    font.setCapitalization(QFont.Capitalization.AllUppercase)
+    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, _HEADING_SPACING)
+    if base.pointSizeF() > 0:
+        font.setPointSizeF(base.pointSizeF() * _HEADING_SCALE)
+    return font
+
+
+def plain_font(base: QFont) -> QFont:
+    """``base`` with a heading's caps, spacing and size explicitly undone.
+
+    Explicitly, because a font is inherited: the widgets inside a titled one
+    take its heading font unless theirs says otherwise.
+    """
+    font = QFont(base)
+    font.setCapitalization(QFont.Capitalization.MixedCase)
+    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 100.0)
+    if base.pointSizeF() > 0:
+        font.setPointSizeF(base.pointSizeF())
+    return font
+
+
 def section_label(text: str) -> QLabel:
-    """A heading for a run of controls inside a panel; the theme styles it."""
+    """A heading for a run of controls inside a panel; the theme colours it."""
     label = QLabel(text)
     label.setObjectName("sectionLabel")
+    label.setFont(heading_font(label.font()))
     return label
+
+
+def mark_danger(button: QPushButton) -> QPushButton:
+    """Mark ``button`` as one that destroys something; the theme draws it so (#440)."""
+    button.setProperty("danger", True)
+    return button
 
 
 def hint(label: QLabel) -> QLabel:
