@@ -103,6 +103,26 @@ class ToolConfig:
     # A command-line tool: it runs in a terminal (the Terminal panel, or a
     # system terminal window) instead of being launched as a window (#225).
     terminal: bool = False
+    # The OBS scene this tool's window is in (#455). When set, and [obs] allows
+    # it, starting the tool shows that scene and its exit goes back.
+    scene: str = ""
+
+
+@dataclass
+class ObsConfig:
+    """Choosing OBS's live scene from the HUD (#455), over obs-websocket.
+
+    OBS still owns the pictures; this only picks which scene is on. Off by
+    default, and switching on its own when a tool starts is a second opt-in:
+    what's on air shouldn't change by surprise.
+    """
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 4455
+    # Empty: read it from the OBS on this machine (its own config file).
+    password: str = ""
+    auto_switch: bool = False
 
 
 @dataclass
@@ -370,6 +390,7 @@ class Config:
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    obs: ObsConfig = field(default_factory=ObsConfig)
     tools: list[ToolConfig] = field(default_factory=list)
     cameras: list[CameraConfig] = field(default_factory=list)
 
@@ -491,10 +512,18 @@ class Config:
             ("enabled", "hide_when_paused", "label"),
         )
         _apply(cfg.performance, data.get("performance", {}), ("opencv_threads",))
+        _apply(
+            cfg.obs,
+            data.get("obs", {}),
+            ("enabled", "host", "port", "password", "auto_switch"),
+        )
 
         cfg.tools = [
             ToolConfig(
-                name=t["name"], command=t["command"], terminal=bool(t.get("terminal", False))
+                name=t["name"],
+                command=t["command"],
+                terminal=bool(t.get("terminal", False)),
+                scene=str(t.get("scene", "")),
             )
             for t in data.get("tools", [])
             if isinstance(t, Mapping) and "name" in t and "command" in t

@@ -364,8 +364,11 @@ class PreferencesDialog(QDialog):
     # --- Tools -----------------------------------------------------------
 
     def _build_tools_tab(self) -> QWidget:
-        self.tools_table = QTableWidget(0, 3)
-        self.tools_table.setHorizontalHeaderLabels(["Name", "Command", "Terminal"])
+        self.tools_table = QTableWidget(0, 4)
+        self.tools_table.setHorizontalHeaderLabels(["Name", "Command", "Terminal", "OBS scene"])
+        self.tools_table.horizontalHeaderItem(3).setToolTip(
+            "The OBS scene this tool's window is in. Blank: starting it changes nothing"
+        )
         self.tools_table.horizontalHeaderItem(2).setToolTip(
             "A command-line tool: open it in the Terminal panel instead of as a window"
         )
@@ -378,7 +381,21 @@ class PreferencesDialog(QDialog):
             # Ticked for a known command-line tool even when its entry predates
             # the flag, matching what the Tools pane does with it (#230).
             terminal = tool.terminal or is_command_line(tool.command)
-            self._append_tool_row(tool.name, tool.command, terminal)
+            self._append_tool_row(tool.name, tool.command, terminal, tool.scene)
+
+        # Choosing OBS's scene from the Tools dock (#455).
+        obs = self._config.obs
+        self.obs_enabled = QCheckBox("Connect to OBS, to choose the scene from the Tools dock")
+        self.obs_enabled.setToolTip(
+            "Needs OBS's WebSocket server on (Tools → WebSocket Server Settings in OBS)"
+        )
+        self.obs_enabled.setChecked(obs.enabled)
+        self.obs_auto_switch = QCheckBox(
+            "Show a tool's scene when it starts, and go back when it exits"
+        )
+        self.obs_auto_switch.setChecked(obs.auto_switch)
+        self.obs_auto_switch.setEnabled(obs.enabled)
+        self.obs_enabled.toggled.connect(self.obs_auto_switch.setEnabled)
 
         self.add_tool_button = QPushButton("Add")
         self.add_tool_button.clicked.connect(lambda: self._append_tool_row("", "", False))
@@ -402,9 +419,13 @@ class PreferencesDialog(QDialog):
         layout = QVBoxLayout(widget)
         layout.addWidget(self.tools_table)
         layout.addLayout(buttons)
+        layout.addWidget(self.obs_enabled)
+        layout.addWidget(self.obs_auto_switch)
         return widget
 
-    def _append_tool_row(self, name: str, command: str, terminal: bool = False) -> None:
+    def _append_tool_row(
+        self, name: str, command: str, terminal: bool = False, scene: str = ""
+    ) -> None:
         row = self.tools_table.rowCount()
         self.tools_table.insertRow(row)
         self.tools_table.setItem(row, 0, QTableWidgetItem(name))
@@ -413,6 +434,7 @@ class PreferencesDialog(QDialog):
         check.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
         check.setCheckState(Qt.CheckState.Checked if terminal else Qt.CheckState.Unchecked)
         self.tools_table.setItem(row, 2, check)
+        self.tools_table.setItem(row, 3, QTableWidgetItem(scene))
 
     def open_tool_picker(self) -> ToolPickerDialog:
         """Scan for installed tools; add the ticked ones (returned for tests)."""
@@ -433,7 +455,7 @@ class PreferencesDialog(QDialog):
         for tool in tools:
             if tool.command in existing:
                 continue
-            self._append_tool_row(tool.name, tool.command, tool.terminal)
+            self._append_tool_row(tool.name, tool.command, tool.terminal, tool.scene)
             existing.add(tool.command)
 
     def _remove_selected_tool(self) -> None:
@@ -449,7 +471,8 @@ class PreferencesDialog(QDialog):
             check = self.tools_table.item(row, 2)
             terminal = check is not None and check.checkState() == Qt.CheckState.Checked
             if name and command:
-                tools.append(ToolConfig(name=name, command=command, terminal=terminal))
+                scene = _cell(self.tools_table, row, 3)
+                tools.append(ToolConfig(name=name, command=command, terminal=terminal, scene=scene))
         return tools
 
     # --- Logging ---------------------------------------------------------
@@ -720,6 +743,8 @@ class PreferencesDialog(QDialog):
 
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()
+        self._config.obs.enabled = self.obs_enabled.isChecked()
+        self._config.obs.auto_switch = self.obs_auto_switch.isChecked()
 
 
 def _fill_camera_combo(combo: QComboBox, cameras: list[CameraDevice], current: str) -> None:
