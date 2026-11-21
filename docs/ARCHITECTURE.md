@@ -113,6 +113,13 @@ ticket system is a protocol with a fake, not a dependency.
   entries + `open_board` / `open_schematic`, OS-handler fallback), `worklist`
   (`boards_to_source` — open tickets minus the library, `customer`-free). Pure
   path logic; nothing renders. See [BOARDS.md](BOARDS.md).
+- **`chips/`** — the chip reference seam (#452), same shape as `inventory/` but
+  read-only: `model` (`Chip` and its `Marking` / `Document` / `Substitute` /
+  `UsedIn` records, field for field one chip in chip-data's `index.json`;
+  identity is the full part number, case ignored), `marking` (`match_markings`
+  — a typed top mark to ranked candidates, never one answer), `source`
+  (`ChipSource`, null / in-memory). No file reader and no UI yet. Pure Python;
+  no network, no git.
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
 ## Measuring it
