@@ -6,11 +6,8 @@
 ### Features
 
 * **controls:** section the Controls panel into cards ([288137c](https://github.com/IamMrCupp/benchhud/commit/288137ccfd36e507575a3c1616ba2af3fafd3c05))
-* **controls:** section the Controls panel into cards ([57683a2](https://github.com/IamMrCupp/benchhud/commit/57683a215ed89256b11ba391f84292fb87b7d9d1))
 * **shell:** stacked Bench/Recon groups and a bottom Tools dock ([#429](https://github.com/IamMrCupp/benchhud/issues/429)) ([288137c](https://github.com/IamMrCupp/benchhud/commit/288137ccfd36e507575a3c1616ba2af3fafd3c05))
-* **shell:** stacked Bench/Recon groups and a bottom Tools dock ([#429](https://github.com/IamMrCupp/benchhud/issues/429)) ([57683a2](https://github.com/IamMrCupp/benchhud/commit/57683a215ed89256b11ba391f84292fb87b7d9d1))
 * **theme:** bundled Inter and status tones ([288137c](https://github.com/IamMrCupp/benchhud/commit/288137ccfd36e507575a3c1616ba2af3fafd3c05))
-* **theme:** bundled Inter and status tones ([57683a2](https://github.com/IamMrCupp/benchhud/commit/57683a215ed89256b11ba391f84292fb87b7d9d1))
 
 ## [0.19.0](https://github.com/IamMrCupp/benchhud/compare/v0.18.0...v0.19.0) (2026-11-20)
 
