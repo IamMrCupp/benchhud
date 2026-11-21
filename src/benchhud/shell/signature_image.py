@@ -7,10 +7,11 @@ when there is one. Plain QPainter, so it needs no chart widget or window.
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
 
 from benchhud.instruments.signature import Signature, reference_at
 from benchhud.palette import palette
+from benchhud.shell.fonts import stream_font
 
 _BACKGROUND = QColor("#1f2229")
 _GRID = QColor("#3a3f4a")
@@ -30,7 +31,7 @@ def render_signature(
     image.fill(_BACKGROUND)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    font = QFont()
+    font = stream_font()
     font.setPixelSize(12)
     painter.setFont(font)
 

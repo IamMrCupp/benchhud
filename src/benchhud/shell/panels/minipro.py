@@ -44,8 +44,7 @@ from benchhud.shell.panels.flash import (
     _thread_executor,
     short_hash,
 )
-from benchhud.shell.qt_util import mark_danger
-from benchhud.shell.theme import DANGER
+from benchhud.shell.qt_util import mark_danger, set_tone
 
 _LOG_LINES = 2000
 
@@ -183,7 +182,7 @@ class MiniproPanel(Panel):
 
     def _say(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet(f"color: {DANGER};" if error else "")
+        set_tone(self.status, "error" if error else None)
 
     def _start(self, operation: str, job: Callable[[], Any], message: str) -> None:
         self._busy = operation

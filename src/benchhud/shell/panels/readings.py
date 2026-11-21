@@ -33,7 +33,7 @@ from benchhud.instruments.owon_spm8104 import DmmReading
 from benchhud.jobs.readings import MODES, Row, Verdict, compare, format_value, mode, mode_from_dmm
 from benchhud.jobs.store import JobStore
 from benchhud.shell.panel import PANEL_MARGINS, Panel
-from benchhud.shell.theme import DANGER
+from benchhud.shell.qt_util import set_tone
 
 _VERDICT_COLOURS = {
     Verdict.OK: "#5ec27a",
@@ -316,4 +316,4 @@ class ReadingsPanel(Panel):
 
     def _say(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet(f"color: {DANGER};" if error else "")
+        set_tone(self.status, "error" if error else None)

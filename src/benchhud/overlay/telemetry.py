@@ -30,7 +30,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPen
 
 from benchhud.config import TelemetryOverlayConfig
 from benchhud.palette import SeriesPalette, palette, shade, tint
-from benchhud.shell.fonts import seven_segment_family
+from benchhud.shell.fonts import seven_segment_family, stream_font
 
 _PLACEHOLDER = "—"
 
@@ -129,7 +129,7 @@ def _digit_font(px: int) -> QFont:
 
 
 def _label_font(px: int, *, bold: bool = False) -> QFont:
-    font = QFont()
+    font = stream_font()
     font.setPixelSize(px)
     font.setBold(bold)
     return font
