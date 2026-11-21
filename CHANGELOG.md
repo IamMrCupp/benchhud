@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/IamMrCupp/benchhud/compare/v0.20.0...v0.20.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* **sources:** make hidden win over a panel's own display so the now-playing banner hides ([bcad59a](https://github.com/IamMrCupp/benchhud/commit/bcad59a67b0740f2e71166d9e2c5022346e7da2a))
+
 ## [0.20.0](https://github.com/IamMrCupp/benchhud/compare/v0.19.0...v0.20.0) (2026-11-21)
 
 
