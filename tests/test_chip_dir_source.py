@@ -412,6 +412,27 @@ def test_a_package_no_family_fits_has_no_family(tmp_path) -> None:
     assert source.get("EX1").package == "QFNX-20"
 
 
+@pytest.mark.parametrize(
+    ("package", "family"),
+    [("QFN (3x3)", "QFN"), ("QFN 20", "QFN"), ("QFN-20", "QFN"), ("SOT-23", "SOT-23")],
+)
+def test_a_family_ends_at_a_hyphen_a_space_or_a_bracket(tmp_path, package, family) -> None:
+    write_checkout(tmp_path)
+    (tmp_path / "chips" / "EX1.toml").write_text(
+        f'schema = 1\nmpn = "EX1"\nmanufacturer = "Example Semi"\npackage = "{package}"\n'
+    )
+    assert DirChipSource(root=tmp_path).get("EX1").package_family == family
+
+
+def test_a_chip_file_cannot_name_its_own_package_family(tmp_path) -> None:
+    # The build works the family out and ignores the file, so the reader does too.
+    text = 'schema = 1\nmpn = "EX1"\nmanufacturer = "Example Semi"\npackage = "SOT-23-5"\n'
+    for root, expected in ((tmp_path / "with", "SOT-23"), (tmp_path / "without", None)):
+        write_checkout(root, vocab=expected is not None)
+        (root / "chips" / "EX1.toml").write_text(text + 'package_family = "BGA"\n')
+        assert DirChipSource(root=root).get("EX1").package_family == expected
+
+
 def test_a_replaced_function_slug_is_read_as_its_successor(tmp_path) -> None:
     source = DirChipSource(root=write_checkout(tmp_path))
     assert source.get("EX1234QFN").functions == ("buck-controller",)
@@ -545,7 +566,7 @@ def test_a_chip_file_newer_than_the_index_means_the_files_are_read(tmp_path, war
     assert source.get("EX9000SOT").package == "SOT-23-6"  # the index still says -5
     assert source.origin == tmp_path / "chips"
     (line,) = warned()
-    assert "older than the chip files" in line
+    assert "may be out of date" in line
 
 
 def test_a_deleted_chip_file_is_noticed_too(tmp_path) -> None:
@@ -566,6 +587,73 @@ def test_a_changed_vocab_file_makes_the_index_old_as_well(tmp_path) -> None:
     source = DirChipSource(root=tmp_path)
     assert source.get("EX9000SOT").package_family == "SOT"
     assert source.origin == tmp_path / "chips"
+
+
+def test_a_removed_manufacturer_folder_is_noticed(tmp_path) -> None:
+    _checkout_with_index(tmp_path, index_age=60.0)
+    for path in sorted((tmp_path / "chips" / "sample-devices").iterdir()):
+        path.unlink()
+    (tmp_path / "chips" / "sample-devices").rmdir()
+    os.utime(tmp_path / "chips", (2000.0, 2000.0))  # only chips/ itself is newer
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 2
+    assert source.origin == tmp_path / "chips"
+
+
+def test_a_removed_vocab_file_is_noticed(tmp_path) -> None:
+    _checkout_with_index(tmp_path, index_age=60.0)
+    (tmp_path / "vocab" / "packages.toml").unlink()
+    os.utime(tmp_path / "vocab", (2000.0, 2000.0))  # only vocab/ itself is newer
+    source = DirChipSource(root=tmp_path)
+    assert source.get("EX9000SOT").package_family is None
+    assert source.origin == tmp_path / "chips"
+
+
+def test_a_file_that_is_not_data_does_not_make_the_index_old(tmp_path, warned) -> None:
+    index = _checkout_with_index(tmp_path, index_age=60.0)
+    readme = tmp_path / "chips" / "README.md"
+    readme.write_text("# chips\n")
+    os.utime(readme, (2000.0, 2000.0))
+    os.utime(tmp_path / "chips", (1000.0, 1000.0))  # as if the README had always been there
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 4
+    assert source.origin == index
+    assert warned() == []
+
+
+def test_a_path_that_cannot_be_examined_does_not_hide_a_newer_file(tmp_path) -> None:
+    _checkout_with_index(tmp_path, index_age=60.0)
+    folder = tmp_path / "chips" / "example-semi"
+    try:
+        (folder / "000-gone.toml").symlink_to(folder / "not-there.toml")
+    except OSError:
+        pytest.skip("can't make a symlink here")
+    os.utime(folder, (1000.0, 1000.0))  # as if the link was there before the build
+    edited = folder / "EX9000SOT.toml"
+    edited.write_text(edited.read_text().replace("SOT-23-5", "SOT-23-6"))
+    os.utime(edited, (2000.0, 2000.0))
+    source = DirChipSource(root=tmp_path)
+    assert source.get("EX9000SOT").package == "SOT-23-6"
+    assert source.origin == tmp_path / "chips"
+    assert source.get("EX1234QFN") == _BUCK  # the dangling link costs one file, not the rest
+
+
+def test_the_index_beside_the_files_is_tried_before_the_one_in_out(tmp_path) -> None:
+    beside = _write_index(tmp_path / "index.json", [_record("EXBESIDE")])
+    _write_index(tmp_path / "out" / "index.json", [_record("EXOUT")])
+    source = DirChipSource(root=tmp_path)
+    assert source.origin == beside
+    assert source.get("EXBESIDE") is not None
+    assert source.get("EXOUT") is None
+
+
+def test_a_broken_index_is_passed_over_for_the_next_one(tmp_path, warned) -> None:
+    (tmp_path / "index.json").write_text("{half an index")
+    in_out = _write_index(tmp_path / "out" / "index.json", [_record("EXOUT")])
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 1
+    assert source.origin == in_out
+    assert len(warned()) == 1
 
 
 def test_an_unpacked_build_has_nothing_to_be_older_than(tmp_path, warned) -> None:
@@ -598,6 +686,154 @@ def test_a_broken_index_beside_chip_files_falls_back_to_the_files(tmp_path, warn
     source = DirChipSource(root=tmp_path)
     assert source.reload() == 4
     assert source.origin == tmp_path / "chips"
+    assert len(warned()) == 1
+
+
+# --- nothing raises -------------------------------------------------------
+
+
+def _deep(levels: int = 100_000) -> str:
+    return "[" * levels + "]" * levels
+
+
+def test_a_chip_file_nested_past_the_parser_is_skipped(tmp_path, warned) -> None:
+    write_checkout(tmp_path)
+    (tmp_path / "chips" / "example-semi" / "EXDEEP.toml").write_text(f"x = {_deep()}\n")
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 4
+    assert source.get("EX1234QFN") == _BUCK
+    (line,) = warned()
+    assert "EXDEEP.toml" in line
+
+
+def test_a_vocab_file_nested_past_the_parser_is_the_same_as_none(tmp_path, warned) -> None:
+    write_checkout(tmp_path)
+    (tmp_path / "vocab" / "packages.toml").write_text(f"families = {_deep()}\n")
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 4
+    assert source.get("EX1234QFN").package_family is None
+    assert len(warned()) == 1
+
+
+def test_an_index_nested_past_the_parser_loads_nothing(tmp_path, warned) -> None:
+    (tmp_path / "index.json").write_text('{"format": 1, "chips": ' + _deep() + "}")
+    assert DirChipSource(root=tmp_path).reload() == 0
+    assert len(warned()) == 1
+
+
+def _no_entry() -> bool:
+    """Whether taking a folder's permissions away keeps this process out."""
+    return os.name != "nt" and os.geteuid() != 0
+
+
+@pytest.fixture
+def locked():
+    """Take every permission off a path for the test, and give them back after."""
+    if not _no_entry():
+        pytest.skip("permissions don't keep this process out")
+    taken: list[tuple[Path, int]] = []
+
+    def lock(path: Path) -> Path:
+        taken.append((path, path.stat().st_mode))
+        path.chmod(0)
+        return path
+
+    yield lock
+    for path, mode in reversed(taken):
+        path.chmod(mode)
+
+
+def test_a_folder_it_may_not_read_costs_only_that_folder(tmp_path, warned, locked) -> None:
+    write_checkout(tmp_path)
+    locked(tmp_path / "chips" / "sample-devices")
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 2
+    assert source.get("EX1234QFN") == _BUCK
+    assert source.get("SD400BGA") is None
+    (line,) = warned()
+    assert "sample-devices" in line
+
+
+def test_a_chip_file_it_may_not_read_costs_only_that_file(tmp_path, warned, locked) -> None:
+    write_checkout(tmp_path)
+    locked(tmp_path / "chips" / "sample-devices" / "SD400BGA.toml")
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 3
+    assert source.get("SD400BGA") is None
+    (line,) = warned()
+    assert "SD400BGA.toml" in line
+
+
+@pytest.mark.parametrize("which", ["chips", "vocab", "out", "."])
+def test_a_part_of_the_directory_it_may_not_read_never_raises(
+    tmp_path, warned, locked, which
+) -> None:
+    _checkout_with_index(tmp_path, index_age=60.0)
+    locked(tmp_path / which)
+    source = DirChipSource(root=tmp_path)
+    expected = {"chips": 4, "vocab": 4, "out": 4, ".": 0}[which]  # an index, or the files
+    assert source.reload() == expected
+    assert (source.get("EX1234QFN") is not None) == bool(expected)
+    assert len(source.by_marking("X1=")) == (2 if expected else 0)
+    if which in ("out", "."):
+        assert len(warned()) == (1 if which == "." else 0)
+
+
+def test_chips_it_may_not_list_says_so(tmp_path, warned, locked) -> None:
+    write_checkout(tmp_path)
+    locked(tmp_path / "chips")
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == 0
+    (line,) = warned()
+    assert "can't list" in line
+
+
+@pytest.mark.parametrize(("check", "chips"), [("is_file", 4), ("is_dir", 0)])
+def test_a_path_check_that_raises_is_a_no(tmp_path, monkeypatch, check: str, chips: int) -> None:
+    # What pathlib does before Python 3.14 when it isn't allowed to look. With
+    # no file check to trust there's no index to find, so the chip files are
+    # read; with no folder check there's no directory at all.
+    _checkout_with_index(tmp_path, index_age=60.0)
+
+    def refuse(self, **_kwargs):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, check, refuse)
+    source = DirChipSource(root=tmp_path)
+    assert source.reload() == chips
+    assert (source.get("EX1234QFN") is not None) == bool(chips)
+    assert len(source.by_marking("X1=")) == (2 if chips else 0)
+    assert source.origin == (tmp_path / "chips" if chips else None)
+
+
+def test_a_root_too_long_to_be_a_path_finds_nothing(tmp_path, warned) -> None:
+    source = DirChipSource(root=tmp_path / ("x" * 5000))
+    assert source.reload() == 0
+    assert source.get("EX1234QFN") is None
+    assert len(warned()) == 1
+
+
+def test_a_failure_nobody_planned_for_still_does_not_raise(tmp_path, monkeypatch, warned) -> None:
+    write_checkout(tmp_path)
+
+    def broken(root, name):
+        raise RuntimeError("something new")
+
+    monkeypatch.setattr(dir_source_module, "_load", broken)
+    source = DirChipSource(root=tmp_path, name="community")
+    assert source.get("EX1234QFN") is None
+    assert source.by_marking("X1=") == []
+    assert source.origin is None
+    assert source.reload() == 0
+    assert all("community" in line for line in warned())
+    monkeypatch.undo()
+    assert source.reload() == 4  # and it recovers once the cause is gone
+
+
+def test_a_home_directory_that_does_not_exist_is_just_a_missing_directory(warned) -> None:
+    source = DirChipSource.from_config("~no-such-user-here/chips")
+    assert source.root == Path("~no-such-user-here/chips")
+    assert source.reload() == 0
     assert len(warned()) == 1
 
 
@@ -738,6 +974,41 @@ def test_a_lookup_during_a_reload_answers_from_the_copy_already_held(tmp_path, m
         reloader.join(timeout=10)
     assert counted == [3]
     assert source.get("EX1234QFN") is None
+
+
+def test_two_reloads_run_one_after_the_other(tmp_path, monkeypatch) -> None:
+    write_checkout(tmp_path)
+    source = DirChipSource(root=tmp_path)
+    real_load = dir_source_module._load
+    first_has_read = threading.Event()
+    carry_on = threading.Event()
+    calls: list[int] = []
+
+    def load(root, name):
+        calls.append(1)
+        loaded = real_load(root, name)
+        if len(calls) == 1:  # the first reload reads, then is held before it can store
+            first_has_read.set()
+            assert carry_on.wait(timeout=10)
+        return loaded
+
+    monkeypatch.setattr(dir_source_module, "_load", load)
+    first = threading.Thread(target=source.reload)
+    first.start()
+    assert first_has_read.wait(timeout=10)
+    (tmp_path / "chips" / "example-semi" / "EXNEW.toml").write_text(
+        'schema = 1\nmpn = "EXNEW"\nmanufacturer = "Example Semi"\n'
+    )
+    second = threading.Thread(target=source.reload)
+    second.start()
+    second.join(timeout=0.3)
+    try:
+        assert second.is_alive()  # waiting its turn, not racing the first
+    finally:
+        carry_on.set()
+        first.join(timeout=10)
+        second.join(timeout=10)
+    assert source.get("EXNEW") is not None  # the later read is the one kept
 
 
 if __name__ == "__main__":

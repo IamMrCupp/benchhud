@@ -20,7 +20,10 @@ The index, when there is one and it can be trusted; the chip files otherwise.
   from them, so **an index older than anything under** ``chips/`` **or**
   ``vocab/`` **is skipped** and the chip files are read. Otherwise a
   ``git pull`` without a rebuild would leave the HUD on last week's data with
-  nothing to say so.
+  nothing to say so. "Older" goes by modification time, of chip and vocab
+  files and of the folders holding them — deleting a file changes only its
+  folder's. It errs towards the chip files: anything that touches a folder
+  makes the index look old, and the chip files are never the wrong answer.
 - **An index in a format newer than 1 is never guessed at.** It isn't used. If
   the directory also has chip files those are read — each carries its own
   ``schema`` number and is checked the same way; if it doesn't, nothing loads.
@@ -49,8 +52,9 @@ A reader, not a validator
 It takes what it can use. Unknown keys are ignored, and a function slug or a
 document ``kind`` it has never seen is carried through. A chip it can't make
 sense of — no part number, a list where text belongs, a ``schema`` it doesn't
-know — is skipped with one log line and the rest still load. ``chipdata
-validate`` is the check; this never raises.
+know — is skipped with one log line and the rest still load. So is a file or
+a folder it isn't allowed to read. ``chipdata validate`` is the check; this
+never raises.
 
 A part number that appears twice is the first one read, the same rule as
 :class:`~benchhud.chips.source.InMemoryChipSource`: index order in an index,
@@ -64,7 +68,8 @@ Not at construction — building the source costs nothing and touches no disk.
 The first lookup reads it, and the result is kept in memory. Nothing watches
 the directory: :meth:`DirChipSource.reload` re-reads it, and so does a
 restart. A lookup that arrives during a reload answers from the copy already
-held, never a half-read one.
+held, never a half-read one. Only the very first read has no copy to answer
+from, so lookups that arrive during it wait for it.
 
 The first lookup does the reading, so the caller decides which thread pays for
 it — call ``reload()`` from a worker before the first lookup to keep it off
@@ -75,9 +80,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import tomllib
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -227,12 +233,41 @@ class _Vocab:
         return tuple(dict.fromkeys(self.deprecated.get(slug, slug) for slug in functions))
 
 
-def _read_toml(path: Path) -> dict[str, Any] | None:
-    """A TOML file as a dict; ``None`` (and a log line) when it can't be read."""
+def _is_file(path: Path) -> bool:
+    """``path.is_file()`` that can't raise.
+
+    Before Python 3.14 pathlib lets a permission error or an over-long name
+    out as an exception; here either just means "no file this can read".
+    """
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def _is_dir(path: Path) -> bool:
+    """``path.is_dir()`` that can't raise — see :func:`_is_file`."""
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _read_toml(path: Path, *, missing_ok: bool = False) -> dict[str, Any] | None:
+    """A TOML file as a dict; ``None`` (and a log line) when it can't be read.
+
+    With ``missing_ok`` a file that isn't there is ``None`` without the line.
+    """
     try:
         with path.open("rb") as handle:
             return tomllib.load(handle)
-    except (OSError, ValueError) as exc:  # TOMLDecodeError and bad UTF-8 are ValueErrors
+    except FileNotFoundError as exc:
+        if not missing_ok:
+            log.warning("chips: can't read %s: %s", path, exc)
+        return None
+    # TOMLDecodeError and bad UTF-8 are ValueErrors; nesting a few hundred
+    # levels deep runs the parser out of stack.
+    except (OSError, ValueError, RecursionError) as exc:
         log.warning("chips: can't read %s: %s", path, exc)
         return None
 
@@ -240,21 +275,43 @@ def _read_toml(path: Path) -> dict[str, Any] | None:
 def _load_vocab(root: Path) -> _Vocab:
     families: tuple[str, ...] = ()
     deprecated: dict[str, str] = {}
-    packages_file = root / "vocab" / "packages.toml"
-    if packages_file.is_file():
-        listed = (_read_toml(packages_file) or {}).get("families")
-        if isinstance(listed, list):
-            families = tuple(f for f in listed if isinstance(f, str) and f)
-    functions_file = root / "vocab" / "functions.toml"
-    if functions_file.is_file():
-        table = (_read_toml(functions_file) or {}).get("deprecated")
-        if isinstance(table, Mapping):
-            deprecated = {
-                old: new
-                for old, new in table.items()
-                if isinstance(old, str) and isinstance(new, str) and new
-            }
+    packages = _read_toml(root / "vocab" / "packages.toml", missing_ok=True) or {}
+    listed = packages.get("families")
+    if isinstance(listed, list):
+        families = tuple(f for f in listed if isinstance(f, str) and f)
+    functions = _read_toml(root / "vocab" / "functions.toml", missing_ok=True) or {}
+    table = functions.get("deprecated")
+    if isinstance(table, Mapping):
+        deprecated = {
+            old: new
+            for old, new in table.items()
+            if isinstance(old, str) and isinstance(new, str) and new
+        }
     return _Vocab(families=families, deprecated=deprecated)
+
+
+def _walk(top: Path, *, say: bool) -> tuple[list[Path], list[Path]]:
+    """The folders (``top`` first) and the files under ``top``.
+
+    A folder that can't be listed is passed over — with a log line when
+    ``say`` — and the rest are still walked. Folders that are symlinks aren't
+    followed, so a link back up the tree can't loop.
+    """
+
+    def cant_list(exc: OSError) -> None:
+        if say:
+            log.warning("chips: can't list %s: %s", exc.filename or top, exc)
+
+    folders, files = [top], []
+    for here, folder_names, file_names in os.walk(top, onerror=cant_list):
+        folders.extend(Path(here, name) for name in folder_names)
+        files.extend(Path(here, name) for name in file_names)
+    return folders, files
+
+
+def _toml_files(files: Iterable[Path]) -> list[Path]:
+    """The ``.toml`` files, in the order chip-data's validator reads them."""
+    return sorted(path for path in files if path.name.endswith(".toml"))
 
 
 # --- reading the two shapes ----------------------------------------------
@@ -299,20 +356,11 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
     return chips
 
 
-def _chip_files(chips_dir: Path) -> list[Path]:
-    """Chip files in the order chip-data's validator reads them."""
-    try:
-        return sorted(p for p in chips_dir.rglob("*.toml") if p.is_file())
-    except OSError as exc:
-        log.warning("chips: can't list %s: %s", chips_dir, exc)
-        return []
-
-
 def _chips_from_files(root: Path) -> list[Chip]:
     """Every usable chip file under ``root/chips``."""
     vocab = _load_vocab(root)
     chips: list[Chip] = []
-    for path in _chip_files(root / "chips"):
+    for path in _toml_files(_walk(root / "chips", say=True)[1]):
         data = _read_toml(path)
         if data is None:
             continue
@@ -324,38 +372,41 @@ def _chips_from_files(root: Path) -> list[Chip]:
         except _Unusable as exc:
             log.warning("chips: skipping %s: %s", path, exc)
             continue
+        # What the build works out, worked out the same way. A chip file has
+        # no package_family key of its own, so nothing is taken from one.
         chips.append(
             replace(
                 chip,
-                package_family=vocab.package_family(chip.package) or chip.package_family,
+                package_family=vocab.package_family(chip.package),
                 functions=vocab.current(chip.functions),
             )
         )
     return chips
 
 
-def _tree(root: Path) -> Iterator[Path]:
-    """Everything an index is built from: ``chips/`` and the vocab files."""
-    chips_dir = root / "chips"
-    yield chips_dir
-    yield from chips_dir.rglob("*")
-    vocab_dir = root / "vocab"
-    if vocab_dir.is_dir():
-        yield vocab_dir
-        yield from vocab_dir.glob("*.toml")
-
-
 def _index_is_current(index: Path, root: Path) -> bool:
     """Whether nothing the index is built from has changed since it was written.
 
-    Directories are checked too: deleting a chip file changes no file's time,
-    only its folder's. A tree that can't be examined leaves the index standing.
+    Looks at the chip files, the vocab files and the folders holding them:
+    deleting a file changes no file's time, only its folder's. A path that
+    can't be examined is passed over, not taken as an answer either way.
     """
     try:
         built = index.stat().st_mtime
-        return all(path.stat().st_mtime <= built for path in _tree(root))
     except OSError:
-        return True
+        return True  # reading it is about to fail, and that says why
+    watched: list[Path] = []
+    for top in (root / "chips", root / "vocab"):
+        folders, files = _walk(top, say=False)
+        watched += folders
+        watched += _toml_files(files)
+    for path in watched:
+        try:
+            if path.stat().st_mtime > built:
+                return False
+        except OSError:
+            continue
+    return True
 
 
 @dataclass(frozen=True)
@@ -379,29 +430,33 @@ def _first_of_each(chips: Iterable[Chip], origin: Path) -> _Loaded:
 def _load(root: Path | None, name: str) -> _Loaded:
     if root is None:
         return _Loaded()
-    if root.is_file():
+    if _is_file(root):
         chips = _chips_from_index(root)
         return _first_of_each(chips, root) if chips is not None else _Loaded()
-    if not root.is_dir():
-        log.warning("chips: source %r: %s is not a directory", name, root)
+    if not _is_dir(root):
+        log.warning("chips: source %r: %s is not a directory this can read", name, root)
         return _Loaded()
 
-    has_chip_files = (root / "chips").is_dir()
-    index = next((p for p in (root / INDEX_NAME, root / "out" / INDEX_NAME) if p.is_file()), None)
-    if index is not None:
+    has_chip_files = _is_dir(root / "chips")
+    found_an_index = False
+    for index in (root / INDEX_NAME, root / "out" / INDEX_NAME):
+        if not _is_file(index):
+            continue
+        found_an_index = True
         if has_chip_files and not _index_is_current(index, root):
             log.warning(
-                "chips: %s is older than the chip files beside it; reading the chip files"
-                " (run `chipdata build` to use the index again)",
+                "chips: %s may be out of date: something under chips/ or vocab/ changed after"
+                " it was written. Reading the chip files (run `chipdata build` to use the"
+                " index again)",
                 index,
             )
-        else:
-            chips = _chips_from_index(index)
-            if chips is not None:
-                return _first_of_each(chips, index)
+            continue
+        chips = _chips_from_index(index)
+        if chips is not None:
+            return _first_of_each(chips, index)
     if has_chip_files:
         return _first_of_each(_chips_from_files(root), root / "chips")
-    if index is None:
+    if not found_an_index:
         log.warning("chips: source %r: no %s and no chips/ in %s", name, INDEX_NAME, root)
     return _Loaded()
 
@@ -428,7 +483,12 @@ class DirChipSource:
     @classmethod
     def from_config(cls, path: str, name: str = "chip-data") -> DirChipSource:
         """Build from config strings; a blank path means "not configured"."""
-        root = Path(path).expanduser() if path.strip() else None
+        if not path.strip():
+            return cls(root=None, name=name)
+        try:
+            root = Path(path).expanduser()
+        except RuntimeError:  # "~nobody/chips": no such user, so no such directory
+            root = Path(path)
         return cls(root=root, name=name)
 
     def _current(self) -> _Loaded:
@@ -441,7 +501,14 @@ class DirChipSource:
         return loaded
 
     def _read(self) -> _Loaded:
-        loaded = _load(self.root, self.name)
+        try:
+            loaded = _load(self.root, self.name)
+        except Exception:
+            # The seam's rule: a source that can't answer gives nothing. Every
+            # failure this knows about is handled where it happens; this is for
+            # the one it doesn't, so a lookup can't raise into the HUD.
+            log.exception("chips: source %r: reading %s failed", self.name, self.root)
+            loaded = _Loaded()
         if loaded.origin is not None:
             log.info(
                 "chips: source %r: %d chips from %s", self.name, len(loaded.chips), loaded.origin
@@ -451,7 +518,8 @@ class DirChipSource:
     def reload(self) -> int:
         """Read the directory again now; returns how many chips it holds.
 
-        Lookups made while this runs answer from the copy already held.
+        Lookups made while this runs answer from the copy already held; two
+        reloads run one after the other, so the later read is the one kept.
         """
         with self._lock:
             loaded = self._loaded = self._read()
