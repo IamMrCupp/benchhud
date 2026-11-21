@@ -56,6 +56,7 @@ from benchhud.flash.flashrom import (
 )
 from benchhud.jobs.store import JobStore
 from benchhud.shell.panel import PANEL_MARGINS, Panel
+from benchhud.shell.qt_util import mark_danger, set_tone
 
 #: Runs a job off the GUI thread.
 Executor = Callable[[Callable[[], None]], None]
@@ -147,10 +148,10 @@ class FlashPanel(Panel):
         self.read_button = QPushButton("Read backup")
         self.read_button.setToolTip("Read the chip twice; keep it only if both reads match")
         self.read_button.clicked.connect(self.read_backup)
-        self.write_button = QPushButton("Write…")
+        self.write_button = mark_danger(QPushButton("Write…"))
         self.write_button.setToolTip("Write an image to the chip, then verify it")
         self.write_button.clicked.connect(self.write)
-        self.erase_button = QPushButton("Erase…")
+        self.erase_button = mark_danger(QPushButton("Erase…"))
         self.erase_button.clicked.connect(self.erase)
         self.cancel_button = QPushButton("Stop")
         self.cancel_button.setToolTip("Stop flashrom")
@@ -231,7 +232,7 @@ class FlashPanel(Panel):
 
     def _say(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet("color: #ff7a7a;" if error else "")
+        set_tone(self.status, "error" if error else None)
 
     def _start(self, operation: str, job: Callable[[], Any], message: str) -> None:
         self._busy = operation

@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from benchhud.shell.qt_util import set_tone
+
 #: DMM modes offered, as (label, the meter's mode token) (#283).
 DMM_MODES = (
     ("DC volts", "VOLT:DC"),
@@ -161,7 +163,7 @@ class SupplyControls(QGroupBox):
     def show_status(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
         self.status.setProperty("idle", False)
-        self.status.setStyleSheet("color: #ff6b6b;" if error else "")
+        set_tone(self.status, "error" if error else None)
 
     def _ask_output_on(self) -> None:
         if self._confirm(self, self.voltage.value(), self.current.value()):
