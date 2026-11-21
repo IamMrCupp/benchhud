@@ -51,3 +51,22 @@ jobs:
           if [ ${#files[@]} -eq 0 ]; then echo "no installers built"; ls -l dist; exit 1; fi
           ls -l "${files[@]}"
           gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"
+
+  # The cask can move as soon as the .dmg is on the release, so say so now
+  # rather than leave it to the tap's once-a-day check (#445). The tap still
+  # installs the bump on a clean Mac and merges it itself.
+  tap:
+    needs: attach
+    runs-on: ubuntu-latest
+    # A release is good without this: the tap's daily run picks up whatever a
+    # missing or under-scoped token leaves behind.
+    continue-on-error: true
+    steps:
+      - name: Start the tap's bump workflow
+        env:
+          # The built-in token can't reach another repository. This one needs
+          # Actions: write on IamMrCupp/homebrew-bench.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "no token: leaving it to the tap's daily run"; exit 0; fi
+          gh workflow run bump.yml -R IamMrCupp/homebrew-bench

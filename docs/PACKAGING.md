@@ -314,6 +314,12 @@ Nobody has to merge the release PR. Once CI passes on it,
 to `main` ships a release a few minutes later. To hold a release, close the
 release PR.
 
+Once the installers are attached, `release-assets.yml` starts the bump workflow
+in the [Homebrew tap](https://github.com/IamMrCupp/homebrew-bench), so the cask
+follows the release instead of waiting for the tap's daily check. That step uses
+`RELEASE_PLEASE_PAT`, which needs **Actions: write** on the tap; if it can't
+start the workflow the release still stands and the daily check catches up.
+
 **On a Mac, recreate the bundle for a release build.** Briefcase writes the
 version into `Info.plist` only at `create`, like the entitlements above, so
 `update` + `build` after a version bump still produce an app that says the old
