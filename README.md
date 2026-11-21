@@ -56,6 +56,9 @@ glows — on the scope image, with the rest of the board left alone.*
   served as its own transparent page on localhost, so every panel is a separate
   OBS source you can place anywhere. Never shows the customer.
   [More →](docs/BROWSER-SOURCES.md)
+- **OBS scenes** — pick OBS's live scene from the Tools dock, and let a tool
+  bring its own scene up when it starts and hand it back when it exits. Off
+  until you turn it on. [More →](docs/OBS-SCENES.md)
 - **Terminal** — your shell in a panel, and optionally on stream as a read-only
   OBS source with a pause button for anything private. macOS and Linux.
   [More →](docs/TERMINAL.md)
