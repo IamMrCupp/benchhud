@@ -151,8 +151,10 @@ body.offline .live {
   text-transform: uppercase;
 }
 
+/* Wins over every panel's own `display`, wherever that rule sits in this file.
+   Without `!important` a later `.nowplaying { display: flex }` beat it (#444). */
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 /* --- now playing (#251) --- */
