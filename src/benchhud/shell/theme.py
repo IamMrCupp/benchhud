@@ -1,13 +1,12 @@
 """Application dark theme.
 
 A single QSS stylesheet applied at startup so the HUD reads as one dark
-bench/stream app rather than default-Qt light.
-
-The colours and the panel treatment are burnwright's (#440): its ``--bw-*``
-dark palette, panels as bordered cards with a gutter between them, headings in
-small caps. The two apps sit on the same bench and should look it. The meter's
-LCD stays light on purpose — it's an instrument face glowing against dark
-equipment, not part of the chrome.
+bench/stream app rather than default-Qt light. The palette is burnwright's dark
+set (its ``--bw-*`` properties in ``src/App.css``), so the two apps look like one
+family (#429, #440). So is the panel treatment: every dock a bordered card with
+a gutter round it, fields and buttons with burnwright's lighter edge, Erase and
+Write outlined as the destructive ones. The meter's LCD cells keep their own
+colours: they match the on-stream readout.
 """
 
 from __future__ import annotations
@@ -15,43 +14,43 @@ from __future__ import annotations
 from importlib.resources import files
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QDockWidget, QGroupBox, QWidget
+from PySide6.QtWidgets import QApplication, QGroupBox, QWidget
 
+from benchhud.shell.fonts import apply_ui_font
 from benchhud.shell.qt_util import heading_font, plain_font
 
 #: The palette, in one place. ``@name`` in the stylesheets below is replaced
-#: with these, longest name first.
+#: with these, longest name first. Values follow burnwright's dark theme.
 COLOURS = {
-    "window": "#151517",  # --bw-bg: behind everything, the gutters between panels
-    "chrome": "#101012",  # the composite's well: a shade under the window
-    "panel": "#1f1f22",  # --bw-panel: a dock's body
-    "raised": "#2a2a2e",  # --bw-control-bg: fields and buttons
-    "hover": "#34343a",  # --bw-control-hover
-    "border": "#3a3a40",  # --bw-border: around panels
-    "edge": "#55555d",  # --bw-control-border: around fields and buttons
-    "text": "#ececef",  # --bw-fg
-    "bright": "#ffffff",
-    "muted": "#a3a3ab",  # --bw-muted
-    "faint": "#6e6e76",
-    "accent": "#8fb0ff",  # --bw-accent
-    "accent-soft": "#24345c",
-    "accent-ink": "#101422",
-    "danger": "#ff9a92",  # --bw-danger
+    "window": "#151517",  # behind everything: the gaps between panels (--bw-bg)
+    "chrome": "#111113",  # menu bar, status bar, the composite's surround
+    "panel": "#1f1f22",  # a dock's body (--bw-panel)
+    "raised": "#2a2a2e",  # cards, fields, buttons (--bw-control-bg)
+    "hover": "#34343a",  # (--bw-control-hover)
+    "border": "#3a3a40",  # round a panel (--bw-border)
+    "edge": "#55555d",  # round a field or a button (--bw-control-border)
+    "text": "#e4e4e8",
+    "bright": "#f4f4f6",  # (--bw-fg is between the two)
+    "muted": "#a3a3ab",  # (--bw-muted)
+    "faint": "#6b6b73",
+    "accent": "#8fb0ff",  # (--bw-accent)
+    "accent-soft": "#24345c",  # (--bw-accent-soft)
+    "accent-ink": "#10162a",  # text on a filled accent
+    "danger": "#ff9a92",
     "danger-soft": "#4a1f1c",
     "danger-dim": "#7d524f",  # danger at half strength, for a disabled button
-    "warning": "#ffc66b",  # --bw-warning
-    "ok": "#7fd6a0",  # --bw-ok
+    "warning": "#ffc66b",
+    "warning-soft": "#3d2e10",
+    "warning-edge": "#f59e0b",  # (--bw-warning-border)
+    "ok": "#7fd6a0",
+    "ok-soft": "#173624",
 }
-
-#: For text a panel colours itself: an error line, a warning.
-DANGER = COLOURS["danger"]
-WARNING = COLOURS["warning"]
 
 DARK_QSS = """
 QWidget { background-color: @panel; color: @text; }
 QMainWindow, QDialog { background-color: @window; }
 
-QMenuBar { background-color: @window; border-bottom: 1px solid @border; }
+QMenuBar { background-color: @chrome; border-bottom: 1px solid @border; }
 QMenuBar::item { padding: 5px 10px; background: transparent; border-radius: 4px; }
 QMenuBar::item:selected { background: @hover; }
 QMenu { background-color: @raised; border: 1px solid @border; padding: 4px; }
@@ -60,14 +59,16 @@ QMenu::item:selected { background: @accent-soft; color: @bright; }
 QMenu::separator { height: 1px; background: @border; margin: 4px 8px; }
 
 /* A dock is a card, as a panel is in burnwright: a border all the way round,
-   rounded corners, its heading inside the top edge. The title draws the top of
-   the frame and the scroll area under it the rest. */
+   rounded corners, its heading inside the top edge (#440). The title bar draws
+   the top of the frame and the scroll area under it the rest. Grouped docks
+   show their group's name once, in small capitals (DockTitleBar, #429). */
 QDockWidget { titlebar-close-icon: none; color: @muted; font-weight: 600; }
-QDockWidget::title {
-    background: @panel; padding: 8px 10px 4px 10px;
-    border: 1px solid @border; border-bottom: none;
+QDockWidget::title, QWidget#dockTitleBar {
+    background: @panel; border: 1px solid @border; border-bottom: none;
     border-top-left-radius: 8px; border-top-right-radius: 8px;
 }
+QDockWidget::title { padding: 8px 10px 4px 10px; }
+QLabel#dockTitle { color: @muted; font-weight: 600; font-size: 11px; }
 QDockWidget > QScrollArea {
     background: @panel; border: 1px solid @border; border-top: none;
     border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;
@@ -86,7 +87,7 @@ QPushButton:hover { background-color: @hover; border-color: @accent; }
 QPushButton:pressed { background-color: @accent-soft; }
 QPushButton:focus { border-color: @accent; }
 QPushButton:disabled { color: @faint; background-color: @panel; border-color: @border; }
-/* The ones that destroy something (see qt_util.mark_danger): Erase, Write. */
+/* The ones that destroy something (qt_util.mark_danger): Erase, Write. */
 QPushButton[danger="true"] { border-color: @danger; color: @danger; }
 QPushButton[danger="true"]:hover { background-color: @danger-soft; border-color: @danger; }
 QPushButton[danger="true"]:disabled { color: @danger-dim; border-color: @danger-dim; }
@@ -97,6 +98,21 @@ QLabel, QCheckBox, QRadioButton { background: transparent; }
 /* A heading inside a panel (see qt_util.section_label), and secondary text. */
 QLabel#sectionLabel { color: @muted; font-weight: 600; padding-top: 6px; }
 QLabel#hint, QLabel#SupplyStatus, QLabel#SignatureStatus { color: @muted; }
+/* A status line that's gone wrong (qt_util.set_tone). */
+QLabel[tone="error"] { color: @danger; }
+QLabel[tone="warning"] { color: @warning; }
+QLabel[tone="ok"] { color: @ok; }
+/* A notice: a tinted line with a stripe down its left edge, burnwright-style. */
+QLabel#notice {
+    background-color: @window; color: @text;
+    border-left: 3px solid @border; border-radius: 4px; padding: 5px 8px;
+}
+QLabel#notice[tone="warning"] {
+    background-color: @warning-soft; color: @warning; border-left-color: @warning-edge;
+}
+QLabel#notice[tone="error"] {
+    background-color: @danger-soft; color: @danger; border-left-color: @danger;
+}
 
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {
     background-color: @raised; border: 1px solid @edge;
@@ -142,6 +158,7 @@ QComboBox QAbstractItemView {
 /* Tabs are flat labels; the one that's open carries an accent bar on the edge
    that touches its panel. */
 QTabWidget::pane { border: 1px solid @border; border-radius: 6px; }
+/* A group's tab row runs along the foot of its card, in the gutter. */
 QTabBar { background: @window; }
 QTabBar::tab {
     background: transparent; padding: 6px 10px; color: @muted;
@@ -158,7 +175,7 @@ QHeaderView::section {
     border-bottom: 1px solid @border; padding: 4px 6px;
 }
 
-QStatusBar { background: @window; color: @muted; border-top: 1px solid @border; }
+QStatusBar { background: @chrome; color: @muted; border-top: 1px solid @border; }
 QStatusBar::item { border: none; }
 QStatusBar QLabel { color: @muted; }
 
@@ -227,23 +244,17 @@ INDICATOR_QSS = _coloured(INDICATOR_QSS)
 
 
 def style_headings(root: QWidget) -> None:
-    """Set every dock's and group's title under ``root`` in small caps.
+    """Set every group title under ``root`` in small caps, like a dock's heading.
 
     A stylesheet can't transform text, so this is done on the font. A font is
-    inherited, so each title's contents are handed the plain one back.
+    inherited, so each group's contents are handed the plain one back.
     """
-    for dock in root.findChildren(QDockWidget):
-        _caps_title(dock, [dock.widget()] if dock.widget() is not None else [])
+    direct = Qt.FindChildOption.FindDirectChildrenOnly
     for group in root.findChildren(QGroupBox):
-        direct = Qt.FindChildOption.FindDirectChildrenOnly
-        _caps_title(group, group.findChildren(QWidget, options=direct))
-
-
-def _caps_title(widget: QWidget, contents: list[QWidget]) -> None:
-    plain = plain_font(widget.font())
-    widget.setFont(heading_font(widget.font()))
-    for child in contents:
-        child.setFont(plain)
+        plain = plain_font(group.font())
+        group.setFont(heading_font(group.font()))
+        for child in group.findChildren(QWidget, options=direct):
+            child.setFont(plain)
 
 
 def stylesheet() -> str:
@@ -253,5 +264,6 @@ def stylesheet() -> str:
 
 
 def apply_theme(app: QApplication) -> None:
-    """Apply the dark theme to the application."""
+    """Apply the dark theme and the interface font (Inter) to the application."""
+    apply_ui_font(app)
     app.setStyleSheet(stylesheet())

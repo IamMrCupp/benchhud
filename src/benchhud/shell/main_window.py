@@ -31,8 +31,20 @@ from typing import Any
 import cv2
 import numpy as np
 from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication, QKeySequence, QShortcut
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabBar, QWidget
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QGuiApplication,
+    QKeySequence,
+    QShortcut,
+)
+from PySide6.QtWidgets import (
+    QDockWidget,
+    QMainWindow,
+    QMessageBox,
+    QTabBar,
+    QWidget,
+)
 
 from benchhud import __version__
 from benchhud.assets import AssetSource, HttpAssetSource, NullAssetSource
@@ -115,6 +127,13 @@ from benchhud.recon import (
 from benchhud.shell.about import about_html
 from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
 from benchhud.shell.composite_view import CompositeView
+from benchhud.shell.dock_groups import (
+    DOCK_GROUPS,
+    Area,
+    DockGroup,
+    bottom_dock_height,
+    heading,
+)
 from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.cameras import CamerasPanel
@@ -162,13 +181,19 @@ def frame_interval_ms(output: OutputConfig) -> int:
 # Bump when the default dock arrangement changes. The shell auto-saves the
 # layout on close, so without this a layout from an older build would silently
 # override a newer default (and the user never knowingly saved one).
-LAYOUT_VERSION = 9
+LAYOUT_VERSION = 10  # 10: Bench/Recon stacked, Tools in a bottom strip (#429)
 
 #: The side columns' default widths. Qt's own default is each dock's size hint,
 #: and the left column's is its whole row of tabs: it opened some 950 px wide
 #: and left the composite a strip (#422).
 SIDE_DOCK_WIDTH = 340
 METER_DOCK_WIDTH = 330
+#: Bench's share of the left column; Recon gets the rest (#429).
+BENCH_SHARE = 0.6
+#: The camera feeds' share of the right column; the meter gets the rest.
+FEEDS_SHARE = 0.33
+#: The dock separators' width, from the theme's ``QMainWindow::separator``.
+_SEPARATOR_PX = 5
 
 SourceFactory = Callable[[], FrameSource]
 #: Takes ``(device, width, height)`` and returns an open :class:`OutputSink`.
@@ -403,32 +428,29 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.composite_view)
 
         # Panels must exist before restoreState so their dock geometry restores.
-        # Default layout: cameras + meter on the right, settings tabbed on the
-        # left, composite preview in the centre. A saved layout (config) wins on
-        # later launches; this is just the first-run arrangement.
+        # Default layout (dock_groups, #429): Bench over Recon on the left, the
+        # Tools strip under the composite, camera feeds + meter on the right. A
+        # saved layout (config) wins on later launches; this is just the
+        # first-run arrangement.
         self.panels = PanelManager(self)
-        right = Qt.DockWidgetArea.RightDockWidgetArea
-        left = Qt.DockWidgetArea.LeftDockWidgetArea
 
         self.scope_panel = ScopePanel()
-        scope_dock = self.panels.add_panel(self.scope_panel, right)
+        self.panels.add_panel(self.scope_panel, None)
         self.thermal_panel = ThermalPanel()
-        thermal_dock = self.panels.add_panel(self.thermal_panel, right)
-        self.tabifyDockWidget(scope_dock, thermal_dock)  # scope/thermal as tabs
+        self.panels.add_panel(self.thermal_panel, None)
         # PowerPanel is the numeric power/DMM meter (DMM header + V/A/W/max).
         self.power_panel = PowerPanel()
-        self.panels.add_panel(self.power_panel, right)
+        self.panels.add_panel(self.power_panel, None)
         self._wire_supply_controls()
         self._wire_signature()
         self.controls_panel = ControlsPanel(self._config)
-        controls_dock = self.panels.add_panel(self.controls_panel, left)
+        self.panels.add_panel(self.controls_panel, None)
         self.launcher_panel = LauncherPanel(self._config.tools)
         self.launcher_panel.terminal_tool_requested.connect(self.run_tool_in_terminal)
         # Asked before a CLI tool takes the terminal from a serial console. A
         # seam so tests needn't click a dialog: (current target) -> go ahead?
         self.confirm_terminal_switch = self._ask_terminal_switch
-        launcher_dock = self.panels.add_panel(self.launcher_panel, left)
-        self.tabifyDockWidget(controls_dock, launcher_dock)  # controls/tools tabs
+        self.panels.add_panel(self.launcher_panel, None)
         self.controls_panel.changed.connect(self.render_composite)
         # The thermal panel colours like the overlay: same range, same colormap.
         self.controls_panel.changed.connect(self._style_thermal_panel)
@@ -457,67 +479,55 @@ class MainWindow(QMainWindow):
             open_schematic=self.open_schematic_file,
         )
         self.jobs_panel.job_changed.connect(self._publish_job)
-        jobs_dock = self.panels.add_panel(self.jobs_panel, left)
-        self.tabifyDockWidget(launcher_dock, jobs_dock)  # …and jobs
+        self.panels.add_panel(self.jobs_panel, None)
         self.inventory_panel = InventoryPanel(
             lambda: self._inventory_source,
             job_ref=self.selected_job_ref,
             on_consumed=self._note_parts_used,
         )
-        inventory_dock = self.panels.add_panel(self.inventory_panel, left)
-        self.tabifyDockWidget(jobs_dock, inventory_dock)  # …and inventory
+        self.panels.add_panel(self.inventory_panel, None)
         self.terminal_panel = TerminalPanel(terminal_view_factory)
         self.terminal_panel.restart_requested.connect(self.restart_terminal)
         self.terminal_panel.pause_toggled.connect(self.set_terminal_paused)
         self.terminal_panel.target_changed.connect(self.set_terminal_target)
         self._terminal_targets: list[tuple[str, str]] | None = None
-        terminal_dock = self.panels.add_panel(self.terminal_panel, left)
-        self.tabifyDockWidget(inventory_dock, terminal_dock)  # …and the terminal
+        self.panels.add_panel(self.terminal_panel, None)
         self.flash_panel = FlashPanel(
             self._config.flash, self._job_store, self.jobs_panel.selected_job_id
         )
         self.flash_panel.job_note_added.connect(self.jobs_panel.refresh_notes)
-        flash_dock = self.panels.add_panel(self.flash_panel, left)
-        self.tabifyDockWidget(terminal_dock, flash_dock)  # …and flashrom (#227)
+        self.panels.add_panel(self.flash_panel, None)
         self.engagement_panel = EngagementPanel(
             lambda: self._recon_source,
             active_ref=lambda: self._active_engagement,
             on_activate=self.import_engagement,
         )
-        engagement_dock = self.panels.add_panel(self.engagement_panel, left)
-        self.tabifyDockWidget(terminal_dock, engagement_dock)  # …and the recon engagement (#305)
+        self.panels.add_panel(self.engagement_panel, None)
         self.interface_panel = InterfacePanel(
             lambda: self._asset_source,
             active_ref=lambda: self._active_engagement,
         )
-        interface_dock = self.panels.add_panel(self.interface_panel, left)
-        self.tabifyDockWidget(engagement_dock, interface_dock)  # …and the interface monitor (#307)
+        self.panels.add_panel(self.interface_panel, None)
         self.pinout_panel = PinoutPanel(active_ref=lambda: self._active_engagement)
-        pinout_dock = self.panels.add_panel(self.pinout_panel, left)
-        self.tabifyDockWidget(interface_dock, pinout_dock)  # …and the pinout/protocol crib (#312)
+        self.panels.add_panel(self.pinout_panel, None)
         self.capture_panel = CapturePanel(
             lambda: self._recon_source,
             active_ref=lambda: self._active_engagement,
         )
-        capture_dock = self.panels.add_panel(self.capture_panel, left)
-        self.tabifyDockWidget(pinout_dock, capture_dock)  # …and the capture/dump status (#314)
+        self.panels.add_panel(self.capture_panel, None)
         self.readings_panel = ReadingsPanel(self._job_store, self.jobs_panel.selected_job_id)
         self.jobs_panel.job_changed.connect(self.readings_panel.refresh)
         self.jobs_panel.job_changed.connect(self._reference_for_job)
-        readings_dock = self.panels.add_panel(self.readings_panel, left)
+        self.panels.add_panel(self.readings_panel, None)
         self.minipro_panel = MiniproPanel(
             self._config.minipro, self._job_store, self.jobs_panel.selected_job_id
         )
         self.minipro_panel.job_note_added.connect(self.jobs_panel.refresh_notes)
-        minipro_dock = self.panels.add_panel(self.minipro_panel, left)
-        self.tabifyDockWidget(flash_dock, minipro_dock)  # …and the T48 (#253)
-        self.tabifyDockWidget(minipro_dock, readings_dock)  # …and readings (#235)
+        self.panels.add_panel(self.minipro_panel, None)
         self.cameras_panel = CamerasPanel(self._config.cameras, scanner=self._scanner)
-        cameras_dock = self.panels.add_panel(self.cameras_panel, left)
-        self.tabifyDockWidget(readings_dock, cameras_dock)  # …and aiming the cameras (#330)
+        self.panels.add_panel(self.cameras_panel, None)
 
-        scope_dock.raise_()
-        controls_dock.raise_()
+        self._arrange_docks()
 
         self._update_terminal_panel()
 
@@ -576,11 +586,79 @@ class MainWindow(QMainWindow):
         else:
             self._size_side_docks()
 
+    def _arrange_docks(self) -> None:
+        """Put the docks into their groups (#429): see :mod:`benchhud.shell.dock_groups`.
+
+        Each group is one heading over its panels, with the group's tab row
+        along the foot (Qt's default edge, so the heading sits on the content).
+        The side columns own their bottom corners, so the Tools strip sits under
+        the composite alone and the columns keep the window's full height.
+        """
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        areas = {
+            Area.LEFT: Qt.DockWidgetArea.LeftDockWidgetArea,
+            Area.RIGHT: Qt.DockWidgetArea.RightDockWidgetArea,
+            Area.BOTTOM: Qt.DockWidgetArea.BottomDockWidgetArea,
+        }
+        below = {Area.LEFT_LOWER: Area.LEFT, Area.RIGHT_LOWER: Area.RIGHT}
+        anchors: dict[Area, QDockWidget] = {}
+        placed: list[tuple[DockGroup, list[QDockWidget]]] = []
+        # Place each group's first dock, then tab the rest onto it: Qt can't
+        # split a dock that's already tabbed (it adds a tab instead).
+        for group in DOCK_GROUPS:
+            docks = [d for d in map(self.panels.dock, group.panel_ids) if d is not None]
+            if not docks:
+                continue
+            first = docks[0]
+            if group.area in below:
+                self.splitDockWidget(anchors[below[group.area]], first, Qt.Orientation.Vertical)
+            else:
+                self.addDockWidget(areas[group.area], first)
+                anchors[group.area] = first
+            placed.append((group, docks))
+        layout = self.layout()
+        for group, docks in placed:
+            for dock in docks[1:]:
+                self.tabifyDockWidget(docks[0], dock)
+                # Lay out after each move: Qt retires a group's old tab bar only
+                # when it lays the window out, and between back-to-back moves the
+                # old bar is left on the window, painting over a panel.
+                if layout is not None:
+                    layout.activate()
+            for panel_id in group.panel_ids:
+                if self.panels.dock(panel_id) is not None:
+                    self.panels.set_heading(panel_id, heading(group.title))
+            docks[0].raise_()
+
     def _size_side_docks(self) -> None:
-        """Give the side columns their default widths; the composite gets the rest."""
-        docks = [self.panels.dock("controls"), self.panels.dock("power")]
-        widths = [SIDE_DOCK_WIDTH, METER_DOCK_WIDTH]
-        self.resizeDocks(docks, widths, Qt.Orientation.Horizontal)
+        """Default dock sizes: the side columns' widths, the Bench/Recon split and
+        the Tools strip's height. The composite gets the rest."""
+        controls, power = self.panels.dock("controls"), self.panels.dock("power")
+        if controls is None or power is None:
+            return
+        self.resizeDocks(
+            [controls, power], [SIDE_DOCK_WIDTH, METER_DOCK_WIDTH], Qt.Orientation.Horizontal
+        )
+        # Estimated from the window, not measured: this runs before the first show.
+        column = (
+            self.height()
+            - self.menuBar().sizeHint().height()
+            - self.statusBar().sizeHint().height()
+        )
+        centre_width = self.width() - SIDE_DOCK_WIDTH - METER_DOCK_WIDTH - 2 * _SEPARATOR_PX
+        tools = self.panels.dock("launcher")
+        if tools is not None:
+            strip = bottom_dock_height(centre_width, column - _SEPARATOR_PX)
+            self.resizeDocks([tools], [strip], Qt.Orientation.Vertical)
+        recon = self.panels.dock("engagement")
+        if recon is not None:
+            bench = round(column * BENCH_SHARE)
+            self.resizeDocks([controls, recon], [bench, column - bench], Qt.Orientation.Vertical)
+        scope = self.panels.dock("scope")
+        if scope is not None:
+            feeds = round(column * FEEDS_SHARE)
+            self.resizeDocks([scope, power], [feeds, column - feeds], Qt.Orientation.Vertical)
 
     def _resize_within_screen(self, width: int, height: int) -> None:
         """Resize to (width, height) but never larger than the biggest screen; centre it.
@@ -636,21 +714,14 @@ class MainWindow(QMainWindow):
 
     def _build_view_menu(self) -> None:
         menu = self.menuBar().addMenu("View")
-        for panel_id in (
-            "scope",
-            "thermal",
-            "power",
-            "controls",
-            "launcher",
-            "jobs",
-            "inventory",
-            "terminal",
-            "cameras",
-        ):
-            dock = self.panels.dock(panel_id)
-            if dock is not None:
-                menu.addAction(dock.toggleViewAction())
-        menu.addSeparator()
+        # Every panel, by group: a dock's heading bar has no close button, and a
+        # panel missing here could only come back through Reset layout (#429).
+        for group in DOCK_GROUPS:
+            for panel_id in group.panel_ids:
+                dock = self.panels.dock(panel_id)
+                if dock is not None:
+                    menu.addAction(dock.toggleViewAction())
+            menu.addSeparator()
         self.reset_layout_action = QAction("Reset layout", self)
         self.reset_layout_action.triggered.connect(self.reset_layout)
         menu.addAction(self.reset_layout_action)

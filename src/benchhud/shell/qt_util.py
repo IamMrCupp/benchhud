@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QComboBox, QFormLayout, QLabel, QMainWindow, QPushButton, QTabBar
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QTabBar,
+    QWidget,
+)
 
 # Room for the dropdown indicator, item padding and a scrollbar.
 _POPUP_CHROME_PX = 44
@@ -63,7 +72,7 @@ def section_label(text: str) -> QLabel:
 
 
 def mark_danger(button: QPushButton) -> QPushButton:
-    """Mark ``button`` as one that destroys something; the theme draws it so."""
+    """Mark ``button`` as one that destroys something; the theme draws it so (#440)."""
     button.setProperty("danger", True)
     return button
 
@@ -72,6 +81,44 @@ def hint(label: QLabel) -> QLabel:
     """Mark ``label`` as secondary text, which the theme draws muted."""
     label.setObjectName("hint")
     return label
+
+
+#: The tones :func:`set_tone` accepts; the theme colours each one.
+TONES = ("error", "warning", "ok")
+
+
+def set_tone(widget: QWidget, tone: str | None) -> None:
+    """Colour ``widget``'s text by meaning (``"error"``, ``"warning"``, ``"ok"``).
+
+    ``None`` puts it back to its normal colour. The colours live in the theme,
+    so a status line never hard-codes one; the style is re-applied because Qt
+    doesn't re-read a property selector on its own.
+    """
+    if tone is not None and tone not in TONES:
+        raise ValueError(f"unknown tone: {tone!r}")
+    if widget.property("tone") == tone:
+        return
+    widget.setProperty("tone", tone)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
+def notice(label: QLabel, tone: str | None = None) -> QLabel:
+    """Draw ``label`` as a notice: a tinted line with a stripe down its left edge."""
+    label.setObjectName("notice")
+    label.setWordWrap(True)
+    set_tone(label, tone)
+    return label
+
+
+def card(title: str) -> tuple[QGroupBox, QFormLayout]:
+    """A titled card for one section of a panel, and the form inside it."""
+    box = QGroupBox(title.upper())
+    form = QFormLayout(box)
+    # Narrow sides: a card has to fit the 260 px dock the panels are built for (#230).
+    form.setContentsMargins(6, 8, 6, 8)
+    grow_fields(form)
+    return box, form
 
 
 def grow_fields(form: QFormLayout) -> None:

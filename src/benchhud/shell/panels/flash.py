@@ -56,8 +56,7 @@ from benchhud.flash.flashrom import (
 )
 from benchhud.jobs.store import JobStore
 from benchhud.shell.panel import PANEL_MARGINS, Panel
-from benchhud.shell.qt_util import mark_danger
-from benchhud.shell.theme import DANGER
+from benchhud.shell.qt_util import mark_danger, set_tone
 
 #: Runs a job off the GUI thread.
 Executor = Callable[[Callable[[], None]], None]
@@ -233,7 +232,7 @@ class FlashPanel(Panel):
 
     def _say(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)
-        self.status.setStyleSheet(f"color: {DANGER};" if error else "")
+        set_tone(self.status, "error" if error else None)
 
     def _start(self, operation: str, job: Callable[[], Any], message: str) -> None:
         self._busy = operation
