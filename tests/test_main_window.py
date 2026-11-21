@@ -307,3 +307,11 @@ def test_no_port_reset_without_a_port(qtbot) -> None:
     window._maybe_reset_thermal_port(120.0)
     qtbot.wait(50)
     assert ran == []
+
+
+def test_the_suite_runs_headless_unless_told_otherwise(qapp) -> None:
+    """No real windows on a developer's desktop (#448)."""
+    import os
+
+    wanted = os.environ["QT_QPA_PLATFORM"]
+    assert qapp.platformName() == wanted

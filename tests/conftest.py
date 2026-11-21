@@ -7,7 +7,13 @@ against this fake. Phase 2's OWON driver reuses these fixtures.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
+
+# Before anything imports Qt: without this, every test that shows a window
+# opens a real one on a desktop, where macOS files it in the Dock as "python"
+# (#448). A run that wants to watch can still set the variable itself.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
