@@ -6,7 +6,7 @@ Pure Python: no Qt, no files, no network. Every chip here is made up —
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError, fields, replace
 
 import pytest
 
@@ -131,7 +131,9 @@ def test_a_chip_is_immutable_and_hashable() -> None:
         _BUCK.package = "SOP-8"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         _BUCK.markings[0].code = "Y2"  # type: ignore[misc]
-    assert len({_BUCK, _BUCK}) == 1
+    twin = replace(_BUCK)
+    assert twin is not _BUCK
+    assert len({_BUCK, twin}) == 1
 
 
 def test_a_chip_holds_nothing_about_a_job_or_a_customer() -> None:
@@ -279,7 +281,7 @@ def test_case_is_folded_when_it_has_to_be() -> None:
     assert not match.exact_case
 
 
-def test_the_typed_case_outranks_a_folded_one() -> None:
+def test_between_codes_of_one_length_the_typed_case_wins() -> None:
     upper = _chip("EX1000QFN", "AB")
     lower = _chip("EX2000QFN", "ab")
     assert [m.chip.mpn for m in match_markings([upper, lower], "ab7")] == [
@@ -290,6 +292,33 @@ def test_the_typed_case_outranks_a_folded_one() -> None:
         "EX1000QFN",
         "EX2000QFN",
     ]
+
+
+def test_case_never_outweighs_length() -> None:
+    # Typed in lower case at the bench: the whole code still beats one letter of it.
+    whole = _chip("EX1000QFN", "X1=")
+    one_letter = _chip("EX2000QFN", "x")
+    found = match_markings([one_letter, whole], "x1=")
+    assert [(m.chip.mpn, m.kind, m.exact_case) for m in found] == [
+        ("EX1000QFN", MatchKind.EXACT, False),
+        ("EX2000QFN", MatchKind.WHOLE_MARK, True),
+    ]
+    nearer = _chip("EX3000QFN", "X1=")
+    further = _chip("EX4000QFN", "x1=6A")
+    assert [m.chip.mpn for m in match_markings([further, nearer], "x1")] == [
+        "EX3000QFN",
+        "EX4000QFN",
+    ]
+
+
+def test_folding_that_changes_a_length_still_grades_right() -> None:
+    eszett = _chip("EX1000QFN", "ß1")  # "ß" folds to "ss"
+    (match,) = match_markings([eszett], "SS1")
+    assert (match.kind, match.exact_case) == (MatchKind.EXACT, False)
+    (match,) = match_markings([eszett], "SS1X")
+    assert match.kind is MatchKind.WHOLE_MARK
+    (match,) = match_markings([eszett], "S")
+    assert match.kind is MatchKind.PARTIAL
 
 
 def test_a_folded_full_match_outranks_a_half_typed_one() -> None:
@@ -321,13 +350,17 @@ def test_a_run_of_inner_whitespace_counts_as_one_space() -> None:
 def test_nothing_typed_matches_nothing(nothing) -> None:
     assert marking_score("X1=", nothing) == 0
     assert match_markings([_BUCK], nothing) == []
+
+
+@pytest.mark.parametrize("nothing", ["", "   ", "\t"])
+def test_a_source_asked_about_nothing_gives_nothing(nothing: str) -> None:
     assert InMemoryChipSource([_BUCK]).by_marking(nothing) == []
 
 
 @pytest.mark.parametrize("empty", ["", "   ", None])
 def test_an_empty_code_matches_nothing(empty) -> None:
     assert marking_score(empty, "X1=6A") == 0
-    assert match_markings([_chip("EX1234QFN", "")], "X1=6A") == []
+    assert match_markings([_chip("EX1234QFN", empty)], "X1=6A") == []
 
 
 # --- marking match: ranking ----------------------------------------------
@@ -360,6 +393,9 @@ def test_a_typed_mark_longer_than_the_code_ranks_the_longest_code_first() -> Non
 def test_half_typed_ranks_the_code_with_least_left_to_type_first() -> None:
     chips = [_chip("EX1000QFN", "X1=6A"), _chip("EX2000QFN", "X1=")]
     assert [m.marking.code for m in match_markings(chips, "X1")] == ["X1=", "X1=6A"]
+    # Not just alphabetical: "X1Z" sorts after "X1=6A" but has less left to type.
+    chips = [_chip("EX1000QFN", "X1=6A"), _chip("EX2000QFN", "X1Z")]
+    assert [m.marking.code for m in match_markings(chips, "X1")] == ["X1Z", "X1=6A"]
 
 
 def test_a_chip_is_one_candidate_under_its_best_marking() -> None:
@@ -370,9 +406,20 @@ def test_a_chip_is_one_candidate_under_its_best_marking() -> None:
     assert match.marking.code == "X1="
 
 
-def test_a_part_number_listed_twice_is_one_candidate() -> None:
-    found = match_markings([_chip("EX1234QFN", "X1="), _chip("ex1234qfn", "X1=")], "X1=")
-    assert [m.chip.mpn for m in found] == ["EX1234QFN"]
+def test_a_part_number_listed_twice_is_the_first_one_for_both_lookups() -> None:
+    first = _chip("EX1234QFN", "X1")
+    second = _chip("ex1234qfn", "X1=")  # the better match, but not the chip
+    source = InMemoryChipSource([first, second])
+    (match,) = source.by_marking("X1=6A")
+    assert match.chip is first
+    assert match.marking.code == "X1"
+    assert source.get("EX1234QFN") is first
+
+
+def test_a_chip_with_no_part_number_is_not_a_candidate() -> None:
+    nameless = [_chip("", "X1="), _chip("  ", "X1=")]
+    assert match_markings(nameless, "X1=") == []
+    assert [m.chip.mpn for m in match_markings([*nameless, _BUCK], "X1=")] == ["EX1234QFN"]
 
 
 def test_ties_come_back_in_the_same_order_every_time() -> None:
@@ -382,20 +429,38 @@ def test_ties_come_back_in_the_same_order_every_time() -> None:
     assert [m.chip.mpn for m in match_markings([b, c, a], "X1=")] == expected
 
 
+def test_a_tie_goes_by_code_before_part_number() -> None:
+    # Both fold to what was typed, so they score the same. "AB" sorts before
+    # "ab"; the part numbers are the other way round.
+    upper = _chip("EX2000QFN", "AB")
+    lower = _chip("EX1000QFN", "ab")
+    for chips in ([upper, lower], [lower, upper]):
+        found = match_markings(chips, "Ab")
+        assert found[0].score == found[1].score
+        assert [m.marking.code for m in found] == ["AB", "ab"]
+
+
+def test_matches_from_two_sources_sort_into_one_ranked_list() -> None:
+    local = InMemoryChipSource([_chip("EX2000QFN", "X1"), _chip("EX4000QFN", "X1=6")])
+    community = InMemoryChipSource([_chip("EX1000QFN", "X1="), _chip("EX3000QFN", "X1")])
+    together = sorted(
+        local.by_marking("X1=") + community.by_marking("X1="), key=lambda m: m.sort_key
+    )
+    assert [m.chip.mpn for m in together] == ["EX1000QFN", "EX2000QFN", "EX3000QFN", "EX4000QFN"]
+    everything = match_markings([*local.chips, *community.chips], "X1=")
+    assert together == everything
+
+
 def test_score_is_zero_for_no_match_and_positive_otherwise() -> None:
     assert marking_score("X1=", "Y2") == 0
     for typed in ("X1=", "X1=6A", "X1", "x1"):
         assert marking_score("X1=", typed) > 0
 
 
-def test_no_amount_of_length_lifts_a_match_into_the_band_above() -> None:
-    long_code = "ABCDEFGHIJKLMNOP"
-    half_typed_as_typed = marking_score(long_code, long_code[:-1])
-    half_typed_folded = marking_score(long_code, long_code[:-1].lower())
-    full_folded = marking_score("a", "A")
-    full_as_typed = marking_score("A", "A")
-    assert full_as_typed > marking_score(long_code.lower(), long_code) > full_folded
-    assert full_folded > half_typed_as_typed > half_typed_folded > 0
+def test_no_amount_of_length_lifts_a_half_typed_match_above_a_full_one() -> None:
+    weakest_full = marking_score("a", "A")  # one character, case folded
+    assert marking_score("ABCDEFGHIJKLMNOP", "ABCDEFGHIJKLMNO") < weakest_full
+    assert marking_score("X1", "X") < weakest_full
     huge = "Z" * 5000
-    assert marking_score(huge, huge.lower()) < full_as_typed
-    assert 0 < marking_score(huge, "z") < marking_score(huge, "Z") < full_folded
+    assert 0 < marking_score(huge, "z") < marking_score(huge, "Z") < weakest_full
+    assert marking_score(huge, huge.lower()) > weakest_full

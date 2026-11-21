@@ -30,8 +30,8 @@ class ChipSource(Protocol):
 
     @property
     def name(self) -> str:
-        """Human label for the source (shown in the UI, and kept as the
-        provenance of every value it supplies)."""
+        """Human label for the source — shown in the UI, and what a merge of
+        several sources records as where a value came from."""
         ...
 
     def get(self, mpn: str) -> Chip | None:
@@ -62,7 +62,8 @@ class NullChipSource:
 class InMemoryChipSource:
     """A source backed by a list — for tests, demos, and offline fallback.
 
-    If two chips in the list share a part number, the first one is the chip.
+    If two chips in the list share a part number, the first one is the chip,
+    for both lookups. A chip with a blank part number is never found.
     """
 
     chips: list[Chip] = field(default_factory=list)

@@ -14,13 +14,15 @@ The rules, in the order they decide a rank:
 
 1. **A code found whole in the typed text beats a half-typed one.** ``X1=6A``
    against ``X1=`` is a full match; ``X1`` against ``X1=`` is partial.
-2. **The typed case beats a folded one.** ``x1=`` still finds ``X1=``, below
-   any code that matches as typed. Case on a top mark means something, so it
-   counts when it's given and doesn't lock anyone out when it isn't.
-3. **Among full matches, the longer code wins** — it accounts for more of the
+2. **Among full matches, the longer code wins** — it accounts for more of the
    mark. Typed text that *is* the code is the longest there can be, so an
    exact match is always first.
-4. **Among partial matches, the code with the least left to type wins.**
+3. **Among partial matches, the code with the least left to type wins.**
+4. **Case breaks a tie.** ``x1=`` finds ``X1=``, and ranks just below a code
+   of the same length that matches as typed. Case on a top mark means
+   something, so it counts when it's given — but it never outweighs length,
+   so a mark typed all in lower case still ranks by how much of it each code
+   accounts for.
 
 Whitespace around either side is dropped, and a run of whitespace inside
 counts as one space. An empty query, or an empty code, matches nothing: a
@@ -41,13 +43,11 @@ from enum import Enum
 
 from benchhud.chips.model import Chip, Marking
 
-# A score is ``band * _BAND + detail``; ``detail`` stays under ``_BAND`` so no
-# amount of it lifts a match into the band above.
-_BAND = 1000
-_FULL_AS_TYPED = 4
-_FULL_FOLDED = 3
-_PARTIAL_AS_TYPED = 2
-_PARTIAL_FOLDED = 1
+# Lengths count up to this many characters; a real code is 16 at most. It
+# keeps every half-typed score under ``_FULL``, so no amount of length lifts a
+# half-typed match above a full one.
+_CAP = 1000
+_FULL = 4 * _CAP
 
 
 class MatchKind(Enum):
@@ -67,7 +67,8 @@ class MarkingMatch:
 
     ``chip`` carries the package and functions that tell candidates apart;
     ``marking`` is the one that matched. ``score`` is comparable between
-    matches for the same typed text, whichever source they came from.
+    matches for the same typed text, whichever source they came from, and
+    ``sort_key`` puts any list of them in ranked order.
     """
 
     chip: Chip
@@ -75,6 +76,12 @@ class MarkingMatch:
     kind: MatchKind
     exact_case: bool
     score: int
+
+    @property
+    def sort_key(self) -> tuple[int, str, str, str]:
+        """Best first; ties by code, then part number, so the order is fixed."""
+        code = normalise_mark(self.marking.code)
+        return (-self.score, code.casefold(), code, self.chip.key)
 
 
 def normalise_mark(text: str | None) -> str:
@@ -87,15 +94,15 @@ def _grade(code: str | None, typed: str | None) -> tuple[int, MatchKind, bool] |
     c, t = normalise_mark(code), normalise_mark(typed)
     if not c or not t:
         return None
+    # As typed first, then folded. Lengths are taken after folding, which can
+    # change them ("ß" folds to "ss").
     for exact_case, a, b in ((True, c, t), (False, c.casefold(), t.casefold())):
         if b.startswith(a):  # typed "X1=6A", code "X1="
-            band = _FULL_AS_TYPED if exact_case else _FULL_FOLDED
             kind = MatchKind.EXACT if len(a) == len(b) else MatchKind.WHOLE_MARK
-            return band * _BAND + min(len(a), _BAND - 1), kind, exact_case
+            return _FULL + 2 * min(len(a), _CAP) + exact_case, kind, exact_case
         if a.startswith(b):  # typed "X1", code "X1=" — still typing
-            band = _PARTIAL_AS_TYPED if exact_case else _PARTIAL_FOLDED
-            left_to_type = len(a) - len(b)
-            return band * _BAND + max(0, _BAND - 1 - left_to_type), MatchKind.PARTIAL, exact_case
+            left_to_type = min(len(a) - len(b), _CAP)
+            return 1 + 2 * (_CAP - left_to_type) + exact_case, MatchKind.PARTIAL, exact_case
     return None
 
 
@@ -109,20 +116,25 @@ def match_markings(chips: Iterable[Chip], typed: str | None) -> list[MarkingMatc
     """Every chip ``typed`` could be, best first.
 
     A chip appears once, under its best-matching marking — two codes on one
-    chip are still one candidate. Ties keep a fixed order (code, then part
-    number) so the same query always gives the same list.
+    chip are still one candidate. If a part number is in ``chips`` twice, the
+    first one is the chip, the same as a lookup by part number; a chip with no
+    part number has no identity and is skipped. Ties keep a fixed order (code,
+    then part number) so the same query always gives the same list.
     """
-    best: dict[str, MarkingMatch] = {}
+    seen: set[str] = set()
+    found: list[MarkingMatch] = []
     for chip in chips:
+        if not chip.key or chip.key in seen:
+            continue
+        seen.add(chip.key)
+        best: MarkingMatch | None = None
         for marking in chip.markings:
             grade = _grade(marking.code, typed)
             if grade is None:
                 continue
             score, kind, exact_case = grade
-            held = best.get(chip.key)
-            if held is None or score > held.score:
-                best[chip.key] = MarkingMatch(chip, marking, kind, exact_case, score)
-    return sorted(
-        best.values(),
-        key=lambda m: (-m.score, m.marking.code.casefold(), m.marking.code, m.chip.key),
-    )
+            if best is None or score > best.score:
+                best = MarkingMatch(chip, marking, kind, exact_case, score)
+        if best is not None:
+            found.append(best)
+    return sorted(found, key=lambda m: m.sort_key)
