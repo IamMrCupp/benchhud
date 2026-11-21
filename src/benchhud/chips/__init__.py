@@ -1,5 +1,6 @@
 """Chip reference — what a chip is, from its part number or the mark printed on it."""
 
+from benchhud.chips.dir_source import DirChipSource
 from benchhud.chips.marking import (
     MarkingMatch,
     MatchKind,
@@ -13,6 +14,7 @@ from benchhud.chips.source import ChipSource, InMemoryChipSource, NullChipSource
 __all__ = [
     "Chip",
     "ChipSource",
+    "DirChipSource",
     "Document",
     "InMemoryChipSource",
     "Marking",
