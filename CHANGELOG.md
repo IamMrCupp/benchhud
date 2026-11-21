@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/IamMrCupp/benchhud/compare/v0.20.1...v0.21.0) (2026-11-21)
+
+
+### Features
+
+* **chips:** add the chip model, ChipSource seam and marking match ([c68ba54](https://github.com/IamMrCupp/benchhud/commit/c68ba5490483c9fdb3a2f520aaf988e789337256))
+
 ## [0.20.1](https://github.com/IamMrCupp/benchhud/compare/v0.20.0...v0.20.1) (2026-11-21)
 
 
