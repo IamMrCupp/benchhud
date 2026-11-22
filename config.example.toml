@@ -189,6 +189,31 @@ extensions = ["obv", "brd", "bdv"]     # board-view formats
 schematic_extensions = ["pdf"]         # schematic formats filed alongside
 viewer = "auto"                        # auto | openboardview | flexbv
 
+[chips]
+# The chip reference: type the mark printed on a chip, or a part number, and
+# get the chip. The data isn't in benchhud — it's read from folders you keep,
+# the way boards are. A folder is a chip-data checkout, a build of one unpacked
+# somewhere, or a private overlay in the same shape. benchhud doesn't run git
+# and doesn't download anything; update a checkout yourself.
+#
+# With no sources there's no chip data and nothing else changes.
+datasheet_dir = ""        # e.g. "~/datasheets" — kept here; not used yet
+
+# One block per source, in order of precedence: where two sources disagree
+# about a chip, the first one listed wins and the other is kept as a conflict.
+# So a private overlay goes above the community data.
+#
+# [[chips.sources]]
+# name = "local"          # shown beside every value it supplies
+# kind = "dir"            # the only kind there is
+# path = "~/chips-private"
+#
+# [[chips.sources]]
+# name = "community"
+# kind = "dir"
+# path = "~/src/chip-data"
+# enabled = true          # false leaves it out without deleting the entry
+
 [minipro]
 # The T48 panel: read, back up and write chips on an XGecu T48 / TL866 with
 # minipro. Backups are two reads that must match, filed with the selected job.

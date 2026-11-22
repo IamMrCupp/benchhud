@@ -127,8 +127,13 @@ ticket system is a protocol with a fake, not a dependency.
   — several sources in order of precedence as one: the first source with a
   single value wins it, a later one that disagrees is kept as a `Conflict`,
   lists are joined; `merged()` gives a `MergedChip` saying which source each
-  part came from, while `get` / `by_marking` still return plain chips). No UI
-  yet. Pure Python; no network, no git.
+  part came from, while `get` / `by_marking` still return plain chips),
+  `builder` (`build_chip_source` — the `[chips]` config's ordered
+  `[[chips.sources]]` to one source: the null source when there are none, a
+  composite otherwise; `warm` hands the first read to a worker thread). The
+  main window builds it at start and after Preferences; Preferences → Chips
+  edits the list and shows what each folder loaded, read on a worker. Nothing
+  looks a chip up yet. Pure Python below the dialog; no network, no git.
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
 ## Measuring it

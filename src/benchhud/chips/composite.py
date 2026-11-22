@@ -404,6 +404,21 @@ class CompositeChipSource:
             log.exception("chips: merging %r from %s failed", mpn, [name for name, _ in found])
             return None
 
+    def reload(self) -> None:
+        """Have every source that reads from somewhere read it again, now.
+
+        This is the slow part of a lookup, done ahead of time: call it from a
+        worker thread and the first lookup finds everything already in memory.
+        """
+        for source in self.sources:
+            again = getattr(source, "reload", None)
+            if not callable(again):
+                continue
+            try:
+                again()
+            except Exception:
+                log.exception("chips: source %r failed reloading", _name_of(source))
+
     def merged(self, mpn: str) -> MergedChip | None:
         """The chip with this part number, merged, with where each part came from."""
         return self._merge(mpn)
