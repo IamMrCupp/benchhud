@@ -123,8 +123,12 @@ ticket system is a protocol with a fake, not a dependency.
   it's there and no older than the chip files, else the `chips/**/*.toml`
   files with `package_family` and replaced function slugs worked out from the
   checkout's `vocab/`; read on first lookup and kept, `reload()` to re-read;
-  a bad file is skipped with a log line). No UI yet. Pure Python; no network,
-  no git.
+  a bad file is skipped with a log line), `composite` (`CompositeChipSource`
+  — several sources in order of precedence as one: the first source with a
+  single value wins it, a later one that disagrees is kept as a `Conflict`,
+  lists are joined; `merged()` gives a `MergedChip` saying which source each
+  part came from, while `get` / `by_marking` still return plain chips). No UI
+  yet. Pure Python; no network, no git.
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
 ## Measuring it
