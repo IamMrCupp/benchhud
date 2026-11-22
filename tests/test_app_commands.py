@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 from benchhud import app
+from conftest import SUBPROCESS_TIMEOUT_S, subprocess_env
 
 
 def test_a_stream_that_is_not_the_terminal_is_replaced(monkeypatch) -> None:
@@ -50,10 +52,32 @@ def test_a_command_reaches_stdout_even_when_python_writes_elsewhere(tmp_path) ->
         capture_output=True,
         text=True,
         check=False,
-        env={"BENCHHUD_CONFIG": str(config), "PATH": "/usr/bin:/bin"},
+        env=subprocess_env(BENCHHUD_CONFIG=str(config)),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == str(config)
+
+
+def test_a_child_process_imports_the_benchhud_under_test() -> None:
+    """Not the copy the interpreter happens to have installed (#465)."""
+    import benchhud
+
+    done = subprocess.run(
+        [sys.executable, "-c", "import benchhud; print(benchhud.__file__)"],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=subprocess_env(),
+        timeout=SUBPROCESS_TIMEOUT_S,
+    )
+    assert done.returncode == 0, done.stderr
+    assert Path(done.stdout.strip()).resolve() == Path(benchhud.__file__).resolve()
+
+
+def test_a_child_process_cannot_put_a_window_on_screen() -> None:
+    assert subprocess_env()["QT_QPA_PLATFORM"] == "offscreen"
+    assert subprocess_env(BENCHHUD_CONFIG="x")["BENCHHUD_CONFIG"] == "x"
 
 
 def test_no_arguments_does_not_touch_the_streams(monkeypatch) -> None:

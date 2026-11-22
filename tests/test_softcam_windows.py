@@ -35,6 +35,7 @@ from benchhud.output.softcam import (
     SoftcamUnavailable,
     open_softcam_sink,
 )
+from conftest import subprocess_env
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="softcam is the Windows backend")
 
@@ -151,6 +152,7 @@ def sender(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Sender]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env=subprocess_env(),  # the benchhud under test, not an installed one (#465)
     )
     running = _Sender(process)
     try:

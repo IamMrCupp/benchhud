@@ -35,6 +35,7 @@ from benchhud.browser_sources.payloads import JOB_FIELDS, job_reply, jobs_payloa
 from benchhud.config import Config
 from benchhud.jobs.store import Job, JobStatus, JobStore
 from benchhud.shell.main_window import MainWindow
+from conftest import SUBPROCESS_TIMEOUT_S, subprocess_env
 
 #: What must never leave the app, whatever the command.
 PII = ("Jane Doe", "F2LXK0ABCDEF", "died after a swim")
@@ -624,7 +625,8 @@ def test_the_command_runs_without_qt_and_without_the_app(tmp_path) -> None:
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "BENCHHUD_CONFIG": str(tmp_path / "config.toml")},
+        env=subprocess_env(BENCHHUD_CONFIG=str(tmp_path / "config.toml")),
+        timeout=SUBPROCESS_TIMEOUT_S,
     )
     assert done.returncode == 1, done.stderr
     assert "benchhud isn't running" in done.stderr
