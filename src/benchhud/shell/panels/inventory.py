@@ -37,6 +37,11 @@ stream-safe as it was.
   revision. The line beside the button says so before it's opened, the button
   says "(by name)", and the confirmation after opening says it again.
 
+**Only the chip's own name for a document is ever shown** — the last part of
+it, cut short if it's long. Never the name or folder of the file on this
+machine: that's somebody's disk, this panel can be on stream, and a file found
+by its hash can be called anything. The file is opened, not named.
+
 The lookup can be slow the first time and hashing a folder of PDFs can be slow
 any time, so neither runs here: a worker does both and signals back. Every
 request carries a number, and an answer to anything but the latest is dropped
@@ -61,6 +66,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -68,11 +74,11 @@ from PySide6.QtWidgets import (
 
 from benchhud.chips.datasheets import (
     DATASHEET_KIND,
-    DatasheetFile,
+    ChipDocument,
     DatasheetLibrary,
     open_document,
 )
-from benchhud.chips.model import Chip
+from benchhud.chips.model import Chip, Document
 from benchhud.chips.source import ChipSource, NullChipSource
 from benchhud.inventory.source import InventorySource, InventoryWriteError, Part
 from benchhud.shell.panel import PANEL_MARGINS, Panel
@@ -119,27 +125,64 @@ def chip_summary(chip: Chip) -> str:
     return "\n".join(lines)
 
 
+#: A document name longer than this is cut in the middle to show.
+_NAME_LIMIT = 40
+
+
+def document_name(document: Document) -> str:
+    """The name a chip gives a document, fit to show; ``""`` when it gives none.
+
+    Only the last part: a fingerprint can carry the folders of whoever wrote
+    it down (``C:\\Users\\…\\EX1234.pdf``), and those are nobody's business
+    on a panel that can be on stream. A long name is cut in the middle, where
+    it matters least.
+    """
+    name = (document.filename or "").strip().replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if len(name) > _NAME_LIMIT:
+        keep = (_NAME_LIMIT - 1) // 2
+        name = f"{name[:keep]}…{name[-(_NAME_LIMIT - 1 - keep) :]}"
+    return name
+
+
+def find_datasheet(library: DatasheetLibrary, chip: Chip) -> ChipDocument | None:
+    """The chip's datasheet and the file held for it, or ``None`` when none is.
+
+    The same pick as :meth:`DatasheetLibrary.datasheet` — the first datasheet
+    with a file, an exact match over an earlier name match — but it keeps the
+    document, so the row can show the chip's name for it and not the file's.
+    This is the call that hashes: off the GUI thread only.
+    """
+    held = [
+        entry
+        for entry in library.for_chip(chip)
+        if entry.document.kind == DATASHEET_KIND and entry.file is not None
+    ]
+    return next((entry for entry in held if entry.file.exact), held[0] if held else None)
+
+
 def datasheet_status(
-    chip: Chip, file: DatasheetFile | None, *, library_configured: bool
+    chip: Chip, held: ChipDocument | None, *, library_configured: bool
 ) -> tuple[str, str]:
     """``(the line beside the button, the button's text)`` for a chip's datasheet.
 
     A name match says it's a name match in both, so it can be told from an
     exact one before the file is opened.
     """
-    listed = [d.filename for d in chip.documents if d.kind == DATASHEET_KIND and d.filename]
-    if file is not None and file.exact:
-        return f"{file.path.name} — an exact copy of the datasheet listed", "Open datasheet"
-    if file is not None:
+    if held is not None and held.file is not None:
+        name = document_name(held.document) or "the datasheet listed"
+        if held.file.exact:
+            return f"{name} — held, an exact copy", "Open datasheet"
         return (
-            f"{file.path.name} — matched by name only; it may be another revision",
+            f"{name} — held, matched by name only; it may be another revision",
             "Open datasheet (by name)",
         )
+    listed = [d for d in chip.documents if d.kind == DATASHEET_KIND]
     if not listed:
         return "No datasheet is listed for this chip", "Open datasheet"
+    name = document_name(listed[0]) or "one with no name"
     if not library_configured:
-        return f"No datasheet folder set — the chip lists {listed[0]}", "Open datasheet"
-    return f"Not held — the chip lists {listed[0]}", "Open datasheet"
+        return f"No datasheet folder set — the chip lists {name}", "Open datasheet"
+    return f"Not held — the chip lists {name}", "Open datasheet"
 
 
 def _row_text(part: Part) -> str:
@@ -185,7 +228,7 @@ class InventoryPanel(Panel):
         self._lookup_waiting: tuple[int, str] | None = None
         self._lookup_running = False
         self._chip: Chip | None = None
-        self._datasheet: DatasheetFile | None = None
+        self._datasheet: ChipDocument | None = None
         self._chip_found.connect(self._on_chip_found)
         self._datasheet_found.connect(self._on_datasheet_found)
 
@@ -202,6 +245,8 @@ class InventoryPanel(Panel):
         self.message_label = QLabel()
         self.message_label.setObjectName("InventoryMessage")
         self.message_label.setWordWrap(True)
+        # Never rich text: some of what it shows comes from chip data.
+        self.message_label.setTextFormat(Qt.TextFormat.PlainText)
         self.message_label.setVisible(False)
         layout.addWidget(self.message_label)
 
@@ -237,9 +282,17 @@ class InventoryPanel(Panel):
 
     def _build_chip_block(self) -> QWidget:
         """The chip details and the datasheet row — hidden until there's a chip to show."""
+        # What these show comes from chip data, which anyone can write. Plain
+        # text, so a tag in a description is shown and not obeyed; and no say
+        # in the panel's width, so a long unbroken word is clipped instead of
+        # shoving the dock wide and the composite off the screen.
+        no_say_in_width = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        no_say_in_width.setHeightForWidth(True)
         self.chip_label = QLabel()
         self.chip_label.setObjectName("InventoryChip")
         self.chip_label.setWordWrap(True)
+        self.chip_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.chip_label.setSizePolicy(no_say_in_width)
         self.chip_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.datasheet_button = QPushButton("Open datasheet")
         self.datasheet_button.setToolTip("Open the datasheet held for this chip")
@@ -247,6 +300,8 @@ class InventoryPanel(Panel):
         self.datasheet_label = QLabel()
         self.datasheet_label.setObjectName("InventoryDatasheet")
         self.datasheet_label.setWordWrap(True)
+        self.datasheet_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.datasheet_label.setSizePolicy(no_say_in_width)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.datasheet_button)
@@ -274,8 +329,9 @@ class InventoryPanel(Panel):
     def sync_chip_details(self) -> None:
         """Show the selected part's chip — or nothing, when there's none to show.
 
-        Called when the selection changes, and by the main window when the
-        chip source or the datasheet folder does.
+        Called when the selection changes and when the list is rebuilt; the
+        main window can call it when the chip source or the datasheet folder
+        changes under a selection.
         """
         self._lookup += 1  # whatever was being looked up is no longer wanted
         self._lookup_waiting = None
@@ -305,7 +361,7 @@ class InventoryPanel(Panel):
 
         def job() -> None:
             chip: Chip | None = None
-            file: DatasheetFile | None = None
+            held: ChipDocument | None = None
             try:
                 answer = source.get(mpn)
                 chip = answer if isinstance(answer, Chip) else None
@@ -316,11 +372,11 @@ class InventoryPanel(Panel):
                 chip_found.emit(request, chip)
             if chip is not None and library is not None:
                 try:
-                    file = library.datasheet(chip)  # this is the part that hashes
+                    held = find_datasheet(library, chip)  # this is the part that hashes
                 except Exception:
                     log.exception("inventory: finding the datasheet for %r failed", mpn)
             with contextlib.suppress(RuntimeError):
-                datasheet_found.emit(request, file)
+                datasheet_found.emit(request, held)
 
         self._lookup_running = True
         try:
@@ -348,11 +404,11 @@ class InventoryPanel(Panel):
         self.datasheet_label.setText("Checking the datasheet folder…")
         self.datasheet_row.setVisible(True)
 
-    def _on_datasheet_found(self, request: int, file: object) -> None:
+    def _on_datasheet_found(self, request: int, held: object) -> None:
         self._lookup_running = False
         if request == self._lookup and self._chip is not None:
             library = self._datasheets() if self._datasheets is not None else None
-            self._datasheet = file if isinstance(file, DatasheetFile) else None
+            self._datasheet = held if isinstance(held, ChipDocument) else None
             line, button = datasheet_status(
                 self._chip,
                 self._datasheet,
@@ -366,13 +422,13 @@ class InventoryPanel(Panel):
 
     def open_selected_datasheet(self) -> None:
         """Open the file held for the selected part's chip, and say what was opened."""
-        file = self._datasheet
-        if file is None:
+        held = self._datasheet
+        if held is None or held.file is None:
             return
-        name = file.path.name
-        if not self._open_datasheet(file.path):
+        name = document_name(held.document) or "the datasheet"
+        if not self._open_datasheet(held.file.path):
             self._show_message(f"Couldn't open {name}.", error=True)
-        elif file.exact:
+        elif held.file.exact:
             self._show_message(f"Opened {name}.", error=False)
         else:
             self._show_message(
@@ -387,14 +443,20 @@ class InventoryPanel(Panel):
         query = self.search_edit.text().strip()
         source = self._source()
         parts = source.search(query) if query else source.list_low_stock()
-        self.part_list.clear()
-        for part in parts:
-            item = QListWidgetItem(_row_text(part))
-            item.setData(Qt.ItemDataRole.UserRole, part)
-            colour = _STATUS_COLOURS.get(part.status)
-            if colour is not None:
-                item.setForeground(colour)
-            self.part_list.addItem(item)
+        # Quietly: clearing a list makes its next row current for a moment, and
+        # that row would be looked up — and its datasheet hashed — for nothing.
+        self.part_list.blockSignals(True)
+        try:
+            self.part_list.clear()
+            for part in parts:
+                item = QListWidgetItem(_row_text(part))
+                item.setData(Qt.ItemDataRole.UserRole, part)
+                colour = _STATUS_COLOURS.get(part.status)
+                if colour is not None:
+                    item.setForeground(colour)
+                self.part_list.addItem(item)
+        finally:
+            self.part_list.blockSignals(False)
         if not parts and source.name == "none":
             self._show_message("No inventory backend configured — see Preferences.", error=False)
         elif not parts and not query:
@@ -402,6 +464,7 @@ class InventoryPanel(Panel):
         else:
             self.message_label.setVisible(False)
         self._sync_use_row()
+        self.sync_chip_details()
 
     def selected_part(self) -> Part | None:
         item = self.part_list.currentItem()

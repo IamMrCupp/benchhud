@@ -24,15 +24,21 @@ from benchhud.chips import (
     InMemoryChipSource,
     Marking,
     NullChipSource,
+    Substitute,
     UsedIn,
     builder,
 )
 from benchhud.chips.builder import build_datasheet_library, warm_library
-from benchhud.chips.datasheets import DatasheetFile, DatasheetLibrary, MatchedBy
+from benchhud.chips.datasheets import ChipDocument, DatasheetFile, DatasheetLibrary, MatchedBy
 from benchhud.config import ChipSourceConfig, Config
 from benchhud.inventory import InMemoryInventorySource, Part
 from benchhud.shell.main_window import MainWindow
-from benchhud.shell.panels.inventory import InventoryPanel, chip_summary, datasheet_status
+from benchhud.shell.panels.inventory import (
+    InventoryPanel,
+    chip_summary,
+    datasheet_status,
+    document_name,
+)
 from benchhud.shell.preferences import PreferencesDialog
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chip-data" / "index.json"
@@ -195,14 +201,12 @@ def test_a_datasheet_that_matches_by_hash_is_an_exact_copy(qtbot, tmp_path) -> N
     library = _library(tmp_path, **{"downloaded (3).pdf": _REV_A})
     panel = _panel(qtbot, library=library, open_datasheet=lambda p: opened.append(p) or True)
     _select(panel, "EX1234QFN")
-    assert panel.datasheet_label.text() == (
-        "downloaded (3).pdf — an exact copy of the datasheet listed"
-    )
+    assert panel.datasheet_label.text() == "EX1234.pdf — held, an exact copy"
     assert panel.datasheet_button.text() == "Open datasheet"
     assert panel.datasheet_button.isEnabled()
     panel.datasheet_button.click()
     assert opened == [library.root / "downloaded (3).pdf"]
-    assert panel.message_label.text() == "Opened downloaded (3).pdf."
+    assert panel.message_label.text() == "Opened EX1234.pdf."
 
 
 def test_a_datasheet_found_by_name_only_says_so_before_and_as_it_opens(qtbot, tmp_path) -> None:
@@ -212,7 +216,7 @@ def test_a_datasheet_found_by_name_only_says_so_before_and_as_it_opens(qtbot, tm
     _select(panel, "EX1234QFN")
     # Before it's opened: the line and the button both say it's a name match.
     assert panel.datasheet_label.text() == (
-        "ex1234.PDF — matched by name only; it may be another revision"
+        "EX1234.pdf — held, matched by name only; it may be another revision"
     )
     assert panel.datasheet_button.text() == "Open datasheet (by name)"
     assert panel.datasheet_button.isEnabled()
@@ -220,7 +224,7 @@ def test_a_datasheet_found_by_name_only_says_so_before_and_as_it_opens(qtbot, tm
     assert opened == [library.root / "ex1234.PDF"]
     # And as it opens.
     assert panel.message_label.text() == (
-        "Opened ex1234.PDF — matched by name only, so check it's the right revision."
+        "Opened EX1234.pdf — matched by name only, so check it's the right revision."
     )
 
 
@@ -261,27 +265,136 @@ def test_a_datasheet_that_will_not_open_is_said_not_swallowed(qtbot, tmp_path) -
     assert "d9534f" in panel.message_label.styleSheet()  # shown as an error
 
 
+_LISTED = _BUCK.documents[0]
+
+
 @pytest.mark.parametrize(
-    ("file", "configured", "line", "button"),
+    ("held", "configured", "line", "button"),
     [
         (
-            DatasheetFile(Path("/d/EX1234.pdf"), MatchedBy.HASH),
+            ChipDocument(_LISTED, DatasheetFile(Path("/d/whatever.pdf"), MatchedBy.HASH)),
             True,
-            "EX1234.pdf — an exact copy of the datasheet listed",
+            "EX1234.pdf — held, an exact copy",
             "Open datasheet",
         ),
         (
-            DatasheetFile(Path("/d/EX1234.pdf"), MatchedBy.NAME),
+            ChipDocument(_LISTED, DatasheetFile(Path("/d/ex1234.PDF"), MatchedBy.NAME)),
             True,
-            "EX1234.pdf — matched by name only; it may be another revision",
+            "EX1234.pdf — held, matched by name only; it may be another revision",
             "Open datasheet (by name)",
         ),
         (None, True, "Not held — the chip lists EX1234.pdf", "Open datasheet"),
+        (
+            ChipDocument(_LISTED, None),
+            True,
+            "Not held — the chip lists EX1234.pdf",
+            "Open datasheet",
+        ),
         (None, False, "No datasheet folder set — the chip lists EX1234.pdf", "Open datasheet"),
     ],
 )
-def test_what_the_datasheet_line_reads(file, configured: bool, line: str, button: str) -> None:
-    assert datasheet_status(_BUCK, file, library_configured=configured) == (line, button)
+def test_what_the_datasheet_line_reads(held, configured: bool, line: str, button: str) -> None:
+    assert datasheet_status(_BUCK, held, library_configured=configured) == (line, button)
+
+
+def test_the_file_on_this_machine_is_never_named(qtbot, tmp_path) -> None:
+    # Found by its hash, so it can be called anything — and filed anywhere.
+    folder = tmp_path / "datasheets" / "clients" / "Jordan Example"
+    folder.mkdir(parents=True)
+    (folder / "smith-laptop (private).pdf").write_bytes(_REV_A)
+    panel = _panel(
+        qtbot, library=DatasheetLibrary(tmp_path / "datasheets"), open_datasheet=lambda p: True
+    )
+    _select(panel, "EX1234QFN")
+    assert panel.datasheet_button.isEnabled()
+    panel.datasheet_button.click()
+    shown = "\n".join(
+        [
+            panel.chip_label.text(),
+            panel.datasheet_label.text(),
+            panel.datasheet_button.text(),
+            panel.message_label.text(),
+            panel.chip_label.toolTip(),
+            panel.datasheet_label.toolTip(),
+            panel.datasheet_button.toolTip(),
+        ]
+    )
+    for private in ("smith", "private", "Jordan", "clients", str(tmp_path)):
+        assert private not in shown
+    assert panel.datasheet_label.text() == "EX1234.pdf — held, an exact copy"
+
+
+@pytest.mark.parametrize(
+    ("written", "shown"),
+    [
+        ("EX1234.pdf", "EX1234.pdf"),
+        ("C:\\Users\\jordan\\Clients\\Smith\\EX1234.pdf", "EX1234.pdf"),
+        ("/home/jordan/clients/smith/EX1234.pdf", "EX1234.pdf"),
+        ("  docs/EX1234.pdf  ", "EX1234.pdf"),
+        ("", ""),
+        ("   ", ""),
+    ],
+)
+def test_only_the_last_part_of_a_listed_name_is_shown(written: str, shown: str) -> None:
+    assert document_name(Document(kind="datasheet", filename=written)) == shown
+    chip = Chip(
+        mpn="EX1",
+        manufacturer="Example Semi",
+        documents=(Document(kind="datasheet", filename=written),),
+    )
+    line, _ = datasheet_status(chip, None, library_configured=True)
+    assert line == f"Not held — the chip lists {shown or 'one with no name'}"
+    assert "jordan" not in line and "Smith" not in line
+
+
+def test_a_long_name_is_cut_in_the_middle() -> None:
+    long = "EX1234-" + "x" * 80 + "-rev-C.pdf"
+    name = document_name(Document(kind="datasheet", filename=long))
+    assert len(name) == 40
+    assert name.startswith("EX1234-") and name.endswith("-rev-C.pdf") and "…" in name
+
+
+def test_a_datasheet_with_no_name_is_still_found_and_said(qtbot, tmp_path) -> None:
+    nameless = Document(kind="datasheet", filename="", sha256=(hashlib.sha256(_REV_A).hexdigest(),))
+    chip = Chip(mpn="EX1234QFN", manufacturer="Example Semi", documents=(nameless,))
+    held = ChipDocument(nameless, DatasheetFile(Path("/d/a.pdf"), MatchedBy.HASH))
+    assert datasheet_status(chip, held, library_configured=True)[0] == (
+        "the datasheet listed — held, an exact copy"
+    )
+    assert datasheet_status(chip, None, library_configured=True)[0] == (
+        "Not held — the chip lists one with no name"
+    )
+    panel = _panel(
+        qtbot,
+        chips=InMemoryChipSource([chip], "community"),
+        library=_library(tmp_path, **{"a.pdf": _REV_A}),
+        open_datasheet=lambda p: True,
+    )
+    _select(panel, "EX1234QFN")
+    panel.datasheet_button.click()
+    assert panel.message_label.text() == "Opened the datasheet."
+
+
+def test_with_two_datasheets_listed_the_one_held_is_the_one_named(qtbot, tmp_path) -> None:
+    chip = Chip(
+        mpn="EX1234QFN",
+        manufacturer="Example Semi",
+        documents=(
+            Document(kind="datasheet", filename="EX1234-old.pdf", sha256=("0" * 64,)),
+            Document(
+                kind="datasheet",
+                filename="EX1234-new.pdf",
+                sha256=(hashlib.sha256(_REV_C).hexdigest(),),
+            ),
+        ),
+    )
+    chips = InMemoryChipSource([chip], "community")
+    panel = _panel(qtbot, chips=chips, library=_library(tmp_path, **{"saved.pdf": _REV_C}))
+    _select(panel, "EX1234QFN")
+    assert panel.datasheet_label.text() == "EX1234-new.pdf — held, an exact copy"
+    panel = _panel(qtbot, chips=chips, library=_library(tmp_path / "empty"))
+    _select(panel, "EX1234QFN")
+    assert panel.datasheet_label.text() == "Not held — the chip lists EX1234-old.pdf"
 
 
 def test_only_a_datasheet_counts_as_a_datasheet() -> None:
@@ -308,9 +421,9 @@ def test_the_lookup_and_the_hashing_are_handed_to_the_worker(qtbot, tmp_path) ->
             return super().get(mpn)
 
     class Library(DatasheetLibrary):
-        def datasheet(self, chip: Chip):
+        def for_chip(self, chip: Chip):
             hashed.append(chip.mpn)
-            return super().datasheet(chip)
+            return super().for_chip(chip)
 
     folder = _library(tmp_path, **{"EX1234.pdf": _REV_A}).root
     held = _Held()
@@ -323,14 +436,14 @@ def test_the_lookup_and_the_hashing_are_handed_to_the_worker(qtbot, tmp_path) ->
     assert panel.datasheet_row.isHidden()
     held.run_next()
     assert (asked, hashed) == (["EX1234QFN"], ["EX1234QFN"])
-    assert panel.datasheet_label.text().endswith("an exact copy of the datasheet listed")
+    assert panel.datasheet_label.text() == "EX1234.pdf — held, an exact copy"
 
 
 def test_the_details_show_before_the_datasheet_has_been_found(qtbot, tmp_path) -> None:
     seen: list[tuple[str, str, bool]] = []
 
     class Library(DatasheetLibrary):
-        def datasheet(self, chip: Chip):
+        def for_chip(self, chip: Chip):
             # The slow part. By now the chip is already on screen.
             seen.append(
                 (
@@ -339,7 +452,7 @@ def test_the_details_show_before_the_datasheet_has_been_found(qtbot, tmp_path) -
                     panel.datasheet_button.isEnabled(),
                 )
             )
-            return super().datasheet(chip)
+            return super().for_chip(chip)
 
     folder = _library(tmp_path, **{"EX1234.pdf": _REV_A}).root
     panel = _panel(qtbot, library=Library(folder))
@@ -380,6 +493,119 @@ def test_arrowing_down_the_list_looks_up_only_the_row_you_stop_on(qtbot) -> None
         held.run_next()
     assert asked == ["EX1234QFN", "EX0001"]  # the first, and where it stopped
     assert panel.chip_label.text() == "EX0001  ·  Example Semi"
+
+
+def test_changing_the_selection_between_the_two_answers_opens_nothing_stale(
+    qtbot, tmp_path
+) -> None:
+    # The chip answer for the first part is in and its datasheet is being
+    # hashed when the selection moves. The file found must not end up behind
+    # the button for the part now selected.
+    opened: list[Path] = []
+    later: list = []
+
+    def first_now_rest_later(job) -> None:
+        (later.append if later_on["yes"] else _now)(job)
+
+    later_on = {"yes": False}
+
+    class Library(DatasheetLibrary):
+        def for_chip(self, chip: Chip):
+            if chip.mpn == "EX1234QFN" and not later_on["yes"]:
+                later_on["yes"] = True
+                _select(panel, "EX0001")  # mid-hash: the operator moves on
+            return super().for_chip(chip)
+
+    folder = _library(tmp_path, **{"EX1234.pdf": _REV_A}).root
+    panel = _panel(
+        qtbot,
+        library=Library(folder),
+        run=first_now_rest_later,
+        open_datasheet=lambda p: opened.append(p) or True,
+    )
+    _select(panel, "EX1234QFN")
+    # The first part's datasheet answer has now arrived, for a row no longer selected.
+    assert panel.chip_label.text() == "Looking up EX0001…"
+    assert panel.datasheet_row.isHidden()
+    panel.open_selected_datasheet()
+    assert opened == []  # nothing of the last part's is behind the button
+    assert len(later) == 1
+    later.pop()()
+    assert panel.chip_label.text() == "EX0001  ·  Example Semi"
+    assert not panel.datasheet_button.isEnabled()
+    panel.open_selected_datasheet()
+    assert opened == []
+
+
+def test_a_row_passed_over_on_the_way_to_one_with_no_mpn_is_not_looked_up(qtbot) -> None:
+    asked: list[str] = []
+
+    class Chips(InMemoryChipSource):
+        def get(self, mpn: str):
+            asked.append(mpn)
+            return super().get(mpn)
+
+    held = _Held()
+    panel = _panel(qtbot, chips=Chips([_BUCK, _LDO], "community"), run=held)
+    _select(panel, "EX1234QFN")
+    _select(panel, "EX9000SOT")
+    _select(panel, "Kapton tape")
+    while held.jobs:
+        held.run_next()
+    assert asked == ["EX1234QFN"]
+    assert panel.chip_block.isHidden()
+
+
+def test_the_button_goes_back_to_plain_between_parts(qtbot, tmp_path) -> None:
+    seen: list[str] = []
+
+    class Library(DatasheetLibrary):
+        def for_chip(self, chip: Chip):
+            seen.append(panel.datasheet_button.text())
+            return super().for_chip(chip)
+
+    folder = _library(tmp_path, **{"EX1234.pdf": _REV_C}).root  # a name match for the first
+    panel = _panel(qtbot, library=Library(folder))
+    _select(panel, "EX1234QFN")
+    assert panel.datasheet_button.text() == "Open datasheet (by name)"
+    _select(panel, "EX9000SOT")
+    assert seen == ["Open datasheet", "Open datasheet"]  # not still "(by name)" while it checks
+    assert panel.datasheet_button.text() == "Open datasheet"
+
+
+def test_rebuilding_the_list_looks_nothing_up(qtbot, tmp_path) -> None:
+    # Clearing a list makes its next row current for a moment.
+    asked: list[str] = []
+
+    class Chips(InMemoryChipSource):
+        def get(self, mpn: str):
+            asked.append(mpn)
+            return super().get(mpn)
+
+    panel = _panel(qtbot, chips=Chips([_BUCK, _LDO], "community"), library=_library(tmp_path))
+    _select(panel, "EX1234QFN")
+    assert asked == ["EX1234QFN"]
+    panel.refresh()
+    panel.search_edit.setText("EX")
+    panel.refresh()
+    assert asked == ["EX1234QFN"]
+    assert panel.chip_block.isHidden()
+    assert not panel.use_button.isEnabled()  # nothing selected, as before
+
+
+def test_using_a_part_looks_nothing_else_up(qtbot) -> None:
+    asked: list[str] = []
+
+    class Chips(InMemoryChipSource):
+        def get(self, mpn: str):
+            asked.append(mpn)
+            return super().get(mpn)
+
+    panel = _panel(qtbot, chips=Chips([_BUCK, _LDO], "community"))
+    _select(panel, "EX1234QFN")
+    panel.consume_selected()
+    assert asked == ["EX1234QFN"]
+    assert "Used 1" in panel.message_label.text()
 
 
 def test_moving_to_a_part_with_no_mpn_mid_lookup_shows_nothing(qtbot) -> None:
@@ -429,9 +655,9 @@ def test_it_really_is_another_thread(qtbot, tmp_path) -> None:
             return super().get(mpn)
 
     class Library(DatasheetLibrary):
-        def datasheet(self, chip: Chip):
+        def for_chip(self, chip: Chip):
             where.append(threading.current_thread())
-            return super().datasheet(chip)
+            return super().for_chip(chip)
 
     folder = _library(tmp_path, **{"EX1234.pdf": _REV_C}).root
     inventory = InMemoryInventorySource(list(_PARTS))
@@ -452,6 +678,7 @@ def test_it_really_is_another_thread(qtbot, tmp_path) -> None:
     assert len(where) == 2
     assert all(thread is not threading.main_thread() for thread in where)
     assert {thread.name for thread in where} == {"chips-lookup"}
+    assert all(thread.daemon for thread in where)  # it never holds the app open
 
 
 # --- nothing raises into the HUD --------------------------------------------
@@ -475,7 +702,7 @@ def test_a_chip_source_that_raises_reads_as_not_known(qtbot, caplog) -> None:
 
 def test_a_library_that_raises_reads_as_not_held(qtbot, tmp_path) -> None:
     class Broken(DatasheetLibrary):
-        def datasheet(self, chip: Chip):
+        def for_chip(self, chip: Chip):
             raise RuntimeError("hashing fell over")
 
     panel = _panel(qtbot, library=Broken(tmp_path))
@@ -558,6 +785,42 @@ def test_the_panel_is_as_stream_safe_as_it_was() -> None:
     assert InventoryPanel.sensitive is False
 
 
+def test_chip_data_is_shown_as_text_and_never_obeyed(qtbot) -> None:
+    from PySide6.QtCore import Qt
+
+    chip = Chip(
+        mpn="EX1234QFN",
+        manufacturer="<b>Example</b> Semi",
+        description='<img src="file:///etc/passwd"> <a href="http://example.com">click</a>',
+    )
+    panel = _panel(qtbot, chips=InMemoryChipSource([chip], "community"))
+    _select(panel, "EX1234QFN")
+    assert "<b>Example</b> Semi" in panel.chip_label.text()
+    for label in (panel.chip_label, panel.datasheet_label, panel.message_label):
+        assert label.textFormat() == Qt.TextFormat.PlainText
+
+
+def test_long_words_in_chip_data_do_not_push_the_panel_wide(qtbot, tmp_path) -> None:
+    plain = _panel(qtbot, chips=False)
+    baseline = plain.minimumSizeHint().width()
+    unbroken = "x" * 200
+    chip = Chip(
+        mpn="EX1234QFN",
+        manufacturer=unbroken,
+        package=unbroken,
+        description=unbroken,
+        markings=(Marking(code=unbroken),),
+        documents=(Document(kind="datasheet", filename=unbroken + ".pdf"),),
+    )
+    panel = _panel(qtbot, chips=InMemoryChipSource([chip], "community"), library=_library(tmp_path))
+    _select(panel, "EX1234QFN")
+    assert panel.chip_block.isVisible() and panel.datasheet_row.isVisible()
+    # Only the button may add width: none of the text can.
+    button = panel.datasheet_button.minimumSizeHint().width()
+    assert panel.minimumSizeHint().width() <= max(baseline, button + 40)
+    assert panel.minimumSizeHint().width() < 320
+
+
 def test_the_chip_details_are_about_a_part_number_and_nothing_else() -> None:
     summary = chip_summary(_BUCK)
     # Everything shown is one of the chip's own reference fields…
@@ -566,6 +829,16 @@ def test_the_chip_details_are_about_a_part_number_and_nothing_else() -> None:
     # …and the boards it's been seen on are not.
     for text in ("EXAMPLE-BOARD-1", "U7000", "standby 3.3 V"):
         assert text not in summary
+    # Nor is anything else a contributor can write freely.
+    wordy = Chip(
+        mpn="EX1",
+        manufacturer="Example Semi",
+        sources=("credit-to-someone",),
+        markings=(Marking(code="X1=", examples=("X1=6A",), note="a free-text note"),),
+        documents=(Document(kind="datasheet", filename="EX1.pdf", note="another note"),),
+        substitutes=(Substitute(mpn="EX2", note="swap note"),),
+    )
+    assert chip_summary(wordy).splitlines() == ["EX1  ·  Example Semi", "Marked X1="]
 
 
 def test_nothing_about_the_job_reaches_the_chip_details(qtbot, tmp_path) -> None:
@@ -655,6 +928,12 @@ def test_ok_in_preferences_picks_up_a_changed_folder(qtbot, tmp_path, worker_job
     assert len(worker_jobs) == 1
     worker_jobs.clear()
 
+    # Spaces around the same folder are still the same folder.
+    window._config.chips.datasheet_dir = f"  {first}  "
+    window.reconfigure_datasheet_library()
+    assert window.datasheet_library is before
+    worker_jobs.clear()
+
     dialog = window.open_preferences()
     dialog.chips_datasheet_dir.setText(f" {second} ")
     dialog.accept()
@@ -685,7 +964,7 @@ def test_the_window_s_inventory_row_uses_its_chip_source_and_library(
     _select(panel, "EX1234QFN")
     assert panel.chip_label.text().splitlines()[0] == "EX1234QFN  ·  Example Semi"
     assert panel.datasheet_button.text() == "Open datasheet (by name)"
-    assert panel.datasheet_label.text().startswith("EX1234.pdf — matched by name only")
+    assert panel.datasheet_label.text().startswith("EX1234.pdf — held, matched by name only")
 
 
 def test_a_window_with_no_chip_sources_has_the_inventory_panel_it_always_had(qtbot) -> None:

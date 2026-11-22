@@ -975,7 +975,7 @@ class MainWindow(QMainWindow):
         listed and no thread is started. A file is only hashed when a lookup
         asks for it, and lookups run on a worker too.
         """
-        self._datasheet_dir = self._config.chips.datasheet_dir
+        self._datasheet_dir = self._config.chips.datasheet_dir.strip()
         library = build_datasheet_library(self._datasheet_dir)
         warm_library(library)
         return library
@@ -992,14 +992,10 @@ class MainWindow(QMainWindow):
         files that haven't changed, so OK doubles as "see what I just saved
         there" without paying for the whole folder twice.
         """
-        if self._datasheet_dir == self._config.chips.datasheet_dir:
+        if self._datasheet_dir == self._config.chips.datasheet_dir.strip():
             warm_library(self._datasheet_library)
         else:
             self._datasheet_library = self._make_datasheet_library()
-
-    def refresh_chip_details(self) -> None:
-        """Have the inventory row look its part up again, after either changed."""
-        self.inventory_panel.sync_chip_details()
 
     def open_board_file(self, path) -> bool:
         """Open a board file in the configured viewer (or the OS handler)."""
@@ -1050,7 +1046,6 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.reconfigure_boards)
         dialog.accepted.connect(self.reconfigure_chip_source)
         dialog.accepted.connect(self.reconfigure_datasheet_library)
-        dialog.accepted.connect(self.refresh_chip_details)
         dialog.accepted.connect(self.reconfigure_tools)
         dialog.accepted.connect(self.reconfigure_instrument_session)
         dialog.accepted.connect(self.restart_browser_sources)
