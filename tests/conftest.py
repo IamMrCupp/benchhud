@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
 # Before anything imports Qt: without this, every test that shows a window
 # opens a real one on a desktop, where macOS files it in the Dock as "python"
@@ -99,6 +100,32 @@ class FakeSerialPort:
 def isolated_config(tmp_path, monkeypatch):
     """Keep every test off the real user config dir (and its jobs.db)."""
     monkeypatch.setenv("BENCHHUD_CONFIG", str(tmp_path / "config.toml"))
+
+
+#: Longest a test waits for a ``benchhud`` it started in another process. A
+#: command answers in a second or two; past this it has gone somewhere else.
+SUBPROCESS_TIMEOUT_S = 60.0
+
+
+def subprocess_env(**extra: str) -> dict[str, str]:
+    """The environment for a test that starts ``benchhud`` in another process (#465).
+
+    Without this the child imports whatever benchhud its interpreter has
+    installed, which needn't be the code under test: a venv shared with an
+    older checkout gave it a copy with no ``config`` command, and it opened the
+    HUD and sat there. So the copy this process imported goes first on the
+    child's path, and Qt is kept off the screen in case it's started anyway.
+    """
+    import benchhud
+
+    source = str(Path(benchhud.__file__).resolve().parent.parent)
+    inherited = os.environ.get("PYTHONPATH")
+    return {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(filter(None, [source, inherited])),
+        "QT_QPA_PLATFORM": "offscreen",
+        **extra,
+    }
 
 
 @pytest.fixture

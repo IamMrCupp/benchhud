@@ -13,6 +13,7 @@ import pytest
 from benchhud import config as config_module
 from benchhud.app import main as app_main
 from benchhud.cli_config import main
+from conftest import SUBPROCESS_TIMEOUT_S, subprocess_env
 
 
 @pytest.fixture
@@ -96,8 +97,8 @@ def test_config_runs_without_importing_qt(tmp_path) -> None:
         "assert rc == 0, rc; "
         "assert not any(m.startswith('PySide6') for m in sys.modules), 'Qt imported'"
     )
-    env = {**os.environ, config_module.ENV_VAR: str(tmp_path / "c.toml")}
-    subprocess.run([sys.executable, "-c", code], env=env, check=True)
+    env = subprocess_env(**{config_module.ENV_VAR: str(tmp_path / "c.toml")})
+    subprocess.run([sys.executable, "-c", code], env=env, check=True, timeout=SUBPROCESS_TIMEOUT_S)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
