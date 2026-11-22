@@ -87,11 +87,12 @@ layout sticks across restarts.
 raw thermal feed and the meter on the right, the rest of the panels tabbed along
 the bottom.*
 
-![OBS's program scene: the overhead bench camera, with the job card across the top and the meter and power graph in the top-right corner](docs/images/stream.jpg)
+![OBS's program scene: the overhead bench camera, with a second camera inset and a shop logo top-left, the job card across the top, and the meter and power graph in the top-right corner](docs/images/stream.jpg)
 
-*What the stream gets. The overhead camera is OBS's own source; the job card,
-the meter and the power graph are benchhud's browser sources, each placed on
-its own. Supply's off here, so the meter reads zero.*
+*What the stream gets. The job card, the meter and the power graph are
+benchhud's browser sources, each placed on its own. Everything else — both
+cameras, the logos, the viewer count — is OBS's own. Supply's off here, so the
+volts, amps and watts read zero.*
 
 ![The Find chip dialog with the mark X1=6A typed in and two candidate chips listed, beside the chip panel showing the picked part](docs/images/chips.png)
 
