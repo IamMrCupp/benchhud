@@ -25,13 +25,18 @@ description, markings — and offers **Open datasheet** for the file the
 datasheet library holds. That's generic reference about a part number: it
 names no job, no customer and no engagement.
 
-**It reads every chip source, a source kept off air included** (``on_air =
-false``, #482). That switch is about the Chip panel's card; this row is the
-operator's lookup and shows what the operator's own overlay says. So with an
-off-air source configured, this panel is *not* as stream-safe as its tag
-says: select a part that source describes and its words are drawn here.
-Whether the row should read the on-air sources instead is an open question
-(#508).
+**It reads the on-air chip sources only** (#508). This is a dock in the HUD
+window, beside the Chip panel, and it carries the same stream-safe tag — so
+the window hands it the same source the card gets, and a source kept off air
+(``on_air = false``) is left out of it completely. A part only an off-air
+source describes reads as one the reference doesn't know, the same line any
+unknown MPN gets; a part both describe shows what the on-air sources say; a
+document only an off-air source lists is never named. Nothing here says a
+source is being held back. Find chip — its own window — is where every source
+is looked up.
+
+That also means **Show on stream card** only appears for a chip the card will
+show: the row and the card ask the same source.
 
 - **No chip source configured:** none of this exists. The panel looks and
   behaves as it did before chips.
@@ -213,6 +218,11 @@ class InventoryPanel(Panel):
         # (request, mpn) waiting for the worker to be free, and whether it's busy.
         self._lookup_waiting: tuple[int, str] | None = None
         self._lookup_running = False
+        # Set when the window says the chip sources changed: the next lookup
+        # has them read again first, so it can't answer from the old copy.
+        self._reread = False
+        # Whether the message line is saying something about a chip.
+        self._message_about_chip = False
         self._chip: Chip | None = None
         self._datasheet: ChipDocument | None = None
         self._chip_found.connect(self._on_chip_found)
@@ -354,13 +364,40 @@ class InventoryPanel(Panel):
         mpn = (part.mpn or "").strip() if part is not None else ""
         if not mpn or self._chip_source() is None:
             self.chip_block.setVisible(False)
+            # Hidden isn't enough: the last part's chip, and its document's
+            # name, would still be the labels' text. Nothing is kept.
+            self.chip_label.setText("")
+            self._hide_datasheet_row()
             return
         self.chip_label.setText(f"Looking up {mpn}…")
-        self.datasheet_row.setVisible(False)
+        self._hide_datasheet_row()
         self.chip_block.setVisible(True)
         self._lookup_waiting = (self._lookup, mpn)
         if not self._lookup_running:
             self._start_lookup()
+
+    def chip_source_changed(self) -> None:
+        """The chip sources this row may show have changed — a Preferences OK.
+
+        The window calls this. Whatever the row is saying about a chip comes
+        down now — the details, the datasheet line, and a message that names
+        a chip or its document — because the source that said it may no
+        longer be one this row is allowed to show. The selected part, if
+        there is one, is looked up again, and that lookup has the sources
+        read again first: a source answers from the copy it holds while a
+        re-read is still running, and that copy is what just changed.
+        """
+        if self._message_about_chip:
+            self._hide_message()
+        self._reread = True
+        self.sync_chip_details()
+
+    def _hide_datasheet_row(self) -> None:
+        """Hide the datasheet line and its buttons, and keep nothing in them."""
+        self.datasheet_row.setVisible(False)
+        self.datasheet_label.setText("")
+        self.datasheet_button.setText("Open datasheet")
+        self.datasheet_button.setEnabled(False)
 
     def _start_lookup(self) -> None:
         """Hand the waiting lookup to the worker: the chip first, then its datasheet."""
@@ -371,11 +408,15 @@ class InventoryPanel(Panel):
         request, mpn = waiting
         library = self._datasheets() if self._datasheets is not None else None
         chip_found, datasheet_found = self._chip_found, self._datasheet_found
+        reread, self._reread = self._reread, False
 
         def job() -> None:
             chip: Chip | None = None
             held: ChipDocument | None = None
             try:
+                reload = getattr(source, "reload", None) if reread else None
+                if callable(reload):
+                    reload()  # waits for a re-read someone else started, then reads
                 answer = source.get(mpn)
                 chip = answer if isinstance(answer, Chip) else None
             except Exception:  # sources promise not to raise; a lookup must not either
@@ -408,7 +449,7 @@ class InventoryPanel(Panel):
         mpn = (part.mpn or "").strip() if part is not None else ""
         if not isinstance(chip, Chip):
             self.chip_label.setText(f"{mpn} isn't in the chip reference.")
-            self.datasheet_row.setVisible(False)
+            self._hide_datasheet_row()
             return
         self._chip = chip
         self.chip_label.setText(chip_summary(chip))
@@ -449,7 +490,7 @@ class InventoryPanel(Panel):
             log.exception("inventory: could not put a chip on the stream card")
             self._show_message("Couldn't put it on the Chip panel.", error=True)
             return False
-        self._show_message(sent_line(chip.mpn), error=False)
+        self._show_message(sent_line(chip.mpn), error=False, about_chip=True)
         return True
 
     def open_selected_datasheet(self) -> None:
@@ -458,7 +499,7 @@ class InventoryPanel(Panel):
         if held is None or held.file is None:
             return
         opened = self._open_datasheet(held.file.path)
-        self._show_message(opened_line(held, opened), error=not opened)
+        self._show_message(opened_line(held, opened), error=not opened, about_chip=True)
 
     # --- behaviour -------------------------------------------------------
 
@@ -484,7 +525,7 @@ class InventoryPanel(Panel):
         elif not parts and not query:
             self._show_message("Nothing below minimum — the shelf is healthy.", error=False)
         else:
-            self.message_label.setVisible(False)
+            self._hide_message()
         self._sync_use_row()
         self.sync_chip_details()
 
@@ -528,16 +569,27 @@ class InventoryPanel(Panel):
 
     def refresh_keeping_message(self) -> None:
         """Refresh the list without wiping the just-shown confirmation."""
-        text, visible = self.message_label.text(), self.message_label.isVisible()
+        # isHidden, not isVisible: the line was shown even if the dock isn't
+        # on screen right now, and the refresh below empties it.
+        text, visible = self.message_label.text(), not self.message_label.isHidden()
+        about_chip = self._message_about_chip
         self.refresh()
         if visible:
             self.message_label.setText(text)
             self.message_label.setVisible(True)
+            self._message_about_chip = about_chip
 
     def _sync_use_row(self) -> None:
         self.use_button.setEnabled(self.selected_part() is not None)
 
-    def _show_message(self, text: str, *, error: bool) -> None:
+    def _show_message(self, text: str, *, error: bool, about_chip: bool = False) -> None:
         self.message_label.setText(text)
         set_tone(self.message_label, "error" if error else None)
         self.message_label.setVisible(True)
+        self._message_about_chip = about_chip
+
+    def _hide_message(self) -> None:
+        """Hide the message line and empty it — a hidden line keeps nothing."""
+        self.message_label.setVisible(False)
+        self.message_label.setText("")
+        self._message_about_chip = False

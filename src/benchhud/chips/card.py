@@ -1,7 +1,7 @@
 """Sending a chip to the stream card — the words for it, in one place.
 
-The Chip panel is stream output: a viewer can read it. Two operator screens
-can put a chip there — Find chip and the inventory row — and both have to say
+The Chip panel is stream output: a viewer can read it. Two places can put a
+chip there — Find chip and the inventory row — and both have to say
 the same thing about what that means, so the button's name, its tooltip and
 the line that confirms it live here.
 

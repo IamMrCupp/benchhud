@@ -1,8 +1,9 @@
 """A chip source kept off air (#482).
 
 ``on_air = false`` on a ``[[chips.sources]]`` entry keeps that source out of
-what the Chip panel shows — the panel is stream output — while Find chip and
-the inventory row still use it. The things pinned here: the panel is handed
+what the HUD window shows — the Chip panel, which is stream output, and the
+inventory row beside it (#508) — while Find chip, its own window, still uses
+it. The things pinned here: the panel and the row are handed
 the on-air sources and nothing else; an off-air source's values never reach
 the card, whichever way a chip gets there; the card gives no sign anything is
 held back; and a switch flipped in Preferences takes hold on OK.
@@ -30,6 +31,7 @@ from benchhud.chips.dir_source import FROM_FILES, FROM_INDEX, LoadReport
 from benchhud.config import CHIP_SOURCE_ON_AIR, ChipSourceConfig, Config
 from benchhud.inventory import InMemoryInventorySource, Part
 from benchhud.shell import chip_dialog
+from benchhud.shell import main_window as main_window_module
 from benchhud.shell.main_window import MainWindow
 from benchhud.shell.panels import chip as chip_panel_module
 from benchhud.shell.panels.chip import State
@@ -589,22 +591,417 @@ def test_the_tooltip_says_the_card_shows_what_the_on_air_sources_say() -> None:
     assert "on air" in SHOW_ON_CARD_TIP and "stream output" in SHOW_ON_CARD_TIP
 
 
-def test_the_inventory_row_still_uses_every_source(qtbot, tmp_path, worker_jobs) -> None:
-    window = _window(qtbot, tmp_path, worker_jobs)
-    panel = window.inventory_panel
-    window._inventory_source = InMemoryInventorySource(
-        [Part(id=1, description="Mystery regulator", mpn="PRIV77SOT", status="low")]
-    )
-    panel.refresh()
-    panel._run_in_background = _inline
-    panel.part_list.setCurrentRow(0)
-    assert not panel.chip_block.isHidden()
-    assert "Pulled from the blue scrap board" in _everything_drawn(panel)
-    assert not panel.card_button.isHidden()  # it can still be sent; the card decides
+# --- the inventory row: a dock in the same window, so the same rule (#508) -----
 
+_SHELF = [
+    Part(id=1, description="Mystery regulator", mpn="PRIV77SOT", status="low"),
+    Part(id=2, description="Buck controller", mpn="EX1234QFN", status="low"),
+    Part(id=3, description="Unknown IC", mpn="ZZ9999", status="low"),
+]
+#: The overlay's words. The part numbers aren't in it: a shelf part's MPN is
+#: the shop's own data and the row draws it whatever the chip reference says.
+_PRIVATE_WORDS = tuple(text for text in _PRIVATE if text.upper() != "PRIV77SOT")
+
+
+def _row(window: MainWindow, mpn: str):
+    """The window's inventory panel with the part for ``mpn`` selected.
+
+    The first call stocks the shelf and has the row's lookups run on the spot;
+    later calls only move the selection, so a test can swap the runner.
+    """
+    panel = window.inventory_panel
+    if not isinstance(window._inventory_source, InMemoryInventorySource):
+        shelf = InMemoryInventorySource(list(_SHELF))
+        window._inventory_source = shelf
+        # A Preferences OK rebuilds the inventory source from the config;
+        # here that gives the same shelf back.
+        window._make_inventory_source = lambda: shelf
+        panel._run_in_background = _inline
+        panel.refresh()
+    panel.part_list.setCurrentRow(-1)
+    for row in range(panel.part_list.count()):
+        if mpn in panel.part_list.item(row).text():
+            panel.part_list.setCurrentRow(row)
+            return panel
+    raise AssertionError(f"no row for {mpn}")
+
+
+def _no_private_words(panel: QWidget) -> None:
+    drawn = _everything_drawn(panel)
+    for text in _PRIVATE_WORDS:
+        assert text not in drawn, text
+
+
+def test_the_inventory_row_is_handed_the_on_air_source_too(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs)
+    assert window.inventory_panel._chips() is window.on_air_chip_source
+    assert window.inventory_panel._chips() is not window.chip_source
+    assert window.inventory_panel.sensitive is False  # and so its tag is true again
+
+
+def test_a_part_only_an_off_air_source_describes_reads_as_unknown_on_the_row(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs)
+    assert window.chip_source.get("PRIV77SOT") is not None  # Find chip has it
+
+    panel = _row(window, "ZZ9999")
+    for_an_unknown_part = panel.chip_label.text()
+    assert for_an_unknown_part == "ZZ9999 isn't in the chip reference."
+
+    panel = _row(window, "PRIV77SOT")
+    # The same line any unknown part gets, with its own number in it.
+    assert panel.chip_label.text() == for_an_unknown_part.replace("ZZ9999", "PRIV77SOT")
+    assert not panel.chip_block.isHidden()
+    assert panel.datasheet_row.isHidden()  # no datasheet line, no buttons
+    assert not panel.card_button.isVisibleTo(panel)
+    assert panel.show_selected_on_card() is False
+    _no_private_words(panel)
+    for hint in _HINTS:
+        assert hint not in panel.chip_label.text().lower()
+
+
+def test_a_part_both_describe_shows_the_on_air_words_on_the_row(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs)
+    panel = _row(window, "EX1234QFN")
+    drawn = _everything_drawn(panel)
+    assert _PUBLIC_PACKAGE in drawn and _PUBLIC_DESCRIPTION in drawn
+    assert "X1=" in drawn
+    _no_private_words(panel)
+
+
+def test_on_air_the_same_overlay_does_show_on_the_row(qtbot, tmp_path, worker_jobs) -> None:
+    """The control: it's the switch that makes the difference."""
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "EX1234QFN")
+    assert "From the grey donor board, runs hot" in _everything_drawn(panel)
+    panel = _row(window, "PRIV77SOT")
+    assert "Pulled from the blue scrap board" in _everything_drawn(panel)
+    assert panel.card_button.isVisibleTo(panel)
+
+
+def test_a_document_only_an_off_air_source_lists_is_not_named_on_the_row(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    config = Config()
+    config.chips.sources = _sources(tmp_path, overlay_on_air=False)
+    config.chips.datasheet_dir = str(tmp_path / "datasheets")
+    (tmp_path / "datasheets").mkdir()
+    (tmp_path / "datasheets" / "donor-teardown-notes.pdf").write_bytes(b"%PDF-1.4 made up")
+    chip_file = tmp_path / "chips-private" / "chips" / "example-semi" / "EX1234QFN.toml"
+    chip_file.write_text(
+        chip_file.read_text(encoding="utf-8")
+        + '[[documents]]\nkind = "datasheet"\nfilename = "donor-teardown-notes.pdf"\n',
+        encoding="utf-8",
+    )
+    window = MainWindow(config, scanner=_FakeScanner(), on_persist=lambda c: None)
+    qtbot.addWidget(window)
+    window.show()
+    _settle(worker_jobs)
+    merged = window.chip_source.get("EX1234QFN")
+    assert "donor-teardown-notes.pdf" in [document.filename for document in merged.documents]
+
+    panel = _row(window, "EX1234QFN")
+    assert not panel.datasheet_row.isHidden()
+    assert "donor-teardown" not in _everything_drawn(panel)
+    # And Open datasheet can't open it: the row was never told it exists.
+    held = panel._datasheet
+    assert held is None or held.file is None or "donor" not in held.file.path.name
+
+
+def test_with_every_source_off_air_the_row_knows_no_part(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, community_on_air=False)
+    for mpn in ("EX1234QFN", "PRIV77SOT", "ZZ9999"):
+        panel = _row(window, mpn)
+        assert panel.chip_label.text() == f"{mpn} isn't in the chip reference."
+        assert not panel.card_button.isVisibleTo(panel)
+        _no_private_words(panel)
+        assert _PUBLIC_DESCRIPTION not in _everything_drawn(panel)
+
+
+def test_show_on_stream_card_is_only_offered_for_a_chip_the_card_will_show(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    """The row and the card ask the same source, so the row can't say "sent"
+    while the card says "no such chip" — which, side by side, was a hint."""
+    window = _window(qtbot, tmp_path, worker_jobs)
+    panel = _row(window, "EX1234QFN")
+    assert panel.card_button.isVisibleTo(panel)
     panel.card_button.click()
-    assert window.chip_panel.state is State.NOT_FOUND
-    _nothing_private(window.chip_panel)
+    card = window.chip_panel
+    assert card.state is State.SHOWN and card.chip.mpn == "EX1234QFN"
+    assert panel.message_label.text() == sent_line("EX1234QFN")
+    _no_private_words(panel)
+    _nothing_private(card)
+
+
+def test_unticking_on_air_takes_the_overlay_s_words_off_a_selected_row(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "EX1234QFN")
+    assert "From the grey donor board, runs hot" in _everything_drawn(panel)
+
+    _untick_on_air(qtbot, window, 0, Qt.CheckState.Unchecked)
+    _settle(worker_jobs)
+
+    # OK reloads the shelf, which drops the selection — and nothing of the
+    # overlay's is left behind, not even as the text of a hidden label.
+    assert panel.chip_block.isHidden()
+    _no_private_words(panel)
+    panel = _row(window, "EX1234QFN")
+    assert _PUBLIC_DESCRIPTION in _everything_drawn(panel)
+    _no_private_words(panel)
+
+    _untick_on_air(qtbot, window, 0, Qt.CheckState.Checked)
+    _settle(worker_jobs)
+    panel = _row(window, "EX1234QFN")
+    assert "From the grey donor board, runs hot" in _everything_drawn(panel)
+
+
+def test_a_selected_row_is_looked_up_again_when_the_switch_changes(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    """Without a reselect: the window tells the row its source changed."""
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "EX1234QFN")
+    assert "From the grey donor board, runs hot" in _everything_drawn(panel)
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    assert panel.selected_part().mpn == "EX1234QFN"  # still the selected row
+    assert _PUBLIC_DESCRIPTION in _everything_drawn(panel)
+    _no_private_words(panel)
+
+
+def test_unticking_on_air_empties_a_row_only_that_source_describes(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "PRIV77SOT")
+    assert "Hush Devices" in _everything_drawn(panel)
+    assert panel.card_button.isVisibleTo(panel)
+
+    _untick_on_air(qtbot, window, 0, Qt.CheckState.Unchecked)
+    _settle(worker_jobs)
+
+    assert panel.show_selected_on_card() is False
+    _no_private_words(panel)
+    panel = _row(window, "PRIV77SOT")
+    assert panel.chip_label.text() == "PRIV77SOT isn't in the chip reference."
+    assert not panel.card_button.isVisibleTo(panel)
+    assert panel.show_selected_on_card() is False
+    _no_private_words(panel)
+
+
+def test_a_row_answer_from_before_the_switch_never_lands(qtbot, tmp_path, worker_jobs) -> None:
+    """A row lookup that started while the overlay was on air, answering after
+    it was taken off: its answer has the overlay's words in it and is dropped."""
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "ZZ9999")
+    held: list = []
+    panel._run_in_background = held.append
+    _row(window, "EX1234QFN")
+    assert len(held) == 1  # asked of the source that has the overlay in it
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    held.pop(0)()  # the old answer, overlay and all
+    _no_private_words(panel)
+    assert panel.show_selected_on_card() is False  # nothing to send until the new answer
+    while held:
+        held.pop(0)()
+    assert _PUBLIC_DESCRIPTION in _everything_drawn(panel)
+    _no_private_words(panel)
+
+
+def test_the_row_is_looked_up_again_even_if_the_card_s_refresh_falls_over(
+    qtbot, tmp_path, worker_jobs, monkeypatch
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "EX1234QFN")
+    assert "runs hot" in _everything_drawn(panel)
+
+    def broken() -> None:
+        raise RuntimeError("the card fell over")
+
+    monkeypatch.setattr(window.chip_panel, "refresh", broken)
+    window._config.chips.sources[0].on_air = False
+    with pytest.raises(RuntimeError):
+        window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    _no_private_words(panel)
+
+
+def _window_with_a_private_document(qtbot, tmp_path, worker_jobs) -> MainWindow:
+    """Both sources on air; the overlay lists a document of its own, and it's held."""
+    config = Config()
+    config.chips.sources = _sources(tmp_path, overlay_on_air=True)
+    config.chips.datasheet_dir = str(tmp_path / "datasheets")
+    (tmp_path / "datasheets").mkdir()
+    (tmp_path / "datasheets" / "donor-teardown-notes.pdf").write_bytes(b"%PDF-1.4 made up")
+    chip_file = tmp_path / "chips-private" / "chips" / "example-semi" / "PRIV77SOT.toml"
+    chip_file.write_text(
+        chip_file.read_text(encoding="utf-8")
+        + '[[documents]]\nkind = "datasheet"\nfilename = "donor-teardown-notes.pdf"\n',
+        encoding="utf-8",
+    )
+    window = MainWindow(config, scanner=_FakeScanner(), on_persist=lambda c: None)
+    qtbot.addWidget(window)
+    window.show()
+    _settle(worker_jobs)
+    window.chip_panel._executor = _inline
+    return window
+
+
+@pytest.mark.parametrize("through_preferences", [False, True])
+def test_a_flip_takes_down_the_datasheet_line_and_the_opened_message(
+    qtbot, tmp_path, worker_jobs, through_preferences
+) -> None:
+    """The row had named an overlay's document twice over — on the datasheet
+    line, and in "Opened …" after it was opened. Neither outlives the switch,
+    shown or hidden."""
+    window = _window_with_a_private_document(qtbot, tmp_path, worker_jobs)
+    panel = _row(window, "PRIV77SOT")
+    panel._open_datasheet = lambda path: True
+    assert "donor-teardown-notes.pdf" in panel.datasheet_label.text()
+    panel.open_selected_datasheet()
+    assert "donor-teardown-notes.pdf" in panel.message_label.text()
+    assert not panel.message_label.isHidden()
+
+    if through_preferences:
+        _untick_on_air(qtbot, window, 0, Qt.CheckState.Unchecked)
+    else:
+        window._config.chips.sources[0].on_air = False
+        window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    assert panel.message_label.isHidden() and panel.message_label.text() == ""
+    assert "donor-teardown" not in panel.datasheet_label.text()
+    assert "donor-teardown" not in _everything_drawn(panel)
+    _no_private_words(panel)
+    assert panel._datasheet is None
+
+
+def test_a_sent_message_comes_down_with_the_switch_too(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "PRIV77SOT")
+    panel.card_button.click()
+    assert panel.message_label.text() == sent_line("PRIV77SOT")
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    # Left up, it would sit beside a card that now says "no such chip".
+    assert panel.message_label.isHidden() and panel.message_label.text() == ""
+
+
+def test_a_message_that_is_not_about_a_chip_is_left_alone(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "EX1234QFN")
+    panel.consume_selected()  # the shelf has none to use, and says so
+    used = panel.message_label.text()
+    assert used.startswith("Not recorded") and not panel.message_label.isHidden()
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    assert panel.message_label.text() == used and not panel.message_label.isHidden()
+
+
+def test_the_row_does_not_answer_from_the_copy_a_source_held_before_ok(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    """The list of sources is unchanged, so OK keeps them and re-reads them on a
+    worker. Moving a chip out of an on-air folder and pressing OK is how it's
+    taken off air by hand — the row mustn't show it from the old copy while
+    that re-read is still on its way."""
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "PRIV77SOT")
+    assert "Hush Devices" in _everything_drawn(panel)
+    everything = window.chip_source
+
+    (tmp_path / "chips-private" / "chips" / "example-semi" / "PRIV77SOT.toml").unlink()
+    panel.part_list.setCurrentRow(-1)  # as the shelf reload on OK leaves it
+    window.reconfigure_chip_source()
+    assert window.chip_source is everything  # same list: kept, not rebuilt
+    assert len(worker_jobs) == 1  # the window's own re-read hasn't run yet
+
+    panel = _row(window, "PRIV77SOT")
+    assert panel.chip_label.text() == "PRIV77SOT isn't in the chip reference."
+    assert not panel.card_button.isVisibleTo(panel)
+    _no_private_words(panel)
+
+
+def test_the_row_only_re_reads_for_the_first_lookup_after_a_change(
+    qtbot, tmp_path, worker_jobs, monkeypatch
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs)
+    panel = _row(window, "ZZ9999")
+    reads: list[str] = []
+    for source in window.on_air_chip_source.sources:
+        again = source.reload
+        monkeypatch.setattr(source, "reload", lambda again=again: reads.append("read") or again())
+
+    _row(window, "EX1234QFN")
+    assert reads == []  # an ordinary selection reads nothing
+
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    reads.clear()
+    _row(window, "ZZ9999")
+    _row(window, "EX1234QFN")
+    assert reads == []  # the re-read went with the lookup the change itself started
+    assert _PUBLIC_DESCRIPTION in _everything_drawn(panel)
+
+
+def test_the_card_and_the_row_are_cleared_even_if_building_the_sources_falls_over(
+    qtbot, tmp_path, worker_jobs, monkeypatch
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    card = window.chip_panel
+    card.set_chip("EX1234QFN")
+    panel = _row(window, "EX1234QFN")
+    assert "runs hot" in _everything_drawn(panel) and "runs hot" in _everything_drawn(card)
+
+    def broken(source) -> None:
+        raise RuntimeError("no thread to be had")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(main_window_module, "warm_chip_source", broken)
+        window._config.chips.sources[0].on_air = False
+        with pytest.raises(RuntimeError):
+            window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    assert [source.name for source in window.on_air_chip_source.sources] == ["community"]
+    _nothing_private(card)
+    _no_private_words(panel)
+
+    # And the next OK isn't fooled into "nothing changed": it builds again.
+    before = window.chip_source
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    assert window.chip_source is not before
+    assert [source.name for source in window.on_air_chip_source.sources] == ["community"]
+
+
+def test_find_chip_is_where_every_source_is_still_looked_up(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs)
+    dialog = window.open_chip_search()
+    dialog._executor = _inline
+    assert dialog._source is window.chip_source
+    dialog.query_edit.setText("PRIV77SOT")
+    dialog.lookup_now()
+    assert dialog.tree.topLevelItemCount() == 1
+    assert "Pulled from the blue scrap board" in _everything_drawn(dialog)
 
 
 # --- flipping the switch -------------------------------------------------------
@@ -928,8 +1325,11 @@ def test_the_guide_says_how_to_keep_a_source_off_the_stream() -> None:
     # switch is an open issue" — is answered, so it mustn't still be there.
     assert "issues/482" not in doc
     lowered = " ".join(doc.lower().split())
-    assert "find chip and the inventory row still use" in lowered
-    # It owns up to what the switch doesn't cover, and to how it fails.
-    assert "issues/508" in doc and "inventory dock" in lowered
+    # The switch covers the whole HUD window — the card and the inventory row —
+    # and Find chip, its own window, is what still uses every source (#508).
+    assert "the card and the inventory row look the chip up in the on-air sources" in lowered
+    assert "find chip still uses every source" in lowered
+    assert "find chip and the inventory row still use" not in lowered
+    assert "issues/508" not in doc  # answered, so the "open issue" note is gone
     assert "on-air" in doc and "under `[chips]`" in doc
     assert "before this switch" in lowered  # an older benchhud ignores and drops the key

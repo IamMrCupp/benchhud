@@ -218,9 +218,10 @@ datasheet_dir = ""        # e.g. "~/datasheets"
 # about a chip, the first one listed wins and the other is kept as a conflict.
 # So a private overlay goes above the community data.
 #
-# A source is on air unless it says otherwise. `on_air = false` keeps it off the
-# Chip panel — stream output — while Find chip and the inventory row still use
-# it. The switch fails off air: a value that isn't a yes or a no, or the key
+# A source is on air unless it says otherwise. `on_air = false` keeps it out of
+# the HUD window — off the Chip panel, which is stream output, and off the
+# inventory row — while Find chip, its own window, still uses it. The switch
+# fails off air: a value that isn't a yes or a no, or the key
 # misspelt (on-air, onair), keeps the source off air and says so in the log.
 #
 # [[chips.sources]]

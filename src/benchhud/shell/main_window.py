@@ -530,7 +530,9 @@ class MainWindow(QMainWindow):
             lambda: self._inventory_source,
             job_ref=self.selected_job_ref,
             on_consumed=self._note_parts_used,
-            chips=lambda: self._chip_source,
+            # A dock in this window, beside the stream card: the on-air
+            # sources only, like the card, never every source (#508).
+            chips=lambda: self._on_air_chip_source,
             datasheets=lambda: self._datasheet_library,
             show_on_card=self.show_chip_on_card,
         )
@@ -1099,32 +1101,38 @@ class MainWindow(QMainWindow):
         No sources configured is the null source: nothing is read and no
         thread is started.
 
-        Also sets what the Chip panel looks chips up in: the sources that are
-        on air, and only those. The two share their sources, so reading
-        "every source" has read the on-air ones.
+        Also sets what the Chip panel and the inventory row look chips up in:
+        the sources that are on air, and only those. The two share their
+        sources, so reading "every source" has read the on-air ones.
         """
         entries = [replace(entry) for entry in self._config.chips.sources]
         sources = build_chip_sources(entries)
         self._on_air_chip_source: ChipSource = sources.on_air
-        # A copy of what it was built from, to tell later whether that changed
-        # — a source going on or off air included. Kept once it's built, so a
-        # build that failed isn't taken for "nothing changed" next time.
-        self._chip_entries = entries
         warm_chip_source(sources.everything)
+        # A copy of what it was built from, to tell later whether that changed
+        # — a source going on or off air included. Kept only once all of the
+        # above worked, so a build that fell over isn't taken for "nothing
+        # changed" at the next OK.
+        self._chip_entries = entries
         return sources.everything
 
     @property
     def chip_source(self) -> ChipSource:
-        """Where the operator's screens look chips up — every configured source.
+        """Where Find chip looks chips up — every configured source.
 
-        The null source when none is configured. Not for stream output: that
-        is :attr:`on_air_chip_source`.
+        The null source when none is configured. Find chip is its own window
+        and the operator's alone. Nothing in the HUD window gets this: the
+        Chip panel and the inventory row take :attr:`on_air_chip_source`.
         """
         return self._chip_source
 
     @property
     def on_air_chip_source(self) -> ChipSource:
-        """Where the Chip panel looks chips up — the on-air sources only."""
+        """Where the HUD window looks chips up — the on-air sources only.
+
+        The Chip panel, which is stream output, and the inventory row, which
+        is a dock beside it.
+        """
         return self._on_air_chip_source
 
     def reconfigure_chip_source(self) -> None:
@@ -1136,17 +1144,25 @@ class MainWindow(QMainWindow):
         yet, so it's only built when the list really changed.
         """
         same_list = self._chip_entries == self._config.chips.sources
-        if same_list:
-            warm_chip_source(self._chip_source)
-        else:
-            self._chip_source = self._make_chip_source()
-        # The stream card first, before anything else gets a chance to go
-        # wrong: a source just taken off air has to come off the card.
-        self.chip_panel.refresh()
+        try:
+            if same_list:
+                warm_chip_source(self._chip_source)
+            else:
+                self._chip_source = self._make_chip_source()
+        finally:
+            # The stream card and the inventory row, whatever happened above
+            # and before anything else gets a chance to go wrong: a source
+            # just taken off air has to come off both. Each takes down what
+            # it shows at once and has the sources read again before it
+            # looks; an answer still on its way from before is dropped.
+            try:
+                self.chip_panel.refresh()
+            finally:
+                self.inventory_panel.chip_source_changed()
         if self._chip_dialog is not None:
             # Find chip may be open. A new list: it looks in the new source
             # from here on. The same list: the folders may have changed, so it
-            # has them read again before it looks — like the chip panel above.
+            # has them read again before it looks — like the two above.
             self._chip_dialog.set_source(self._chip_source, reread=same_list)
 
     def _make_datasheet_library(self) -> DatasheetLibrary:
