@@ -64,7 +64,14 @@ CREATE TABLE IF NOT EXISTS signatures (
     reference  INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
+-- What the app itself needs to remember between runs (#497). Not job data.
+CREATE TABLE IF NOT EXISTS app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
+
+_SELECTED_JOB = "selected_job"
 
 # Fields a caller may update on a job (whitelist — never interpolate raw input).
 _UPDATABLE = ("device", "serial", "customer", "symptoms", "status", "external_ref", "board_id")
@@ -76,6 +83,10 @@ class JobStatus(StrEnum):
     WAITING = "waiting"  # on parts, or on the customer
     DONE = "done"
     SCRAPPED = "scrapped"
+
+
+#: A job in one of these is off the bench. Nothing brings it back unasked.
+FINISHED_STATUSES: frozenset[str] = frozenset({JobStatus.DONE, JobStatus.SCRAPPED})
 
 
 @dataclass(frozen=True)
@@ -274,6 +285,50 @@ class JobStore:
         """Delete a job and its notes."""
         self._conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         self._conn.commit()
+
+    # --- what was selected ------------------------------------------------
+
+    def selected_job_id(self) -> int | None:
+        """The job that was selected when this was last written, if any (#497).
+
+        Only what was remembered: the job may have been finished or deleted
+        since. :meth:`restorable_job` is the one that checks.
+        """
+        row = self._conn.execute(
+            "SELECT value FROM app_state WHERE key = ?", (_SELECTED_JOB,)
+        ).fetchone()
+        try:
+            return int(row["value"]) if row is not None else None
+        except ValueError:
+            return None
+
+    def set_selected_job(self, job_id: int | None) -> None:
+        """Remember which job is selected; ``None`` forgets it.
+
+        Written at once, not at quit, so it outlives a crash or a pulled plug.
+        """
+        if job_id is None:
+            self._conn.execute("DELETE FROM app_state WHERE key = ?", (_SELECTED_JOB,))
+        else:
+            self._conn.execute(
+                "INSERT INTO app_state (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (_SELECTED_JOB, str(job_id)),
+            )
+        self._conn.commit()
+
+    def restorable_job(self) -> Job | None:
+        """The remembered job, if it's still one to put back on the bench.
+
+        ``None`` when nothing was remembered, the job is gone, or it has been
+        finished (done or scrapped) since: a restart must not put a job that's
+        off the bench back on the stream's job card.
+        """
+        job_id = self.selected_job_id()
+        job = self.get_job(job_id) if job_id is not None else None
+        if job is None or job.status in FINISHED_STATUSES:
+            return None
+        return job
 
     # --- notes -----------------------------------------------------------
 

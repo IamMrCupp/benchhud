@@ -143,6 +143,13 @@ benchhud job set 12 --status waiting
 - **`set`** — same as editing the detail form and hitting **Save**, for any job by
   id. It changes only what you name, and it doesn't move the selection.
 
+**The selection survives a restart.** Which job is selected is written to
+`jobs.db` the moment it changes — not at quit, so a crash or a pulled plug keeps
+it too. At start benchhud selects that job again, and the job card on stream
+comes back with it. Two cases where it doesn't: the job has since been marked
+`done` or `scrapped`, or it's gone. A finished job doesn't go back on stream
+because the app restarted; select it yourself if you want it there.
+
 **The fields.** `new` and `set` take the same flags — everything the detail form
 saves, plus the board number, which the form doesn't have:
 

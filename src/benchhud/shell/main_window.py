@@ -584,6 +584,10 @@ class MainWindow(QMainWindow):
         unelide_tabs(self)
         style_headings(self)
 
+        # The job that was selected last run (#497), now that everything which
+        # follows the selection is connected. A finished job is not restored.
+        self.jobs_panel.restore_selection()
+
     def _stabilise_camera_paths(
         self,
         stable: Callable[[str], str | None] = stable_path,
