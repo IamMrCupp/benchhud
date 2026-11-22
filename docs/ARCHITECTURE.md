@@ -15,6 +15,10 @@ ticket system is a protocol with a fake, not a dependency.
 - **`app.py`** — entry point: loads config, builds the `QApplication`, opens the
   shell, starts the preview loop. `--version` stays Qt-free (works headless).
 - **`config.py`** — typed config tree + TOML load/save. Deliberately cv2-free.
+  Reads are lenient (a wrong type or shape falls back to the default); a file
+  that isn't TOML raises `ConfigError`, and `shell/config_problem` turns that
+  into "start on defaults, say so, save nothing over the file". A save is read
+  back before the file is touched.
 - **`shell/`** — `MainWindow` (dockable panel host + preview loop), `PanelManager`,
   the `Panel` base, `CompositeView` (the centre pane's live composite),
   `Preferences` (device dropdowns, tools editor, intake + boards settings),

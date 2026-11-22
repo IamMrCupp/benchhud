@@ -27,6 +27,8 @@ from benchhud import config as config_module
 
 #: Exit code for a bad key or value (argparse also uses 2 for usage errors).
 EXIT_BAD_INPUT = 2
+#: Exit code when the config file is there but can't be read, or can't be written.
+EXIT_BAD_CONFIG = 3
 
 _TRUE = {"true", "1", "yes", "on"}
 _FALSE = {"false", "0", "no", "off"}
@@ -96,7 +98,10 @@ def _read_stdin(stream: TextIO) -> str:
 def set_value(key: str, raw: str, path: str | None = None) -> str:
     """Set ``key`` to ``raw`` in the config at ``path`` (or the default), and save.
 
-    Returns the path written. Raises :class:`ConfigKeyError` for a bad key or value.
+    Returns the path written. Raises :class:`ConfigKeyError` for a bad key or
+    value, and :class:`~benchhud.config.ConfigError` when the file is there but
+    can't be read — it is not rewritten from defaults, which would throw away
+    everything else in it.
     """
     cfg = config_module.load(path)
     owner, name, current = _resolve(cfg, key)
@@ -130,6 +135,11 @@ def main(argv: Sequence[str], stdin: TextIO | None = None) -> int:
     except ConfigKeyError as exc:
         print(f"benchhud config: {exc}", file=sys.stderr)
         return EXIT_BAD_INPUT
+    except (config_module.ConfigError, OSError) as exc:
+        # True of a failed write too: it's made beside the file and only moved
+        # over it once it's whole.
+        print(f"benchhud config: {exc}\nNothing was changed.", file=sys.stderr)
+        return EXIT_BAD_CONFIG
     # Never echo the value: it may be a token.
     print(f"set {args.key} in {written}")
     return 0

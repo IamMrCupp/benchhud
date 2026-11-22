@@ -3,6 +3,11 @@
 # Copy to your user config path (benchhud writes/reads it there automatically;
 # see `benchhud --help` once implemented) or point $BENCHHUD_CONFIG at a file.
 # Device paths below match the reference Linux bench; adjust for your hardware.
+#
+# Edit it with benchhud closed: it saves this file when it quits. A value of
+# the wrong type is ignored and the default used. If the file can't be read at
+# all — a typo that isn't valid TOML — benchhud still starts, on defaults, tells
+# you the file and the line, and saves nothing over it until it's fixed.
 
 [shell]
 # Main-window geometry, restored on launch and written back on quit.
