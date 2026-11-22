@@ -10,6 +10,8 @@ current scope/thermal frame and live meter readings as timeline entries.
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +41,8 @@ from benchhud.shell.qt_util import fit_combo_popup, grow_fields
 from benchhud.shell.ticket_picker import TicketPickerDialog
 from benchhud.tickets.importer import import_ticket
 from benchhud.tickets.source import Ticket, TicketSource
+
+log = logging.getLogger(__name__)
 
 CaptureProvider = Callable[[], CaptureContext | None]
 TicketSourceProvider = Callable[[], TicketSource]
@@ -103,6 +107,11 @@ class JobsPanel(Panel):
         self._open_schematic = open_schematic
         self._board_files: list[BoardFile] = []
         self._schematic_files: list[BoardFile] = []
+        # What the store already has, so restoring it at start isn't a write.
+        try:
+            self._remembered_job: int | None = store.selected_job_id()
+        except sqlite3.Error:
+            self._remembered_job = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(*PANEL_MARGINS)
@@ -144,7 +153,7 @@ class JobsPanel(Panel):
     def job_list_widget(self) -> QListWidget:
         self.job_list = QListWidget()
         self.job_list.setMinimumHeight(90)
-        self.job_list.currentItemChanged.connect(lambda *_: self._load_selected())
+        self.job_list.currentItemChanged.connect(lambda *_: self._selection_changed())
         return self.job_list
 
     def _build_detail(self) -> QWidget:
@@ -392,6 +401,48 @@ class JobsPanel(Panel):
             return
         for note in self._store.list_notes(job_id):
             self.notes_list.addItem(f"{_short_stamp(note.created_at)}  {note.text}")
+
+    def _selection_changed(self) -> None:
+        """A row was picked, by a click, the CLI or a restore."""
+        self._load_selected()
+        self._remember_selection()
+
+    def _remember_selection(self) -> None:
+        """Save which job is selected, so a restart can put it back (#497).
+
+        Only from a real change of row. ``refresh_jobs`` empties the list and
+        refills it with the signals off, so a reload never forgets the job on
+        its way through.
+        """
+        job_id = self.selected_job_id()
+        if job_id == self._remembered_job:
+            return
+        try:
+            self._store.set_selected_job(job_id)
+        except sqlite3.Error:
+            # Selecting still works; it just won't survive the next restart.
+            log.warning("could not remember the selected job", exc_info=True)
+            return
+        self._remembered_job = job_id
+
+    def restore_selection(self) -> bool:
+        """Select the job that was selected when benchhud last ran (#497).
+
+        Only when it's still there and not finished; see
+        :meth:`JobStore.restorable_job`. Returns whether a job was selected.
+        The window calls this once everything that listens for ``job_changed``
+        is connected, so the job card, the readings and the board reference
+        all follow.
+        """
+        try:
+            job = self._store.restorable_job()
+        except sqlite3.Error:
+            log.warning("could not read the remembered job", exc_info=True)
+            return False
+        if job is None:
+            return False
+        self.select_job(job.id)
+        return self.selected_job_id() == job.id
 
     def selected_job_id(self) -> int | None:
         item = self.job_list.currentItem()
