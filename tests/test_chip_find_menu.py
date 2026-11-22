@@ -1084,7 +1084,7 @@ def test_an_imported_engagement_turns_the_link_outs_off_and_says_how_long(
     assert not any(button.isEnabled() for button in dialog.site_buttons)
     assert not dialog.maker_button.isEnabled()
     assert dialog.web_label.text() == LINK_OUT_LOCKED_BY_ENGAGEMENT
-    assert "until benchhud is restarted" in dialog.web_label.text()
+    assert "End the engagement from the Engagement panel" in dialog.web_label.text()
     # The engagement itself is not named on the dialog.
     assert "R26-0004" not in dialog.web_label.text()
     assert "teardown" not in dialog.web_label.text()
@@ -1099,8 +1099,8 @@ def test_a_ref_that_does_not_resolve_locks_nothing(qtbot) -> None:
     assert window.may_link_out() is True
 
 
-def test_nothing_the_operator_can_do_here_ends_an_engagement(qtbot, tmp_path, worker_jobs) -> None:
-    # What the lock message says is true: it stays locked for the run.
+def test_nothing_but_ending_it_ends_an_engagement(qtbot, tmp_path, worker_jobs) -> None:
+    # Preferences and reopening the dialog are not ways out; only End engagement is (#490).
     window = _window(qtbot, _configured(tmp_path), on_persist=lambda config: None)
     _settle(worker_jobs)
     window._recon_source = InMemoryReconSource(engagements=[_ENGAGEMENT])
@@ -1112,6 +1112,43 @@ def test_nothing_the_operator_can_do_here_ends_an_engagement(qtbot, tmp_path, wo
     assert window.active_engagement == "R26-0004"
     assert window.may_link_out() is False
     assert dialog.web_label.text() == LINK_OUT_LOCKED_BY_ENGAGEMENT
+
+
+def test_ending_the_engagement_turns_the_link_outs_back_on(qtbot, tmp_path, worker_jobs) -> None:
+    """The repair after lunch gets its web lookups back without a restart (#490)."""
+    window = _window(qtbot, _configured(tmp_path))
+    _settle(worker_jobs)
+    dialog = window.open_chip_search()
+    dialog.query_edit.setText("X1=")
+    window._recon_source = InMemoryReconSource(engagements=[_ENGAGEMENT])
+    window.import_engagement("R26-0004")
+    assert not any(button.isEnabled() for button in dialog.site_buttons)
+
+    assert window.end_engagement() == "R26-0004"
+
+    assert window.may_link_out() is True
+    # Straight away, with the dialog still open and nothing typed or clicked.
+    assert any(button.isEnabled() for button in dialog.site_buttons)
+    assert dialog.web_label.text() != LINK_OUT_LOCKED_BY_ENGAGEMENT
+
+
+def test_importing_again_after_ending_locks_them_again(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, _configured(tmp_path))
+    _settle(worker_jobs)
+    dialog = window.open_chip_search()
+    dialog.query_edit.setText("X1=")
+    window._recon_source = InMemoryReconSource(engagements=[_ENGAGEMENT])
+    window.import_engagement("R26-0004")
+    window.end_engagement()
+    window.import_engagement("R26-0004")
+    assert window.may_link_out() is False
+    assert not any(button.isEnabled() for button in dialog.site_buttons)
+    assert dialog.web_label.text() == LINK_OUT_LOCKED_BY_ENGAGEMENT
+
+
+def test_the_lock_message_says_where_to_end_it() -> None:
+    assert "Engagement panel" in LINK_OUT_LOCKED_BY_ENGAGEMENT
+    assert "restart" not in LINK_OUT_LOCKED_BY_ENGAGEMENT
 
 
 def test_looking_chips_up_in_your_own_data_is_not_locked(qtbot, tmp_path, worker_jobs) -> None:
@@ -1149,5 +1186,6 @@ def test_the_chips_doc_is_linked_and_names_every_site_it_can_send_a_mark_to() ->
     assert "CHIPS.md" in (REPO / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
     for site in MARKING_SITES:
         assert f"`{site.host}`" in doc  # a site added to the code is a site the doc must own up to
-    assert "stays active until you restart benchhud" in doc
+    assert "stays active until you end it" in doc
+    assert "End engagement…" in doc
     assert "issues/482" in doc

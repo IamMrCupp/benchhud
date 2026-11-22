@@ -337,7 +337,7 @@ NO_DATASHEET_FOLDER = (
 #: because it's true: nothing in the app ends an engagement.
 LINK_OUT_LOCKED_BY_ENGAGEMENT = (
     "Web lookups are off while a recon engagement is active — they'd tell an outside site"
-    " what's on the bench. An engagement stays active until benchhud is restarted."
+    " what's on the bench. End the engagement from the Engagement panel to turn them back on."
 )
 
 
@@ -542,6 +542,7 @@ class MainWindow(QMainWindow):
             lambda: self._recon_source,
             active_ref=lambda: self._active_engagement,
             on_activate=self.import_engagement,
+            on_end=self.end_engagement,
         )
         self.panels.add_panel(self.engagement_panel, None)
         self.interface_panel = InterfacePanel(
@@ -937,6 +938,32 @@ class MainWindow(QMainWindow):
                 self._chip_dialog.refresh_link_outs()
         return engagement
 
+    def end_engagement(self) -> str | None:
+        """Stop working against the active engagement; returns the ref it was.
+
+        The other half of :meth:`import_engagement` (#490). benchhud forgets
+        the ref and nothing else: bench-recon isn't told, and nothing that was
+        off air comes on air — the recon panels are off air by their own tag,
+        not by whether an engagement is active. Every panel that shows the ref
+        is redrawn, and Find chip's web lookups come back on. The confirm is
+        the Engagement panel's; this is the action.
+        """
+        ended = self._active_engagement
+        if ended is None:
+            return None
+        self._active_engagement = None
+        for panel in (
+            self.engagement_panel,
+            self.interface_panel,
+            self.pinout_panel,
+            self.capture_panel,
+        ):
+            panel.refresh()
+        if self._chip_dialog is not None:
+            self._chip_dialog.refresh_link_outs()
+        log.info("engagement %s ended", ended)
+        return ended
+
     def selected_job_ref(self) -> str | None:
         """The selected job's shop-ticket ref — what consumption is billed to.
 
@@ -1122,9 +1149,8 @@ class MainWindow(QMainWindow):
         Not while a recon engagement is active: a marking search would tell a
         third party what's on the target. Asked by Find chip at every click.
 
-        **An engagement, once imported, stays active until benchhud is
-        restarted** — nothing in the app ends one. So after the first import
-        this is no for the rest of the run, and the dialog says so.
+        An engagement stays active until it's ended from the Engagement panel
+        (:meth:`end_engagement`) or benchhud quits; the dialog says where.
         """
         return self._active_engagement is None
 

@@ -241,11 +241,14 @@ While a recon engagement is active, the web buttons are off. A marking search
 names a part to a stranger, and on an engagement that part is on someone's
 target.
 
-**An engagement, once imported, stays active until you restart benchhud** —
-nothing in the app ends one
-([an open issue](https://github.com/IamMrCupp/benchhud/issues/490)). So after
-the first import, web lookups are off for the rest of that run, and Find chip
-says exactly that. Looking chips up in your own data is unaffected.
+**An engagement stays active until you end it.** Importing one turns the web
+lookups off, and they stay off — through the customer repair you do after lunch
+too — until you press **End engagement…** in the Engagement panel and confirm.
+That clears the engagement from the recon panels and turns the lookups back on;
+Find chip says where to go while they're off. Ending is local: nothing changes
+in bench-recon, and importing the engagement again picks it back up. Quitting
+benchhud ends it as well. Looking chips up in your own data is unaffected
+either way.
 
 ---
 
