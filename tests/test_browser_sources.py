@@ -174,6 +174,20 @@ def test_pages_are_transparent_and_load_nothing_remote(served) -> None:
         assert "http://" not in page.decode() and "https://" not in page.decode()
 
 
+def test_the_job_card_carries_a_credit_that_can_be_turned_off(served) -> None:
+    """The stream says what the HUD is, in the card's corner (#494)."""
+    _, server = served
+    _, page = _get(server, "/panel/job")
+    html = page.decode()
+    assert '<div class="credit" id="credit">benchhud</div>' in html
+    # Inside the card, so it shows and hides with it.
+    card = html.split('id="card">', 1)[1].split("<script>", 1)[0]
+    assert 'id="credit"' in card
+    assert '.get("credit") === "0"' in html
+    _, css = _get(server, "/static/panel.css")
+    assert ".job .credit" in css.decode()
+
+
 def test_hidden_beats_every_panels_own_display(served) -> None:
     """A hidden card must not be displayed, whatever its panel's rule says (#444).
 

@@ -119,6 +119,7 @@ body.offline .live {
 /* --- job card --- */
 
 .job {
+  position: relative;
   display: inline-block;
   min-width: 16em;
   padding: 8px 12px;
@@ -149,6 +150,18 @@ body.offline .live {
   font-size: 12px;
   font-weight: bold;
   text-transform: uppercase;
+}
+
+/* The tool's name, as a credit rather than a logo: small and quiet, in the
+   corner the status pill leaves free (#494). */
+.job .credit {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  color: var(--cell-bg);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  opacity: 0.65;
 }
 
 /* Wins over every panel's own `display`, wherever that rule sits in this file.
