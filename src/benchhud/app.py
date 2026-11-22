@@ -74,10 +74,18 @@ def main(argv: list[str] | None = None) -> int:
 
     from benchhud import config as config_module
     from benchhud.logging_setup import configure_logging
+    from benchhud.shell import config_problem
     from benchhud.shell.main_window import MainWindow
 
-    config = config_module.load()
+    # A config that can't be read doesn't stop the app: it comes up on
+    # defaults, says so, and saves nothing over the file (#475).
+    config, problem = config_problem.load_or_defaults(config_module.load)
     configure_logging(config.shell.logging.level)
+    if problem is not None:
+        import logging
+
+        logging.getLogger(__name__).error("%s %s", config_problem.HEADLINE, problem)
+        print(f"benchhud: {config_problem.HEADLINE}\n{problem}", file=sys.stderr)
 
     from benchhud import cvthreads
 
@@ -97,8 +105,14 @@ def main(argv: list[str] | None = None) -> int:
 
     from benchhud.browser_sources.control import default_control_path
 
-    window = MainWindow(config, on_persist=config_module.save, control_file=default_control_path())
+    window = MainWindow(
+        config,
+        on_persist=config_problem.saver(config_module.save, problem),
+        control_file=default_control_path(),
+    )
     window.show()
+    if problem is not None:
+        config_problem.show(window, problem)
     window.start_preview()
     window.start_thermal()  # no-op unless a thermal camera is chosen
     window.start_telemetry()  # no-op unless [panels.telemetry] enabled and present

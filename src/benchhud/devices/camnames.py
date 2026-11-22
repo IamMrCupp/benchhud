@@ -190,5 +190,13 @@ def udev_rules_main(
     if not found:
         err(f"benchhud udev-rules: no USB cameras under {BY_ID_DIR}")
         return 1
-    out(rules_file(name_cameras(found, roles())).rstrip("\n"))
+    try:
+        which = roles()
+    except ValueError as exc:  # the config is there but can't be read
+        # No rules at all, rather than rules that name the scope and the
+        # thermal camera after their models: OBS would look for /dev/cam-scope
+        # and find nothing, with no error anywhere.
+        err(f"benchhud udev-rules: {exc}")
+        return 1
+    out(rules_file(name_cameras(found, which)).rstrip("\n"))
     return 0

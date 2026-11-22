@@ -2,8 +2,17 @@
 
 The config tree mirrors ``config.example.toml``. It loads with the stdlib
 ``tomllib`` and writes with ``tomlkit``. Reads are lenient — unknown keys are
-ignored and missing keys fall back to defaults — so a hand-edited or
-older-version config never hard-fails the app.
+ignored, and a missing key, a value of the wrong type or a section of the
+wrong shape falls back to its default — so a hand-edited or older-version
+config never hard-fails the app.
+
+The one thing leniency can't cover is a file that isn't TOML at all, or can't
+be read. :func:`load` raises :class:`ConfigError` for that, naming the file
+and the line, and the caller decides: the app comes up on defaults and saves
+nothing over the file; a command that would rewrite it stops instead.
+
+Writes are checked before the file is touched: what's about to be written has
+to load back, so a save can't leave a config the next start chokes on.
 
 The live config is app-managed (window geometry, dock layout), so writes go to a
 platform-appropriate path (overridable with ``$BENCHHUD_CONFIG``), separate from
@@ -14,6 +23,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import sys
 import tomllib
 from collections.abc import Callable, Mapping
@@ -25,6 +35,19 @@ import tomlkit
 
 APP_NAME = "benchhud"
 ENV_VAR = "BENCHHUD_CONFIG"
+
+
+class ConfigError(ValueError):
+    """The config file is there but can't be used, or can't be written.
+
+    ``path`` is the file and ``reason`` is what's wrong with it — for a file
+    that isn't valid TOML, the parser's own words, line and column included.
+    """
+
+    def __init__(self, path: Path, reason: str) -> None:
+        super().__init__(f"{path}: {reason}")
+        self.path = path
+        self.reason = reason
 
 
 @dataclass
@@ -441,39 +464,45 @@ class Config:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Config:
-        """Build a Config from parsed TOML, filling defaults and ignoring extras."""
-        cfg = cls()
+        """Build a Config from parsed TOML, filling defaults and ignoring extras.
 
-        shell_d = data.get("shell", {})
+        Nothing in ``data`` makes this raise: a value of the wrong type keeps
+        its default, and a section that isn't a table counts as not there.
+        """
+        cfg = cls()
+        if not isinstance(data, Mapping):
+            return cfg
+
+        shell_d = _table(data, "shell")
         _apply(
             cfg.shell,
             shell_d,
             ("window_width", "window_height", "layout", "layout_version"),
         )
-        _apply(cfg.shell.logging, shell_d.get("logging", {}), ("level",))
+        _apply(cfg.shell.logging, _table(shell_d, "logging"), ("level",))
 
         _apply(
             cfg.output,
-            data.get("output", {}),
+            _table(data, "output"),
             ("enabled", "device", "width", "height", "fps", "scope_device", "thermal_device"),
         )
 
-        panels_d = data.get("panels", {})
+        panels_d = _table(data, "panels")
         _apply(
             cfg.panels.scope,
-            panels_d.get("scope", {}),
+            _table(panels_d, "scope"),
             ("enabled", "device", "width", "height", "reduced_live"),
         )
-        _apply(cfg.panels.thermal, panels_d.get("thermal", {}), ("enabled", "device", "reset_port"))
+        _apply(cfg.panels.thermal, _table(panels_d, "thermal"), ("enabled", "device", "reset_port"))
         _apply(
             cfg.panels.telemetry,
-            panels_d.get("telemetry", {}),
+            _table(panels_d, "telemetry"),
             ("enabled", "port", "baud"),
         )
 
         _apply(
             cfg.overlay,
-            data.get("overlay", {}),
+            _table(data, "overlay"),
             (
                 "mode",
                 "alpha",
@@ -485,7 +514,7 @@ class Config:
                 "scale_bar",
             ),
         )
-        registration = data.get("registration", {})
+        registration = _table(data, "registration")
         _apply(
             cfg.registration,
             registration,
@@ -495,23 +524,23 @@ class Config:
             cfg.registration.version = 1  # saved before #242: the old placement
         _apply(
             cfg.faults,
-            data.get("faults", {}),
+            _table(data, "faults"),
             ("auto_log", "current_threshold_a"),
         )
         _apply(
             cfg.telemetry_overlay,
-            data.get("telemetry_overlay", {}),
+            _table(data, "telemetry_overlay"),
             ("enabled", "corner", "show_psu", "show_dmm", "scale", "opacity"),
         )
         _apply(
             cfg.graph_overlay,
-            data.get("graph_overlay", {}),
+            _table(data, "graph_overlay"),
             ("enabled", "corner", "window_seconds", "scale", "opacity"),
         )
-        _apply(cfg.browser_sources, data.get("browser_sources", {}), ("enabled", "port"))
+        _apply(cfg.browser_sources, _table(data, "browser_sources"), ("enabled", "port"))
         _apply(
             cfg.terminal,
-            data.get("terminal", {}),
+            _table(data, "terminal"),
             (
                 "enabled",
                 "shell",
@@ -525,63 +554,65 @@ class Config:
         )
         _apply(
             cfg.intake,
-            data.get("intake", {}),
+            _table(data, "intake"),
             ("base_url", "token"),
         )
         _apply(
             cfg.inventory,
-            data.get("inventory", {}),
+            _table(data, "inventory"),
             ("base_url", "token"),
         )
         _apply(
             cfg.recon,
-            data.get("recon", {}),
+            _table(data, "recon"),
             ("base_url", "token"),
         )
 
         _apply(
             cfg.instruments,
-            data.get("instruments", {}),
+            _table(data, "instruments"),
             ("control", "max_voltage", "max_current", "poll_interval"),
         )
         _apply(
             cfg.boards,
-            data.get("boards", {}),
+            _table(data, "boards"),
             ("library_dir", "extensions", "schematic_extensions", "viewer"),
         )
-        chips_d = data.get("chips", {})
-        if isinstance(chips_d, Mapping):
-            if isinstance(chips_d.get("datasheet_dir"), str):
-                cfg.chips.datasheet_dir = chips_d["datasheet_dir"]
-            raw_sources = chips_d.get("sources", [])
-            if isinstance(raw_sources, list):
-                cfg.chips.sources = [
-                    source for source in map(_chip_source_from_dict, raw_sources) if source
-                ]
-        _apply(cfg.flash, data.get("flash", {}), ("command", "programmer"))
-        _apply(cfg.minipro, data.get("minipro", {}), ("command", "last_chip"))
+        chips_d = _table(data, "chips")
+        _apply(cfg.chips, chips_d, ("datasheet_dir",))
+        raw_sources = chips_d.get("sources", [])
+        if isinstance(raw_sources, list):
+            cfg.chips.sources = [
+                source for source in map(_chip_source_from_dict, raw_sources) if source
+            ]
+        _apply(cfg.flash, _table(data, "flash"), ("command", "programmer"))
+        _apply(cfg.minipro, _table(data, "minipro"), ("command", "last_chip"))
         _apply(
             cfg.now_playing,
-            data.get("now_playing", {}),
+            _table(data, "now_playing"),
             ("enabled", "hide_when_paused", "label"),
         )
-        _apply(cfg.performance, data.get("performance", {}), ("opencv_threads",))
+        _apply(cfg.performance, _table(data, "performance"), ("opencv_threads",))
         _apply(
             cfg.obs,
-            data.get("obs", {}),
+            _table(data, "obs"),
             ("enabled", "host", "port", "password", "auto_switch"),
         )
 
-        cfg.tools = [
-            ToolConfig(
-                name=t["name"],
-                command=t["command"],
-                terminal=bool(t.get("terminal", False)),
-                scene=str(t.get("scene", "")),
-            )
-            for t in data.get("tools", [])
-            if isinstance(t, Mapping) and "name" in t and "command" in t
-        ]
+        raw_tools = data.get("tools", [])
+        if isinstance(raw_tools, list):
+            cfg.tools = [
+                ToolConfig(
+                    name=t["name"],
+                    command=t["command"],
+                    terminal=t.get("terminal") is True,
+                    scene=t["scene"] if isinstance(t.get("scene"), str) else "",
+                )
+                for t in raw_tools
+                if isinstance(t, Mapping)
+                and isinstance(t.get("name"), str)
+                and isinstance(t.get("command"), str)
+            ]
         raw_cameras = data.get("cameras", [])
         if isinstance(raw_cameras, list):
             cfg.cameras = [c for c in map(_camera_from_dict, raw_cameras) if c is not None]
@@ -592,18 +623,55 @@ class Config:
         d = asdict(self)
         if d["shell"].get("layout") is None:
             d["shell"].pop("layout", None)
-        # An empty list would be written as `sources = []`, and TOML then
-        # refuses a `[[chips.sources]]` block added by hand below it.
-        if not d["chips"]["sources"]:
-            d["chips"].pop("sources")
+        # An empty list would be written as `tools = []`, and TOML then
+        # refuses a `[[tools]]` block added by hand below it — which is how
+        # config.example.toml says to add one. So no empty list is written.
+        for owner, name in ((d, "tools"), (d, "cameras"), (d["chips"], "sources")):
+            if not owner[name]:
+                owner.pop(name)
         return d
 
 
+def _table(data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    """The section ``key`` of ``data``; empty when it's missing or isn't a table."""
+    value = data.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _fitted(current: Any, value: Any) -> tuple[bool, Any]:
+    """``(usable, value)``: ``value`` as a replacement for ``current``, by type.
+
+    A field keeps the type its default has. TOML has no way to say which
+    number is meant, so a whole number is fine where a decimal is expected,
+    and ``30.0`` is fine for a whole number.
+    """
+    if isinstance(current, bool):
+        return isinstance(value, bool), value
+    if isinstance(value, bool):
+        return False, value
+    if isinstance(current, int):
+        if isinstance(value, float) and value.is_integer():
+            return True, int(value)
+        return isinstance(value, int), value
+    if isinstance(current, float):
+        usable = isinstance(value, int | float) and value == value  # not NaN
+        return usable, float(value) if usable else value
+    if isinstance(current, list):
+        return isinstance(value, list) and all(isinstance(v, str) for v in value), value
+    # Text, or a field with no default (the saved window layout): text.
+    return isinstance(value, str), value
+
+
 def _apply(obj: Any, data: Mapping[str, Any], keys: tuple[str, ...]) -> None:
-    """Copy present ``keys`` from ``data`` onto dataclass instance ``obj``."""
+    """Copy present ``keys`` from ``data`` onto dataclass instance ``obj``.
+
+    A value of the wrong type for its field is left out, so the default stands.
+    """
     for key in keys:
         if key in data:
-            setattr(obj, key, data[key])
+            usable, value = _fitted(getattr(obj, key), data[key])
+            if usable:
+                setattr(obj, key, value)
 
 
 def default_config_path() -> Path:
@@ -621,11 +689,57 @@ def default_config_path() -> Path:
 
 
 def load(path: str | os.PathLike[str] | None = None) -> Config:
-    """Load config from ``path`` (or the default). Missing file → defaults."""
+    """Load config from ``path`` (or the default). Missing file → defaults.
+
+    Raises :class:`ConfigError` when the file is there but can't be read or
+    isn't valid TOML. It never returns defaults for a file it couldn't read:
+    a caller that then saved would overwrite the file with them.
+    """
     target = Path(path) if path is not None else default_config_path()
-    if not target.exists():
+    try:
+        text = target.read_text("utf-8")
+    except FileNotFoundError:
         return Config()
-    return Config.from_dict(tomllib.loads(target.read_text("utf-8")))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(target, f"can't be read: {exc}") from exc
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(target, str(exc) + _hint(str(exc))) from exc
+    return Config.from_dict(data)
+
+
+_EMPTY_LIST_IN_THE_WAY = re.compile(r"Cannot mutate immutable namespace \('(\w+)',\)")
+
+
+def _hint(parser_said: str) -> str:
+    """Plain words for the one parser message that needs them.
+
+    Configs saved before #475 hold a line like ``tools = []``. TOML won't take
+    a ``[[tools]]`` block after one, and says so in a way nobody would guess.
+    """
+    found = _EMPTY_LIST_IN_THE_WAY.search(parser_said)
+    if found is None:
+        return ""
+    name = found.group(1)
+    return f". An earlier line sets `{name} = []`: delete that line to use [[{name}]] blocks"
+
+
+def _storable(value: Any) -> Any:
+    """``value`` with the characters a config file can't hold taken out of its text.
+
+    Two can't make the trip. An escape character is written by tomlkit as
+    ``\\e``, which ``tomllib`` refuses on the way back in. A lone surrogate
+    can't be encoded at all. Neither means anything in a path, a name or a
+    token, and both arrive by paste, so they're dropped.
+    """
+    if isinstance(value, str):
+        return "".join(ch for ch in value if ch != "\x1b" and not "\ud800" <= ch <= "\udfff")
+    if isinstance(value, dict):
+        return {key: _storable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_storable(item) for item in value]
+    return value
 
 
 def save(config: Config, path: str | os.PathLike[str] | None = None) -> Path:
@@ -633,13 +747,22 @@ def save(config: Config, path: str | os.PathLike[str] | None = None) -> Path:
 
     The file is owner-only (``0600``): it holds the intake, bench-parts and
     bench-recon tokens. An existing file is tightened too.
+
+    What's about to be written is read back first. If it wouldn't load,
+    :class:`ConfigError` is raised and the file on disk is left as it was —
+    a save never replaces a working config with one the next start can't read.
     """
     target = Path(path) if path is not None else default_config_path()
+    text = tomlkit.dumps(_storable(config.to_dict()))
+    try:
+        tomllib.loads(text)
+        data = text.encode("utf-8")
+    except (tomllib.TOMLDecodeError, UnicodeEncodeError) as exc:
+        raise ConfigError(target, f"not saved, it wouldn't load back: {exc}") from exc
     target.parent.mkdir(parents=True, exist_ok=True)
-    text = tomlkit.dumps(config.to_dict())
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(text)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
     with contextlib.suppress(OSError):
         os.chmod(target, 0o600)  # O_CREAT's mode only applies to a new file
     return target
