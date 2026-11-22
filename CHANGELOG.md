@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.0](https://github.com/IamMrCupp/benchhud/compare/v0.31.0...v0.32.0) (2026-11-22)
+
+
+### Features
+
+* **shell:** light, dark and custom themes ([090bcd3](https://github.com/IamMrCupp/benchhud/commit/090bcd350830d0cae65a2f85707308aca8bfbbc7))
+* **shell:** light, dark and custom themes ([04ba4e1](https://github.com/IamMrCupp/benchhud/commit/04ba4e13f51a6a7b7fd2ebad2720f33884506eb7))
+
 ## [0.31.0](https://github.com/IamMrCupp/benchhud/compare/v0.30.0...v0.31.0) (2026-11-22)
 
 
