@@ -72,7 +72,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -98,6 +97,8 @@ from benchhud.chips.opening import (
 from benchhud.chips.source import ChipSource, NullChipSource
 from benchhud.inventory.source import InventorySource, InventoryWriteError, Part
 from benchhud.shell.panel import PANEL_MARGINS, Panel
+from benchhud.shell.qt_util import set_tone
+from benchhud.shell.theme import colour as theme_colour
 
 log = logging.getLogger(__name__)
 
@@ -117,7 +118,17 @@ JobRefProvider = Callable[[], str | None]
 #: Called after a successful consume, e.g. to drop a note on the job timeline.
 ConsumedHook = Callable[[Part, int], None]
 
-_STATUS_COLOURS = {"out": QColor("#d9534f"), "low": QColor("#e8a33d")}
+#: Stock that needs attention, in the look's colours: out is danger, low a warning.
+_STATUS_COLOURS = {"out": "danger", "low": "warning"}
+
+
+def _colour_row(item: QListWidgetItem, part: Part) -> None:
+    """Out of stock in the danger colour, low in the warning one, the rest plain."""
+    tone = _STATUS_COLOURS.get(part.status)
+    if tone is None:
+        item.setData(Qt.ItemDataRole.ForegroundRole, None)
+    else:
+        item.setForeground(theme_colour(tone))
 
 
 def _thread_executor(job: Callable[[], None]) -> None:
@@ -464,9 +475,7 @@ class InventoryPanel(Panel):
             for part in parts:
                 item = QListWidgetItem(_row_text(part))
                 item.setData(Qt.ItemDataRole.UserRole, part)
-                colour = _STATUS_COLOURS.get(part.status)
-                if colour is not None:
-                    item.setForeground(colour)
+                _colour_row(item, part)
                 self.part_list.addItem(item)
         finally:
             self.part_list.blockSignals(False)
@@ -509,6 +518,14 @@ class InventoryPanel(Panel):
             self._on_consumed(updated, quantity)
         self.refresh_keeping_message()
 
+    def recolour(self) -> None:
+        """Re-tint the rows in the current look, without asking the backend again."""
+        for index in range(self.part_list.count()):
+            item = self.part_list.item(index)
+            part = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(part, Part):
+                _colour_row(item, part)
+
     def refresh_keeping_message(self) -> None:
         """Refresh the list without wiping the just-shown confirmation."""
         text, visible = self.message_label.text(), self.message_label.isVisible()
@@ -522,5 +539,5 @@ class InventoryPanel(Panel):
 
     def _show_message(self, text: str, *, error: bool) -> None:
         self.message_label.setText(text)
-        self.message_label.setStyleSheet("color: #d9534f;" if error else "")
+        set_tone(self.message_label, "error" if error else None)
         self.message_label.setVisible(True)

@@ -100,7 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("benchhud")
     app.setApplicationDisplayName("benchhud")
     app.setWindowIcon(app_icon())
-    apply_theme(app)
+    from benchhud.themes import load_themes, themes_dir
+
+    themes_folder = themes_dir(config_module.default_config_path())
+    apply_theme(app, config.shell.appearance, load_themes(themes_folder)[0])
 
     from benchhud.browser_sources.control import default_control_path
 
@@ -108,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         config,
         on_persist=config_problem.saver(config_module.save, problem),
         control_file=default_control_path(),
+        themes_folder=themes_folder,
     )
     window.show()
     if problem is not None:

@@ -1,12 +1,15 @@
-"""Application dark theme.
+"""The application's look: one stylesheet, filled in with a light or dark palette.
 
-A single QSS stylesheet applied at startup so the HUD reads as one dark
-bench/stream app rather than default-Qt light. The palette is burnwright's dark
-set (its ``--bw-*`` properties in ``src/App.css``), so the two apps look like one
-family (#429, #440). So is the panel treatment: every dock a bordered card with
-a gutter round it, fields and buttons with burnwright's lighter edge, Erase and
-Write outlined as the destructive ones. The meter's LCD cells keep their own
-colours: they match the on-stream readout.
+The palette is burnwright's (its ``--bw-*`` properties in ``src/App.css``), light
+or dark, so the HUD and burnwright look like one family (#429, #440). So is the
+panel treatment: every dock a bordered card with a gutter round it, fields and
+buttons with burnwright's lighter edge, Erase and Write outlined as the
+destructive ones. Which palette, and any custom theme laid over it, is
+``[shell] appearance``; see :mod:`benchhud.themes`.
+
+The instrument screens keep their own colours whatever the look: the meter's
+LCD cells, the power chart and the signature image match the on-stream
+readout, and an oscilloscope's channel colours need a dark screen to read.
 """
 
 from __future__ import annotations
@@ -14,39 +17,19 @@ from __future__ import annotations
 from importlib.resources import files
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QGroupBox, QWidget
 
 from benchhud.shell.fonts import apply_ui_font
 from benchhud.shell.qt_util import heading_font, plain_font
+from benchhud.themes import DARK, DEFAULT_APPEARANCE, Look, Theme, resolve
 
-#: The palette, in one place. ``@name`` in the stylesheets below is replaced
-#: with these, longest name first. Values follow burnwright's dark theme.
-COLOURS = {
-    "window": "#151517",  # behind everything: the gaps between panels (--bw-bg)
-    "chrome": "#111113",  # menu bar, status bar, the composite's surround
-    "panel": "#1f1f22",  # a dock's body (--bw-panel)
-    "raised": "#2a2a2e",  # cards, fields, buttons (--bw-control-bg)
-    "hover": "#34343a",  # (--bw-control-hover)
-    "border": "#3a3a40",  # round a panel (--bw-border)
-    "edge": "#55555d",  # round a field or a button (--bw-control-border)
-    "text": "#e4e4e8",
-    "bright": "#f4f4f6",  # (--bw-fg is between the two)
-    "muted": "#a3a3ab",  # (--bw-muted)
-    "faint": "#6b6b73",
-    "accent": "#8fb0ff",  # (--bw-accent)
-    "accent-soft": "#24345c",  # (--bw-accent-soft)
-    "accent-ink": "#10162a",  # text on a filled accent
-    "danger": "#ff9a92",
-    "danger-soft": "#4a1f1c",
-    "danger-dim": "#7d524f",  # danger at half strength, for a disabled button
-    "warning": "#ffc66b",
-    "warning-soft": "#3d2e10",
-    "warning-edge": "#f59e0b",  # (--bw-warning-border)
-    "ok": "#7fd6a0",
-    "ok-soft": "#173624",
-}
+#: The dark palette, kept under its old name: ``@name`` in the stylesheets
+#: below is one of these keys. The values for every look are in
+#: :mod:`benchhud.themes`.
+COLOURS = DARK
 
-DARK_QSS = """
+_QSS = """
 QWidget { background-color: @panel; color: @text; }
 QMainWindow, QDialog { background-color: @window; }
 
@@ -193,6 +176,10 @@ QSlider::handle:horizontal {
     background: @accent; width: 12px; border-radius: 6px; margin: -5px 0;
 }
 
+/* The terminal's on-air line: red while the stream can see it. */
+QLabel#TerminalOnAir { color: @danger; font-weight: bold; }
+QLabel#TerminalOffAir { color: @muted; font-weight: bold; }
+
 /* The composite sits in a darker well, the way a viewport does. */
 QWidget#CompositePreview, QWidget#CompositePreview QLabel {
     background-color: @chrome; color: @muted;
@@ -202,7 +189,7 @@ QWidget#CompositePreview, QWidget#CompositePreview QLabel {
 
 #: Check boxes and radio buttons, drawn here: the native indicator was painted
 #: over by the window colour and couldn't be seen at all (#286).
-INDICATOR_QSS = """
+_INDICATOR_QSS = """
 QCheckBox, QRadioButton { spacing: 7px; }
 QCheckBox::indicator, QRadioButton::indicator,
 QGroupBox::indicator, QAbstractItemView::indicator {
@@ -232,15 +219,18 @@ QCheckBox:disabled, QRadioButton:disabled { color: @faint; }
 """
 
 
-def _coloured(qss: str) -> str:
+def _coloured(qss: str, colours: dict[str, str]) -> str:
     """``qss`` with each ``@name`` replaced by its colour."""
-    for name in sorted(COLOURS, key=len, reverse=True):
-        qss = qss.replace(f"@{name}", COLOURS[name])
+    for name in sorted(colours, key=len, reverse=True):
+        qss = qss.replace(f"@{name}", colours[name])
     return qss
 
 
-DARK_QSS = _coloured(DARK_QSS)
-INDICATOR_QSS = _coloured(INDICATOR_QSS)
+#: The dark look's stylesheet, as it always was.
+DARK_QSS = _coloured(_QSS, COLOURS)
+INDICATOR_QSS = _coloured(_INDICATOR_QSS, COLOURS)
+
+_current: Look = resolve("dark", system_dark=True, themes=[])
 
 
 def style_headings(root: QWidget) -> None:
@@ -257,13 +247,68 @@ def style_headings(root: QWidget) -> None:
             child.setFont(plain)
 
 
-def stylesheet() -> str:
-    """The whole stylesheet, with the check mark's path filled in."""
-    check = str(files("benchhud.resources").joinpath("check.svg")).replace("\\", "/")
-    return DARK_QSS + INDICATOR_QSS.replace("{check}", check)
+def stylesheet(look: Look | None = None) -> str:
+    """The whole stylesheet for ``look`` (dark by default), check mark filled in.
+
+    The mark is drawn on the accent, so it's dark on a light accent and white
+    on a dark one.
+    """
+    look = look or resolve("dark", system_dark=True, themes=[])
+    colours = look.qss()
+    mark = "check.svg" if look.dark_check else "check-light.svg"
+    check = str(files("benchhud.resources").joinpath(mark)).replace("\\", "/")
+    return _coloured(_QSS, colours) + _coloured(_INDICATOR_QSS, colours).replace("{check}", check)
 
 
-def apply_theme(app: QApplication) -> None:
-    """Apply the dark theme and the interface font (Inter) to the application."""
+def system_is_dark(app: QApplication) -> bool:
+    """Whether the operating system is in dark mode. Unknown counts as dark."""
+    return app.styleHints().colorScheme() != Qt.ColorScheme.Light
+
+
+def apply_theme(
+    app: QApplication,
+    appearance: str = DEFAULT_APPEARANCE,
+    themes: list[Theme] | None = None,
+) -> Look:
+    """Apply ``appearance`` and the interface font (Inter) to the application.
+
+    The native parts Qt doesn't draw from the stylesheet (the title bar, the
+    macOS menu bar, file dialogs) are told the same light or dark, except
+    when following the system, where they already agree.
+    """
+    global _current
     apply_ui_font(app)
-    app.setStyleSheet(stylesheet())
+    hints = app.styleHints()
+    if appearance == "system":
+        hints.unsetColorScheme()
+    look = resolve(appearance, system_dark=system_is_dark(app), themes=themes or [])
+    tell_native(hints, appearance, look)
+    _current = look
+    app.setStyleSheet(stylesheet(look))
+    return look
+
+
+def tell_native(hints, appearance: str, look: Look) -> None:
+    """Ask for the native light or dark to match ``look``, unless following the system.
+
+    Only some platforms honour it (macOS and Windows do; the test platform
+    doesn't), which is fine: it's the parts the stylesheet doesn't reach.
+    """
+    if appearance == "system":
+        return
+    hints.setColorScheme(Qt.ColorScheme.Dark if look.base == "dark" else Qt.ColorScheme.Light)
+
+
+def current_look() -> Look:
+    """The look last applied (dark before anything has been)."""
+    return _current
+
+
+def colour(name: str) -> QColor:
+    """One of the current look's colours, for a widget that paints its own text.
+
+    A table item's colour isn't reached by the stylesheet, so a panel asks for
+    it when it fills a row.
+    """
+    r, g, b, a = _current.colours[name]
+    return QColor(r, g, b, round(a * 255))

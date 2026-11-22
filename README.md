@@ -81,6 +81,12 @@ glows — on the scope image, with the rest of the board left alone.*
 Everything lives in dockable panels — arrange the bench the way you work, and the
 layout sticks across restarts.
 
+Dark by default, light if you'd rather, or the OS's choice — **View → Appearance**.
+It's burnwright's palette, so the HUD, burnwright and the web tools round the
+bench read as one family, and a theme file written for any of them works here
+too. The meter, the power chart and the stream overlays keep their own colours
+whatever you pick. [More →](docs/APPEARANCE.md)
+
 ![The benchhud window: thermal controls on the left, the fused scope view in the middle, the raw thermal feed and the meter on the right](docs/images/hud.png)
 
 *The HUD on the bench. Controls on the left, the fused view in the middle, the

@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QStringListModel, Qt, Signal
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -34,13 +34,15 @@ from benchhud.jobs.readings import MODES, Row, Verdict, compare, format_value, m
 from benchhud.jobs.store import JobStore
 from benchhud.shell.panel import PANEL_MARGINS, Panel
 from benchhud.shell.qt_util import set_tone
+from benchhud.shell.theme import colour as theme_colour
 
+#: Each verdict in the look's colours, so it reads in light and dark alike.
 _VERDICT_COLOURS = {
-    Verdict.OK: "#5ec27a",
-    Verdict.LOW: "#ff7a7a",
-    Verdict.HIGH: "#ff7a7a",
-    Verdict.OPEN: "#ff7a7a",
-    Verdict.TODO: "#8a93a3",
+    Verdict.OK: "ok",
+    Verdict.LOW: "danger",
+    Verdict.HIGH: "danger",
+    Verdict.OPEN: "danger",
+    Verdict.TODO: "muted",
 }
 
 
@@ -299,7 +301,7 @@ class ReadingsPanel(Panel):
         for column, text in enumerate(cells):
             item = QTableWidgetItem(text)
             if column == 3 and row.verdict in _VERDICT_COLOURS:
-                item.setForeground(QBrush(QColor(_VERDICT_COLOURS[row.verdict])))
+                item.setForeground(QBrush(theme_colour(_VERDICT_COLOURS[row.verdict])))
             if row.reference_count:
                 item.setToolTip(f"Known-good from {row.reference_count} reading(s)")
             self.table.setItem(index, column, item)
