@@ -65,6 +65,15 @@ datasheet folder change, the main window hands it the new ones
 and what's typed is looked up again — an answer still on its way from the old
 source is dropped.
 
+**Putting a chip on the stream card is a click, and only its part number
+goes.** The Chip panel is stream output. When the caller hands over a way to
+send a chip there, the picked candidate gets a **Show on stream card** button:
+a mouse click, never Enter and never a side effect of picking a row. What's
+handed over is the part number and nothing else — the card looks the chip up
+for itself, so nothing from this pane (a note, a source's name, a value that
+lost) can ride along. Without that callable, or with no chip data, there's no
+button at all.
+
 Read-only, and nothing raises into the HUD: a source or an opener that fails
 gets a log line and a plain message.
 
@@ -99,6 +108,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from benchhud.chips.card import NOTHING_TO_SHOW, SHOW_ON_CARD, SHOW_ON_CARD_TIP, sent_line
 from benchhud.chips.composite import MergedChip
 from benchhud.chips.find import Candidate, find_chips, with_provenance
 from benchhud.chips.linkout import (
@@ -145,6 +155,9 @@ Executor = Callable[[Callable[[], None]], None]
 LinkOutAllowed = Callable[[], bool]
 #: Hands an address to the operator's browser; true when it was taken.
 OpenUrl = Callable[[str], object]
+#: Puts the chip with this part number on the stream card. Given the part
+#: number and nothing else. Called on the GUI thread; it has to return at once.
+ShowOnCard = Callable[[str], object]
 
 #: How long typing has to pause before a lookup starts.
 DEBOUNCE_MS = 120
@@ -297,6 +310,9 @@ class FindChipDialog(QDialog):
     out, link-outs are off. ``open_url`` hands an address to the browser and
     defaults to :func:`benchhud.shell.browser.open_in_browser`.
 
+    ``show_on_card`` puts a chip on the stream card, given its part number.
+    Left out, there is no such button.
+
     ``open_unavailable`` and ``link_out_locked`` are the caller's own words
     for why something is off. They're shown in tooltips as well as on the
     dialog, so they're trusted the way the dialog's own strings are: no
@@ -316,6 +332,7 @@ class FindChipDialog(QDialog):
         link_out_allowed: LinkOutAllowed | None = None,
         link_out_locked: str = LINK_OUT_LOCKED,
         open_url: OpenUrl | None = None,
+        show_on_card: ShowOnCard | None = None,
         executor: Executor = _thread_executor,
         parent: QWidget | None = None,
     ) -> None:
@@ -337,6 +354,7 @@ class FindChipDialog(QDialog):
         self._link_out_locked = link_out_locked or LINK_OUT_LOCKED
         self._link_out_unknown = False  # the last time it was asked, the asking failed
         self._open_url = open_url if open_url is not None else open_in_browser
+        self._show_on_card = show_on_card
         self._executor = executor
 
         self._wanted = ""  # what's typed now
@@ -460,11 +478,21 @@ class FindChipDialog(QDialog):
             link_button.setAutoDefault(False)
             link_button.setDefault(False)
 
+        # What became of sending a chip to the stream card, until the pick moves on.
+        self.card_label = _data_label(QLabel())
+        self.card_label.setVisible(False)
+        self.card_button = QPushButton(SHOW_ON_CARD)
+        self.card_button.clicked.connect(self.show_selected_on_card)
+        # Like a link-out, this leaves the operator's own screen: it takes a
+        # click. It never holds the focus, so neither Enter nor Space reaches it.
+        self.card_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         self.open_button = QPushButton("Open datasheet")
         self.open_button.clicked.connect(self.open_selected)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         buttons.addButton(self.open_button, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addButton(self.card_button, QDialogButtonBox.ButtonRole.ActionRole)
         buttons.addButton(self.maker_button, QDialogButtonBox.ButtonRole.ActionRole)
         # Enter belongs to the picked candidate, from the box and from either
         # list (see eventFilter). No button may claim it as the dialog's default.
@@ -479,6 +507,7 @@ class FindChipDialog(QDialog):
         layout.addWidget(splitter, 1)
         layout.addWidget(self.status_label)
         layout.addWidget(self.open_label)
+        layout.addWidget(self.card_label)
         layout.addWidget(self.web_label)  # a row of its own: it never loses its width
         layout.addLayout(web_row)
         layout.addWidget(buttons)
@@ -535,6 +564,7 @@ class FindChipDialog(QDialog):
         self._round += 1
         self._reread = reread
         self.notice_label.setVisible(not configured)
+        self._refresh_card_button()
         self._debounce.stop()
         self._slow.stop()  # "Looking up…" was about the old source
         pending, self._pending_move = self._pending_move, 0
@@ -882,6 +912,7 @@ class FindChipDialog(QDialog):
         candidate = self.selected()
         key = None if candidate is None else candidate.chip.key
         if key != self._detail_key:
+            self._say_card("")  # what was sent was another chip
             self._web_said = None  # what was said was about another chip
             if not self._opening:
                 self._say_open("")
@@ -911,6 +942,7 @@ class FindChipDialog(QDialog):
                     self.found_label, "This chip's details can't be shown — the log has the reason."
                 )
         self._refresh_open_button()
+        self._refresh_card_button()
         self._refresh_web()
 
     def _show_chip(self, candidate: Candidate) -> None:
@@ -1153,6 +1185,39 @@ class FindChipDialog(QDialog):
         self._say_open(result.detail or f"Opened {what}.", "ok")
         if self.query_edit.text() == self._opening_from:
             self.query_edit.selectAll()  # done with this one: the next mark types over it
+
+    # --- the stream card ----------------------------------------------------------
+
+    def _refresh_card_button(self) -> None:
+        """There only when there's somewhere to send a chip and chips to send."""
+        self.card_button.setVisible(self._show_on_card is not None and self._configured)
+        picked = self.selected() is not None
+        self.card_button.setEnabled(picked)
+        self.card_button.setToolTip(SHOW_ON_CARD_TIP if picked else NOTHING_TO_SHOW)
+
+    def show_selected_on_card(self) -> bool:
+        """Put the picked chip on the stream card. True when it was handed over.
+
+        The part number is all that's handed over: the card looks the chip up
+        for itself and shows what a card shows.
+        """
+        candidate, send = self.selected(), self._show_on_card
+        if candidate is None or send is None or not self._configured:
+            return False
+        mpn = candidate.chip.mpn
+        try:
+            send(mpn)
+        except Exception:
+            log.exception("chip finder: could not put a chip on the stream card")
+            self._say_card("Couldn't put it on the Chip panel — the log has the reason.", "error")
+            return False
+        self._say_card(sent_line(mpn), "ok")
+        return True
+
+    def _say_card(self, text: str, tone: str | None = None) -> None:
+        self.card_label.setText(text)
+        self.card_label.setVisible(bool(text))
+        set_tone(self.card_label, tone)
 
     # --- linking out ------------------------------------------------------------
 

@@ -42,6 +42,12 @@ it, cut short if it's long. Never the name or folder of the file on this
 machine: that's somebody's disk, this panel can be on stream, and a file found
 by its hash can be called anything. The file is opened, not named.
 
+**Show on stream card** sends the row's chip to the Chip panel, which is
+stream output. It's there only when the chip reference knows the part, it's a
+button and never a side effect of selecting a row, and all it hands over is
+the chip's part number — the one the lookup for the selected row came back
+with, so a row passed over on the way never gets sent.
+
 The lookup can be slow the first time and hashing a folder of PDFs can be slow
 any time, so neither runs here: a worker does both and signals back. Every
 request carries a number, and an answer to anything but the latest is dropped
@@ -72,6 +78,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from benchhud.chips.card import SHOW_ON_CARD, SHOW_ON_CARD_TIP, sent_line
 from benchhud.chips.datasheets import ChipDocument, DatasheetLibrary, open_document
 from benchhud.chips.model import Chip
 from benchhud.chips.opening import (
@@ -95,6 +102,8 @@ DatasheetLibraryProvider = Callable[[], DatasheetLibrary]
 Executor = Callable[[Callable[[], None]], None]
 #: Opens a held document; False when it couldn't.
 DocumentOpener = Callable[[Path], bool]
+#: Puts the chip with this part number on the stream card. The part number only.
+ShowOnCard = Callable[[str], object]
 #: The selected job's external ticket ref, or None when no job / not linked.
 JobRefProvider = Callable[[], str | None]
 #: Called after a successful consume, e.g. to drop a note on the job timeline.
@@ -168,6 +177,7 @@ class InventoryPanel(Panel):
         datasheets: DatasheetLibraryProvider | None = None,
         run_in_background: Executor = _thread_executor,
         open_datasheet: DocumentOpener = open_document,
+        show_on_card: ShowOnCard | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -178,6 +188,7 @@ class InventoryPanel(Panel):
         self._datasheets = datasheets
         self._run_in_background = run_in_background
         self._open_datasheet = open_datasheet
+        self._show_on_card = show_on_card
         # The latest lookup asked for; answers to earlier ones are dropped.
         self._lookup = 0
         # (request, mpn) waiting for the worker to be free, and whether it's busy.
@@ -260,9 +271,16 @@ class InventoryPanel(Panel):
         self.datasheet_label.setSizePolicy(no_say_in_width)
         # The line gets a row to itself, above the button: beside it, a line
         # that wraps to three in a narrow dock had only the button's height.
+        # The chip is what goes; the datasheet has nothing to do with it. It's
+        # here because this row exists exactly when the chip is known.
+        self.card_button = QPushButton(SHOW_ON_CARD)
+        self.card_button.setToolTip(SHOW_ON_CARD_TIP)
+        self.card_button.clicked.connect(self.show_selected_on_card)
+        self.card_button.setVisible(self._show_on_card is not None)
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.addWidget(self.datasheet_button)
+        button_row.addWidget(self.card_button)
         button_row.addStretch(1)
         self.datasheet_row = QWidget()
         rows = QVBoxLayout(self.datasheet_row)
@@ -380,6 +398,25 @@ class InventoryPanel(Panel):
             self.datasheet_button.setEnabled(self._datasheet is not None)
         if self._lookup_waiting is not None:
             self._start_lookup()  # the selection moved on while the worker was busy
+
+    def show_selected_on_card(self) -> bool:
+        """Put the selected part's chip on the stream card. True when it was sent.
+
+        Only once the chip reference has answered for the row that's selected
+        now — ``_chip`` is cleared the moment the selection moves — and only
+        its part number is handed over.
+        """
+        chip, send = self._chip, self._show_on_card
+        if chip is None or send is None:
+            return False
+        try:
+            send(chip.mpn)
+        except Exception:
+            log.exception("inventory: could not put a chip on the stream card")
+            self._show_message("Couldn't put it on the Chip panel.", error=True)
+            return False
+        self._show_message(sent_line(chip.mpn), error=False)
+        return True
 
     def open_selected_datasheet(self) -> None:
         """Open the file held for the selected part's chip, and say what was opened."""
