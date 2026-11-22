@@ -5,6 +5,10 @@ escape character pasted into any text setting, and a file that isn't valid
 TOML at all. Plus the ones found on the way: a value of the wrong type, a
 section of the wrong shape, and a save that fails halfway.
 
+What must *not* change is here too: a config that worked before still means
+what it meant — ``enabled = 1``, ``fps = 29.97`` — and the example config
+loads without a murmur.
+
 The last test runs the app's real entry point against a broken file.
 """
 
@@ -13,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import stat
 import tomllib
 from pathlib import Path
 
@@ -132,6 +137,18 @@ def test_a_setting_that_is_only_an_escape_character_saves_as_empty(tmp_path) -> 
     assert cfg.load(path) == Config()
 
 
+def test_an_escape_character_in_the_name_of_a_thing_is_dropped_too(tmp_path) -> None:
+    # A camera shot's name is free text, and it's a key in the file.
+    config = Config()
+    config.cameras = [
+        CameraConfig(name="Bench", device="/dev/video20", shots={"Fa\x1bce": {"zoom": 2}})
+    ]
+    path = cfg.save(config, tmp_path / "config.toml")  # used to raise on every save
+    assert cfg.load(path).cameras == [
+        CameraConfig(name="Bench", device="/dev/video20", shots={"Face": {"zoom": 2}})
+    ]
+
+
 def test_a_lone_surrogate_does_not_break_the_save(tmp_path) -> None:
     path = tmp_path / "config.toml"
     cfg.save(_set_everywhere("keep"), path)
@@ -173,6 +190,90 @@ def test_a_save_that_would_not_load_back_leaves_the_file_alone(tmp_path, monkeyp
     assert path.read_bytes() == before
 
 
+def _leftovers(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir() if p.name != "config.toml")
+
+
+def test_a_write_that_fails_halfway_leaves_the_old_file_whole(tmp_path, monkeypatch) -> None:
+    path = cfg.save(_set_everywhere("precious"), tmp_path / "config.toml")
+    before = path.read_bytes()
+
+    class DiskFull:
+        def __init__(self, fd: int) -> None:
+            self.fd = fd
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            os.close(self.fd)
+
+        def write(self, data: bytes) -> None:
+            os.write(self.fd, data[:10])  # some of it lands, then:
+            raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(cfg.os, "fdopen", lambda fd, mode: DiskFull(fd))
+    with pytest.raises(OSError, match="No space left"):
+        cfg.save(Config(), path)
+    assert path.read_bytes() == before  # used to be ten bytes long
+    assert _leftovers(tmp_path) == []  # and nothing is left lying beside it
+
+
+def test_a_move_into_place_that_fails_leaves_the_old_file_whole(tmp_path, monkeypatch) -> None:
+    path = cfg.save(_set_everywhere("precious"), tmp_path / "config.toml")
+    before = path.read_bytes()
+
+    def refuse(src, dst):
+        raise PermissionError(13, "in use by another process")
+
+    monkeypatch.setattr(cfg.os, "replace", refuse)
+    with pytest.raises(OSError, match="in use"):
+        cfg.save(Config(), path)
+    assert path.read_bytes() == before
+    assert _leftovers(tmp_path) == []
+
+
+def test_a_good_save_leaves_nothing_beside_the_file(tmp_path) -> None:
+    cfg.save(Config(), tmp_path / "config.toml")
+    cfg.save(_set_everywhere("text"), tmp_path / "config.toml")
+    assert _leftovers(tmp_path) == []
+    assert stat.S_IMODE((tmp_path / "config.toml").stat().st_mode) in (
+        0o600,
+        0o666,
+    )  # 0666: Windows
+
+
+def test_a_config_that_is_a_link_stays_a_link(tmp_path) -> None:
+    real = tmp_path / "dotfiles" / "benchhud.toml"
+    real.parent.mkdir()
+    cfg.save(_set_everywhere("old"), real)
+    link = tmp_path / "config" / "config.toml"
+    link.parent.mkdir()
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("can't make a symlink here")
+    cfg.save(_set_everywhere("new"), link)
+    assert link.is_symlink()  # not swapped for a plain file
+    assert cfg.load(real) == _set_everywhere("new")  # what it points at is what changed
+    assert sorted(p.name for p in link.parent.iterdir()) == ["config.toml"]
+    assert sorted(p.name for p in real.parent.iterdir()) == ["benchhud.toml"]
+
+
+def test_a_file_in_a_folder_it_may_not_add_to_is_written_in_place(tmp_path) -> None:
+    if os.name == "nt" or os.geteuid() == 0:
+        pytest.skip("permissions don't keep this process out")
+    folder = tmp_path / "locked"
+    folder.mkdir()
+    path = cfg.save(_set_everywhere("old"), folder / "config.toml")
+    folder.chmod(0o500)  # the file can be written; nothing can be made beside it
+    try:
+        cfg.save(_set_everywhere("new"), path)
+        assert cfg.load(path) == _set_everywhere("new")
+    finally:
+        folder.chmod(0o700)
+
+
 def test_a_save_that_would_not_load_back_creates_nothing(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cfg.tomlkit, "dumps", lambda data: "not toml = = =\n")
     with pytest.raises(ConfigError):
@@ -210,6 +311,36 @@ def test_the_empty_list_trap_is_explained_in_plain_words(broken) -> None:
 
 
 @pytest.mark.parametrize(
+    "line",
+    ["tools = []", "tools=[]", "  tools = [ ]  ", "tools = []  # none yet", "cameras = []"],
+)
+def test_the_hint_is_given_for_an_empty_list_however_it_is_written(tmp_path, line: str) -> None:
+    name = line.split("=")[0].strip()
+    path = tmp_path / "config.toml"
+    path.write_text(f'{line}\n\n[[{name}]]\nname = "x"\ncommand = "y"\ndevice = "z"\n')
+    with pytest.raises(ConfigError) as raised:
+        cfg.load(path)
+    assert f"An earlier line sets `{name} = []`" in raised.value.reason
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        # The parser says the same words for these, and "delete that line" would be wrong.
+        'shell = {window_width = 5}\nshell.layout = "x"\n',
+        'tools = [{name = "x", command = "y"}]\n\n[[tools]]\nname = "z"\ncommand = "w"\n',
+    ],
+)
+def test_the_hint_is_not_given_where_it_would_mislead(tmp_path, content: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(content)
+    with pytest.raises(ConfigError) as raised:
+        cfg.load(path)
+    assert "Cannot mutate immutable namespace" in raised.value.reason
+    assert "delete that line" not in raised.value.reason
+
+
+@pytest.mark.parametrize(
     "content",
     [
         b"[shell\nwindow_width = 1",
@@ -229,10 +360,52 @@ def test_other_broken_files_raise_the_same_error(tmp_path, content: bytes) -> No
     assert raised.value.reason
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "x = " + "[" * 100_000 + "]" * 100_000,  # nested past the parser
+        "x = " + "9" * 5000,  # a number past what Python will read
+    ],
+)
+def test_the_parser_running_out_of_road_is_the_same_error(tmp_path, content: str) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(content)
+    with pytest.raises(ConfigError, match="can't be parsed"):
+        cfg.load(path)
+
+
+def test_a_number_too_big_for_its_field_is_just_a_bad_value(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[instruments]\npoll_interval = {'9' * 400}\nmax_current = 2.5\n")
+    config = cfg.load(path)  # used to be an OverflowError
+    assert config.instruments.poll_interval == Config().instruments.poll_interval
+    assert config.instruments.max_current == 2.5
+
+
+def test_a_byte_order_mark_is_not_an_error(tmp_path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_bytes(b"\xef\xbb\xbf" + b'[intake]\ntoken = "abc"\n')
+    assert cfg.load(path).intake.token == "abc"
+
+
+def test_from_dict_failing_anyway_is_still_the_file_s_error(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[shell]\nwindow_width = 1000\n")
+
+    def broken(data):
+        raise KeyError("something new")
+
+    monkeypatch.setattr(Config, "from_dict", staticmethod(broken))
+    with pytest.raises(ConfigError, match="isn't in the shape") as raised:
+        cfg.load(path)
+    assert raised.value.path == path
+
+
 def test_a_folder_where_the_file_should_be_is_an_error_not_defaults(tmp_path) -> None:
     (tmp_path / "config.toml").mkdir()
-    with pytest.raises(ConfigError, match="can't be read"):
+    with pytest.raises(ConfigError, match="can't be read") as raised:
         cfg.load(tmp_path / "config.toml")
+    assert str(tmp_path) not in raised.value.reason  # the path is said once, not twice
 
 
 def test_a_file_it_may_not_read_is_an_error_not_defaults(tmp_path) -> None:
@@ -287,10 +460,13 @@ def test_a_config_that_is_not_a_table_at_all_is_defaults(data) -> None:
     [
         ("shell", "window_width", "wide"),  # used to reach Qt and stop the window opening
         ("shell", "window_width", True),
-        ("shell", "window_width", 1200.5),
         ("shell", "window_width", [1200]),
+        ("shell", "window_width", float("inf")),
+        ("shell", "window_width", float("nan")),
         ("shell", "layout", 5),
-        ("output", "enabled", 1),
+        ("output", "enabled", 2),
+        ("output", "enabled", -1),
+        ("output", "enabled", 1.0),
         ("output", "enabled", "yes"),
         ("output", "device", 10),
         ("output", "fps", "15"),
@@ -298,6 +474,8 @@ def test_a_config_that_is_not_a_table_at_all_is_defaults(data) -> None:
         ("instruments", "poll_interval", "fast"),
         ("instruments", "poll_interval", True),
         ("instruments", "poll_interval", float("nan")),
+        ("instruments", "poll_interval", float("inf")),
+        ("instruments", "poll_interval", 10**400),  # too big to be a decimal at all
         ("instruments", "max_voltage", None),
         ("boards", "extensions", "obv"),
         ("boards", "extensions", ["obv", 5]),
@@ -324,6 +502,73 @@ def test_numbers_are_taken_either_way_round() -> None:
         float,
     )
     assert config.instruments.max_voltage == 12.0
+
+
+# --- what worked before still works -----------------------------------------
+
+
+def test_a_fraction_for_a_whole_number_is_cut_not_thrown_away() -> None:
+    # `fps = 29.97` ran at 29 before; resetting it to the default would be a
+    # setting silently lost on upgrade.
+    config = Config.from_dict({"output": {"fps": 29.97}, "shell": {"window_width": 1300.5}})
+    assert (config.output.fps, type(config.output.fps)) == (29, int)
+    assert (config.shell.window_width, type(config.shell.window_width)) == (1300, int)
+
+
+@pytest.mark.parametrize(
+    ("written", "means"), [(1, True), (0, False), (True, True), (False, False)]
+)
+def test_a_switch_written_as_one_or_nought_still_means_on_or_off(written, means: bool) -> None:
+    config = Config.from_dict(
+        {
+            "output": {"enabled": written},
+            "panels": {"telemetry": {"enabled": written}},
+            "now_playing": {"enabled": written},
+            "tools": [{"name": "x", "command": "y", "terminal": written}],
+        }
+    )
+    assert config.output.enabled is means
+    assert config.panels.telemetry.enabled is means
+    assert config.now_playing.enabled is means
+    assert config.tools[0].terminal is means
+
+
+def test_the_example_config_loads_without_a_single_complaint(caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.config")
+    example = Path(__file__).resolve().parent.parent / "config.example.toml"
+    cfg.load(example)
+    assert caplog.records == []
+
+
+def test_a_config_the_app_saved_loads_without_a_single_complaint(tmp_path, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.config")
+    full = _set_everywhere("text")
+    full.shell.layout = "AAAA"
+    assert cfg.load(cfg.save(full, tmp_path / "config.toml")) == full
+    assert cfg.load(cfg.save(Config(), tmp_path / "default.toml")) == Config()
+    assert caplog.records == []
+
+
+def test_a_value_that_is_dropped_is_logged_with_its_section_and_key(caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.config")
+    Config.from_dict(
+        {
+            "shell": {"window_width": "wide", "logging": {"level": 5}},
+            "panels": {"scope": {"width": "x"}},
+            "output": {"fps": 30},  # fine: not logged
+        }
+    )
+    said = sorted(record.getMessage() for record in caplog.records)
+    assert said == [
+        "config: [panels.scope] width is the wrong kind of value; using 0",
+        "config: [shell.logging] level is the wrong kind of value; using 'INFO'",
+        "config: [shell] window_width is the wrong kind of value; using 1200",
+    ]
+
+
+def test_a_saved_placement_with_no_version_is_still_the_old_placement() -> None:
+    assert Config.from_dict({"registration": {"scale": 1.5}}).registration.version == 1
+    assert Config.from_dict({"registration": 5}).registration == Config().registration
 
 
 def test_one_bad_value_does_not_cost_the_good_ones_beside_it() -> None:
@@ -434,12 +679,17 @@ def test_the_message_is_shown_without_holding_the_app_up(qtbot, broken) -> None:
     window = MainWindow(scanner=_FakeScanner())
     qtbot.addWidget(window)
     window.show()
+    from PySide6.QtCore import Qt
+
     box = config_problem.show(window, problem)  # returns straight away
     assert isinstance(box, QMessageBox)
     assert box.isVisible()
     assert box.text() == config_problem.HEADLINE
     assert box.informativeText() == config_problem.explain(problem)
     assert box.icon() == QMessageBox.Icon.Warning
+    # The path and the line can be copied out, and the box cleans up after itself.
+    assert box.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert box.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     box.close()
 
 
@@ -456,7 +706,7 @@ def test_closing_and_preferences_ok_leave_a_broken_file_alone(qtbot, broken) -> 
 
 
 def test_the_real_app_starts_on_a_broken_config_and_touches_nothing(
-    qtbot, broken, monkeypatch, capsys
+    qtbot, broken, monkeypatch, caplog
 ) -> None:
     # The entry point itself, with only the event loop and the process-wide
     # side effects (theme, signal handlers, log setup) stubbed out.
@@ -466,6 +716,7 @@ def test_the_real_app_starts_on_a_broken_config_and_touches_nothing(
     from benchhud.shell import quit_signals, theme
 
     before = broken.read_bytes()
+    caplog.set_level(logging.ERROR, logger="benchhud.app")
     monkeypatch.setenv(cfg.ENV_VAR, str(broken))
     monkeypatch.setattr(theme, "apply_theme", lambda app: None)
     monkeypatch.setattr(quit_signals, "install", lambda *args: None)
@@ -495,7 +746,10 @@ def test_the_real_app_starts_on_a_broken_config_and_touches_nothing(
     assert str(broken) in detail and "line 9" in detail
     assert seen["width"] == Config().shell.window_width  # defaults, not the file's 1000
     assert broken.read_bytes() == before
-    assert str(broken) in capsys.readouterr().err
+    # Said once in the log (which goes to the terminal), with the file and the line.
+    (said,) = [r.getMessage() for r in caplog.records if r.name == "benchhud.app"]
+    assert config_problem.HEADLINE in said
+    assert str(broken) in said and "line 9" in said
 
 
 # --- the commands ----------------------------------------------------------
@@ -513,6 +767,25 @@ def test_config_set_on_a_broken_file_changes_nothing_and_says_so(
     assert "line 9" in err
     assert "Nothing was changed." in err
     assert broken.read_bytes() == before  # not rewritten from defaults: the token is still there
+
+
+def test_config_set_that_cannot_write_says_so_and_changes_nothing(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    path = cfg.save(_set_everywhere("precious"), tmp_path / "config.toml")
+    before = path.read_bytes()
+    monkeypatch.setenv(cfg.ENV_VAR, str(path))
+
+    def refuse(src, dst):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(cfg.os, "replace", refuse)
+    code = cli_config.main(["set", "intake.base_url", "http://127.0.0.1:8401"])
+    assert code == cli_config.EXIT_BAD_CONFIG
+    err = capsys.readouterr().err
+    assert "No space left" in err
+    assert "Nothing was changed." in err
+    assert path.read_bytes() == before  # and that's true
 
 
 def test_config_set_still_works_on_a_good_file(tmp_path, monkeypatch, capsys) -> None:

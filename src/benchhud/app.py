@@ -85,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         import logging
 
         logging.getLogger(__name__).error("%s %s", config_problem.HEADLINE, problem)
-        print(f"benchhud: {config_problem.HEADLINE}\n{problem}", file=sys.stderr)
 
     from benchhud import cvthreads
 
