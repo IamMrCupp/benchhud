@@ -34,7 +34,7 @@ stream-safe as it was.
 - **No datasheet held:** the button is off and the line says which file the
   chip lists, so you know what to go and find.
 - **A datasheet found by name only** is the weaker claim — maybe another
-  revision. The line beside the button says so before it's opened, the button
+  revision. The line above the button says so before it's opened, the button
   says "(by name)", and the confirmation after opening says it again.
 
 **Only the chip's own name for a document is ever shown** — the last part of
@@ -163,7 +163,7 @@ def find_datasheet(library: DatasheetLibrary, chip: Chip) -> ChipDocument | None
 def datasheet_status(
     chip: Chip, held: ChipDocument | None, *, library_configured: bool
 ) -> tuple[str, str]:
-    """``(the line beside the button, the button's text)`` for a chip's datasheet.
+    """``(the line above the button, the button's text)`` for a chip's datasheet.
 
     A name match says it's a name match in both, so it can be told from an
     exact one before the file is opened.
@@ -302,12 +302,17 @@ class InventoryPanel(Panel):
         self.datasheet_label.setWordWrap(True)
         self.datasheet_label.setTextFormat(Qt.TextFormat.PlainText)
         self.datasheet_label.setSizePolicy(no_say_in_width)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.datasheet_button)
-        row.addWidget(self.datasheet_label, stretch=1)
+        # The line gets a row to itself, above the button: beside it, a line
+        # that wraps to three in a narrow dock had only the button's height.
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.addWidget(self.datasheet_button)
+        button_row.addStretch(1)
         self.datasheet_row = QWidget()
-        self.datasheet_row.setLayout(row)
+        rows = QVBoxLayout(self.datasheet_row)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.addWidget(self.datasheet_label)
+        rows.addLayout(button_row)
 
         self.chip_block = QWidget()
         block = QVBoxLayout(self.chip_block)
