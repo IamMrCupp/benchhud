@@ -33,7 +33,7 @@ def test_the_groups_follow_the_issue() -> None:
     groups = {g.title: g.panel_ids for g in DOCK_GROUPS}
     assert set(groups["Bench"]) == {"controls", "cameras", "jobs", "readings", "inventory"}
     assert set(groups["Tools"]) == {"launcher", "terminal", "flash", "minipro"}
-    assert set(groups["Recon"]) == {"engagement", "interfaces", "pinout", "captures"}
+    assert set(groups["Recon"]) == {"engagement", "interfaces", "pinout", "captures", "chip"}
 
 
 def test_a_lower_group_sits_under_one_placed_before_it() -> None:

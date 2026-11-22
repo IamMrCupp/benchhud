@@ -26,6 +26,8 @@ ticket system is a protocol with a fake, not a dependency.
   active bench-recon engagement, off air), `interfaces` (connected probes/
   adapters cross-mapped to assigned assets, with a manual port→asset bind),
   `pinout` (a static JTAG/SWD/UART/CAN/SPI/I²C crib beside the engagement,
+  stream-safe), `chip` (one chip from the chip reference as a card — part
+  number, maker, package, function, marks — looked up off the GUI thread,
   stream-safe), `captures` (firmware-dump / capture artifact metadata by ref,
   off air), plus `telemetry` (superseded by
   `power`, class retained).

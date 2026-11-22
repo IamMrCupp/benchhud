@@ -144,6 +144,7 @@ from benchhud.shell.icon import app_icon
 from benchhud.shell.panel_manager import PanelManager
 from benchhud.shell.panels.cameras import CamerasPanel
 from benchhud.shell.panels.capture import CapturePanel
+from benchhud.shell.panels.chip import ChipPanel
 from benchhud.shell.panels.controls import ControlsPanel
 from benchhud.shell.panels.engagement import EngagementPanel
 from benchhud.shell.panels.flash import FlashPanel
@@ -528,6 +529,8 @@ class MainWindow(QMainWindow):
         self.panels.add_panel(self.interface_panel, None)
         self.pinout_panel = PinoutPanel(active_ref=lambda: self._active_engagement)
         self.panels.add_panel(self.pinout_panel, None)
+        self.chip_panel = ChipPanel(lambda: self._chip_source)
+        self.panels.add_panel(self.chip_panel, None)
         self.capture_panel = CapturePanel(
             lambda: self._recon_source,
             active_ref=lambda: self._active_engagement,
@@ -963,6 +966,7 @@ class MainWindow(QMainWindow):
             warm_chip_source(self._chip_source)
         else:
             self._chip_source = self._make_chip_source()
+        self.chip_panel.refresh()
 
     def open_board_file(self, path) -> bool:
         """Open a board file in the configured viewer (or the OS handler)."""

@@ -15,6 +15,8 @@ The harness makes four kinds of check, strongest guarantee first:
 * **Panel policy** (``panel_policy``) — the recon panels still carry the intended
   sensitivity tags (engagement/capture sensitive; interfaces/pinout stream-safe),
   so the enforcement above is applied to the right surfaces. Also network-free.
+  The chip reference panel is held to the same check: it draws generic reference
+  only, so it is stream-safe like the pinout crib.
 * **Projection boundary** (``check_projection``) — the live API returns only
   ref-safe fields. Any key outside the whitelist is a leak: this is where "the
   client, scope, authorization, targets and findings stay in bench-recon" is
@@ -247,22 +249,24 @@ def on_air_enforcement(
 ) -> list[Check]:
     """Prove ``compose_on_air`` drops sensitive layers' bytes from the sink frame.
 
-    Builds the layer set the recon panels would offer the compositor — tagged per
-    their real policy — and inspects the two frames the choke point produces: the
-    ``on_air`` frame handed to the sink and the local ``preview``. A sensitive
-    layer's tracer must be absent from ``on_air`` and present on ``preview``; a
-    stream-safe layer's tracer must reach ``on_air``.
+    Builds the layer set the recon panels and the chip reference panel would
+    offer the compositor — tagged per their real policy — and inspects the two
+    frames the choke point produces: the ``on_air`` frame handed to the sink and
+    the local ``preview``. A sensitive layer's tracer must be absent from
+    ``on_air`` and present on ``preview``; a stream-safe layer's tracer must
+    reach ``on_air``.
 
     The counts only label the checks with the live engagement they were run
     against; the proof itself is deterministic and needs no network, so this
     check runs even when a service is down.
     """
-    # (name, sensitive, tracer value, row) — mirrors the recon panels' policy.
+    # (name, sensitive, tracer value, row) — mirrors the panels' policy.
     specs = [
         (f"engagement[{engagement_ref or '—'}]", True, 11, 0),
         (f"captures[{artifact_count}]", True, 22, 1),
         (f"interfaces[{asset_count}]", False, 33, 2),
         ("pinout", False, 44, 3),
+        ("chip", False, 55, 4),
     ]
     layers = [_stamp_layer(name, sens, val, row) for name, sens, val, row in specs]
 
@@ -308,8 +312,9 @@ def on_air_enforcement(
 
 
 def panel_policy() -> list[Check]:
-    """Assert the recon panels still carry their intended sensitivity tags."""
+    """Assert the recon panels, and the chip panel, still carry their intended tags."""
     from benchhud.shell.panels.capture import CapturePanel
+    from benchhud.shell.panels.chip import ChipPanel
     from benchhud.shell.panels.engagement import EngagementPanel
     from benchhud.shell.panels.interfaces import InterfacePanel
     from benchhud.shell.panels.pinout import PinoutPanel
@@ -319,6 +324,7 @@ def panel_policy() -> list[Check]:
         (CapturePanel, True),
         (InterfacePanel, False),
         (PinoutPanel, False),
+        (ChipPanel, False),
     ]
     checks: list[Check] = []
     for cls, want in policy:
