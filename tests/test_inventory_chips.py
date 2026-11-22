@@ -258,7 +258,7 @@ def test_a_datasheet_that_will_not_open_is_said_not_swallowed(qtbot, tmp_path) -
     _select(panel, "EX1234QFN")
     panel.datasheet_button.click()
     assert panel.message_label.text() == "Couldn't open EX1234.pdf."
-    assert "d9534f" in panel.message_label.styleSheet()  # shown as an error
+    assert panel.message_label.property("tone") == "error"  # shown as an error
 
 
 _LISTED = _BUCK.documents[0]

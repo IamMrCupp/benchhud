@@ -30,17 +30,21 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QByteArray, QChildEvent, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QCloseEvent,
+    QDesktopServices,
     QGuiApplication,
     QKeySequence,
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QTabBar,
     QWidget,
@@ -78,7 +82,7 @@ from benchhud.chips.datasheets import DatasheetLibrary
 from benchhud.chips.model import Chip, Document
 from benchhud.chips.opening import open_held
 from benchhud.chips.source import ChipSource
-from benchhud.config import Config, OutputConfig, PersistCallback
+from benchhud.config import Config, OutputConfig, PersistCallback, default_config_path
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import (
     SERIAL_BY_ID_DIR,
@@ -166,10 +170,11 @@ from benchhud.shell.panels.thermal import ThermalPanel
 from benchhud.shell.preferences import PreferencesDialog
 from benchhud.shell.qt_util import unelide_tabs
 from benchhud.shell.signature_image import render_signature
-from benchhud.shell.theme import style_headings
+from benchhud.shell.theme import apply_theme, style_headings
 from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
+from benchhud.themes import load_themes, normalise_choice, themes_dir
 from benchhud.tickets import HttpTicketSource, NullTicketSource, TicketSource
 
 # How often the frame loop runs with the virtual camera off. With it on, the
@@ -363,9 +368,12 @@ class MainWindow(QMainWindow):
         terminal_view_factory: ViewFactory | None = None,
         terminal_session_factory=None,
         control_file: Path | None = None,
+        themes_folder: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        #: Where View > Appearance looks for theme files (benchhud.themes).
+        self.themes_folder = themes_folder or themes_dir(default_config_path())
         #: Where the job-control token is written for ``benchhud job …`` (#433).
         #: None (the default, and what tests get) leaves job control off.
         self._control_file = control_file
@@ -786,10 +794,91 @@ class MainWindow(QMainWindow):
         menu.addAction(self.reset_layout_action)
 
         menu.addSeparator()
+        self.appearance_menu = menu.addMenu("Appearance")
+        # Filled each time it opens, so a theme file dropped in the folder
+        # shows up without a restart, the way the web tools pick one up on
+        # the next page load.
+        self.appearance_menu.aboutToShow.connect(self.fill_appearance_menu)
+        self.fill_appearance_menu()
+        QGuiApplication.styleHints().colorSchemeChanged.connect(self._system_scheme_changed)
+
+        menu.addSeparator()
         self.demo_action = QAction("Demo mode", self)
         self.demo_action.setCheckable(True)
         self.demo_action.toggled.connect(self.set_demo_mode)
         menu.addAction(self.demo_action)
+
+    # --- appearance -------------------------------------------------------
+
+    def fill_appearance_menu(self) -> None:
+        """System, Light, Dark, the themes in the folder, and the folder itself."""
+        menu: QMenu = self.appearance_menu
+        menu.clear()
+        themes, broken = load_themes(self.themes_folder)
+        current = normalise_choice(self._config.shell.appearance)
+        group = QActionGroup(menu)
+        #: Choice (``"dark"``, ``"theme:amber.json"``) → its menu entry.
+        self.appearance_actions: dict[str, QAction] = {}
+
+        def add(choice: str, label: str, tip: str = "") -> None:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(choice == current)
+            action.setToolTip(tip)
+            action.triggered.connect(lambda _=False, c=choice: self.set_appearance(c))
+            group.addAction(action)
+            self.appearance_actions[choice] = action
+
+        add("system", "System", "Light or dark, following the operating system")
+        add("light", "Light")
+        add("dark", "Dark")
+        if themes:
+            menu.addSection("Themes")
+            for theme in themes:
+                tip = "; ".join(theme.ignored) or f"{theme.id}, over the {theme.base} look"
+                add(theme.choice, theme.name, tip)
+        if broken:
+            menu.addSection("Can't be used")
+            for problem in broken:
+                action = menu.addAction(f"{problem.file}: {problem.reason}")
+                action.setEnabled(False)
+        menu.setToolTipsVisible(True)
+        menu.addSeparator()
+        open_folder = menu.addAction("Open themes folder")
+        open_folder.setToolTip(str(self.themes_folder))
+        open_folder.triggered.connect(self.open_themes_folder)
+
+    def set_appearance(self, choice: str) -> None:
+        """Switch the look now, and keep it for next time."""
+        self._config.shell.appearance = normalise_choice(choice)
+        self._apply_appearance()
+        if self._on_persist is not None:
+            self._on_persist(self._config)
+
+    def _apply_appearance(self) -> None:
+        app = QApplication.instance()
+        if not isinstance(app, QApplication):
+            return
+        themes, _ = load_themes(self.themes_folder)
+        apply_theme(app, self._config.shell.appearance, themes)
+        # Rows that colour their own text aren't reached by the stylesheet.
+        self.readings_panel.refresh()
+        self.inventory_panel.recolour()
+
+    def _system_scheme_changed(self) -> None:
+        if normalise_choice(self._config.shell.appearance) == "system":
+            self._apply_appearance()
+
+    def open_themes_folder(self) -> None:
+        """Open the themes folder in the file manager, making it first if need be."""
+        try:
+            self.themes_folder.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Themes folder", f"Couldn't make {self.themes_folder}:\n{exc}"
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.themes_folder)))
 
     def reset_layout(self) -> None:
         """Restore the default dock arrangement and drop the saved layout."""

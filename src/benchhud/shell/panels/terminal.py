@@ -73,13 +73,11 @@ class TerminalPanel(Panel):
 
         self.on_air = QLabel("● ON STREAM")
         self.on_air.setObjectName("TerminalOnAir")
-        self.on_air.setStyleSheet("color: #ff5a5a; font-weight: bold;")
         self.on_air.setToolTip("The read-only terminal view is live in OBS")
         # A raw serial console is sensitive: it can never be shared to the stream,
         # so instead of the ON STREAM / Pause controls it shows why (#174).
         self.off_air = QLabel("● OFF AIR — serial console (sensitive)")
         self.off_air.setObjectName("TerminalOffAir")
-        self.off_air.setStyleSheet("color: #8aa0b6; font-weight: bold;")
         self.off_air.setToolTip("A raw serial console can leak secrets, so it never goes on air")
         self.off_air.setVisible(False)
         self.pause_button = QPushButton("Pause stream")

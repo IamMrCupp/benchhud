@@ -718,7 +718,7 @@ def test_the_real_app_starts_on_a_broken_config_and_touches_nothing(
     before = broken.read_bytes()
     caplog.set_level(logging.ERROR, logger="benchhud.app")
     monkeypatch.setenv(cfg.ENV_VAR, str(broken))
-    monkeypatch.setattr(theme, "apply_theme", lambda app: None)
+    monkeypatch.setattr(theme, "apply_theme", lambda app, *args: None)
     monkeypatch.setattr(quit_signals, "install", lambda *args: None)
     monkeypatch.setattr(logging_setup, "configure_logging", lambda level: None)
     seen: dict[str, object] = {}

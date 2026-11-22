@@ -15,6 +15,10 @@ window_width = 1600
 window_height = 900
 # The dockable panel layout is persisted by the app as an opaque blob under
 # [shell] as `layout`; you normally don't edit it by hand.
+# The look: "system" (light or dark, following the OS), "light", "dark", or
+# "theme:<file>" for a burnwright-format theme in the themes folder beside
+# this file. Easiest picked from View > Appearance.
+appearance = "dark"
 
 [shell.logging]
 level = "INFO" # DEBUG | INFO | WARNING | ERROR

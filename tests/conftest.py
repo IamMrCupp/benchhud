@@ -15,6 +15,9 @@ from pathlib import Path
 # opens a real one on a desktop, where macOS files it in the Dock as "python"
 # (#448). A run that wants to watch can still set the variable itself.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Never read the developer's own themes folder: a test that wants themes
+# points the window at a tmp_path of its own.
+os.environ.setdefault("BENCHHUD_THEMES_DIR", os.path.join(os.devnull, "no-themes"))
 
 import pytest
 

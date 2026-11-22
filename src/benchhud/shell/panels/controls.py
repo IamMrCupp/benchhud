@@ -36,7 +36,7 @@ from benchhud.overlay.config_adapter import (
 from benchhud.overlay.reference import CompareMode, ReferenceSettings
 from benchhud.overlay.transform import RegistrationTransform
 from benchhud.shell.panel import PANEL_MARGINS, Panel
-from benchhud.shell.qt_util import card, fit_combo_popup, hint, notice
+from benchhud.shell.qt_util import card, fit_combo_popup, hint, notice, set_tone
 
 
 class ControlsPanel(Panel):
@@ -254,13 +254,13 @@ class ControlsPanel(Panel):
 
     def show_reference(self, text: str, *, error: bool = False) -> None:
         self.reference_status.setText(text)
-        self.reference_status.setStyleSheet("color: #ff7a7a;" if error else "")
+        set_tone(self.reference_status, "error" if error else None)
 
     def show_calibration(self, text: str, *, error: bool = False) -> None:
         """Calibration's step-by-step prompt (empty hides it)."""
         self.calibration_status.setText(text)
         self.calibration_status.setVisible(bool(text))
-        self.calibration_status.setStyleSheet("color: #ff7a7a;" if error else "")
+        set_tone(self.calibration_status, "error" if error else None)
 
     def turn(self, quarter_turns: int) -> None:
         """Turn the thermal by 90° steps; the fit follows, so it still fills the view."""

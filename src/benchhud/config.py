@@ -71,6 +71,9 @@ class ShellConfig:
     # Which default-arrangement version produced `layout`. A saved layout from
     # an older default is ignored so a new default isn't silently overridden.
     layout_version: int = 0
+    # "system", "light", "dark", or "theme:<file>" for a theme file in the
+    # themes folder (see benchhud.themes). Dark until someone picks otherwise.
+    appearance: str = "dark"
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
@@ -541,7 +544,7 @@ class Config:
             "shell",
             cfg.shell,
             shell_d,
-            ("window_width", "window_height", "layout", "layout_version"),
+            ("window_width", "window_height", "layout", "layout_version", "appearance"),
         )
         _apply("shell.logging", cfg.shell.logging, _table(shell_d, "logging"), ("level",))
 
