@@ -356,6 +356,10 @@ def test_events_stream_over_http(served) -> None:
     conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
     conn.request("GET", f"/terminal/events?token={host.write_token}")
     response = conn.getresponse()
+    # The feed opens by naming the build, so a stream page left open in OBS
+    # across an upgrade knows to reload (#501).
+    opening = [response.fp.readline().decode() for _ in range(3)]
+    assert opening == ["event: build\n", f"data: {server.build}\n", "\n"]
     seen = []
     while not any(e.get("t") == "data" for e in seen):
         line = response.fp.readline().decode()
@@ -364,6 +368,24 @@ def test_events_stream_over_http(served) -> None:
     assert seen[0] == {"t": "hello", "mode": "write"}
     assert _text(seen) == "hello from the shell"
     conn.close()
+
+
+@pytest.mark.parametrize("token", ["write_token", "share_token"])
+def test_the_terminal_page_is_stamped_and_opens_its_feed_through_panel_js(served, token) -> None:
+    """The stream view's link is kept across launches, so OBS holds that page
+    through an upgrade exactly as it holds a panel's (#501).
+
+    This checks the wiring only. What ``openFeed`` does is tested in
+    test_panel_js.py; the page itself was run in a real browser, not here.
+    """
+    host, server = served
+    status, body = _request(server, "GET", f"/terminal?token={getattr(host, token)}")
+    assert status == 200
+    page = body.decode()
+    assert f'<meta name="benchhud-build" content="{server.build}">' in page
+    assert '<script src="/static/panel.js"></script>' in page
+    assert "openFeed(\n  `/terminal/events${query}`," in page
+    assert "new EventSource" not in page  # no feed of its own that would skip the check
 
 
 # --- the panel and the window ---------------------------------------------------------------

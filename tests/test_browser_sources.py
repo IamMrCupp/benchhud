@@ -15,6 +15,7 @@ import threading
 import pytest
 
 from benchhud.browser_sources import PANELS, BrowserSourceServer, TopicHub
+from benchhud.browser_sources import server as server_module
 from benchhud.browser_sources.payloads import (
     JOB_FIELDS,
     graph_payload,
@@ -147,13 +148,46 @@ def _get(server: BrowserSourceServer, path: str, host: str | None = None):
     return response, body
 
 
-def _read_event(response) -> dict:
-    """Read one ``data:`` event off an SSE response, skipping heartbeats."""
+def _read_raw_event(response) -> tuple[str, str]:
+    """Read one event off an SSE response as ``(name, data)``, skipping heartbeats.
+
+    An event with no ``event:`` line is a ``message``, as it is to a browser.
+    """
+    name = "message"
     while True:
         line = response.fp.readline().decode()
-        if line.startswith("data: "):
+        if not line:
+            raise AssertionError("the stream ended")
+        if line.startswith("event: "):
+            name = line[7:].strip()
+        elif line.startswith("data: "):
             response.fp.readline()  # the blank line that ends the event
-            return json.loads(line[6:])
+            return name, line[6:].rstrip("\n")
+        elif not line.strip():
+            name = "message"
+
+
+def _read_event(response) -> dict:
+    """Read the next event a page's ``onmessage`` would get, as that page does."""
+    while True:
+        name, data = _read_raw_event(response)
+        if name == "message":
+            return json.loads(data)
+
+
+def _open_stream(server: BrowserSourceServer, path: str):
+    conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=5)
+    conn.request("GET", path)
+    return conn, conn.getresponse()
+
+
+_STAMP = re.compile(r'<meta name="benchhud-build" content="([0-9a-z]+)">')
+
+
+def _stamp_of(page: bytes) -> str:
+    found = _STAMP.findall(page.decode())
+    assert len(found) == 1, found
+    return found[0]
 
 
 @pytest.mark.parametrize("panel", list(PANELS))
@@ -264,12 +298,147 @@ def test_events_send_the_current_value_then_each_new_one(served) -> None:
     conn.close()
 
 
+# --- a page left open reloads after an upgrade (#501) -----------------------
+
+
+def test_the_build_is_a_short_stable_hash() -> None:
+    build = server_module.page_build()
+    assert re.fullmatch(r"[0-9a-f]{16}", build)
+    server_module.page_build.cache_clear()
+    assert server_module.page_build() == build
+
+
+def test_the_build_covers_every_file_a_page_is_made_of() -> None:
+    covered = set(server_module._page_files())
+    assert {f"web/{name}.html" for name in PANELS} <= covered
+    assert "web/terminal.html" in covered
+    assert {resource for resource, _ in server_module._STATIC.values()} <= covered
+
+
+@pytest.mark.parametrize("changed", server_module._page_files())
+def test_changing_any_page_file_changes_the_build(monkeypatch, changed) -> None:
+    before = server_module.page_build()
+    real = server_module._resource
+    monkeypatch.setattr(
+        server_module,
+        "_resource",
+        lambda path: real(path) + b"\n" if path == changed else real(path),
+    )
+    server_module.page_build.cache_clear()
+    try:
+        assert server_module.page_build() != before
+    finally:
+        monkeypatch.undo()
+        server_module.page_build.cache_clear()
+
+
+def test_moving_bytes_between_files_changes_the_build(monkeypatch) -> None:
+    """Each file is hashed with its name and length, not run together."""
+    first, second = server_module._page_files()[:2]
+    real = server_module._resource
+    before = server_module.page_build()
+
+    def moved(path: str) -> bytes:
+        if path == first:
+            return real(first)[:-1]
+        if path == second:
+            return real(first)[-1:] + real(second)
+        return real(path)
+
+    monkeypatch.setattr(server_module, "_resource", moved)
+    server_module.page_build.cache_clear()
+    try:
+        assert server_module.page_build() != before
+    finally:
+        monkeypatch.undo()
+        server_module.page_build.cache_clear()
+
+
+@pytest.mark.parametrize("panel", list(PANELS))
+def test_every_panel_page_is_stamped_with_the_servers_build(served, panel) -> None:
+    _, server = served
+    _, page = _get(server, f"/panel/{panel}")
+    assert _stamp_of(page) == server.build == server_module.page_build()
+    # The stamp is in the head, before the script that reads it.
+    text = page.decode()
+    assert text.index("benchhud-build") < text.index("/static/panel.js")
+
+
+@pytest.mark.parametrize("panel", list(PANELS))
+def test_every_feed_opens_by_naming_the_build(served, panel) -> None:
+    hub, server = served
+    hub.publish(panel, {"n": 1})
+    conn, response = _open_stream(server, f"/events/{panel}")
+    assert _read_raw_event(response) == ("build", server.build)
+    assert _read_raw_event(response) == ("message", '{"n": 1}')
+    conn.close()
+
+
+def test_the_build_comes_even_before_anything_is_published(served) -> None:
+    """A page mustn't wait for the first reading to learn it's stale."""
+    _, server = served
+    conn, response = _open_stream(server, "/events/job")
+    assert _read_raw_event(response) == ("build", server.build)
+    conn.close()
+
+
+def test_the_build_is_a_named_event_an_older_page_never_sees(served) -> None:
+    """A page from before this has only ``onmessage``, which gets unnamed events."""
+    hub, server = served
+    hub.publish("meter", {"n": 1})
+    conn, response = _open_stream(server, "/events/meter")
+    raw = response.fp.readline() + response.fp.readline() + response.fp.readline()
+    assert raw == f"event: build\ndata: {server.build}\n\n".encode()
+    assert _read_event(response) == {"n": 1}
+    conn.close()
+
+
+def test_after_an_upgrade_the_same_address_serves_and_announces_the_new_build(served) -> None:
+    """What a page left open in OBS meets: same port, different benchhud."""
+    hub, server = served
+    port = server.port
+    _, old_page = _get(server, "/panel/job")
+    server.stop()
+
+    upgraded = BrowserSourceServer(hub, port)
+    upgraded.build = "0123456789abcdef"
+    upgraded.start()
+    try:
+        conn, response = _open_stream(upgraded, "/events/job")
+        announced = _read_raw_event(response)
+        conn.close()
+        assert announced == ("build", "0123456789abcdef")
+        assert announced[1] != _stamp_of(old_page)  # so the old page reloads
+        _, new_page = _get(upgraded, "/panel/job")
+        assert _stamp_of(new_page) == announced[1]  # and the new one doesn't
+    finally:
+        upgraded.stop()
+
+
+def test_every_page_has_one_place_for_the_stamp() -> None:
+    for path in server_module._page_files():
+        if path.endswith(".html"):
+            assert server_module._resource(path).count(b'<meta charset="utf-8">') == 1, path
+
+
+def test_a_page_with_nowhere_to_put_the_stamp_is_an_error() -> None:
+    with pytest.raises(ValueError, match="charset"):
+        server_module.stamp(b"<!doctype html><title>x</title>", "abc")
+
+
+def test_stamping_changes_nothing_else() -> None:
+    page = server_module._resource("web/job.html")
+    stamped = server_module.stamp(page, "abc")
+    assert stamped.replace(b'\n<meta name="benchhud-build" content="abc">', b"") == page
+
+
 def test_stop_ends_open_streams_and_frees_the_port(served) -> None:
     hub, server = served
     port = server.port
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     conn.request("GET", "/events/graph")
     response = conn.getresponse()
+    assert _read_raw_event(response) == ("build", server.build)  # the opening line
     server.stop()
     assert response.fp.read() == b""  # the stream closed rather than hanging
     conn.close()

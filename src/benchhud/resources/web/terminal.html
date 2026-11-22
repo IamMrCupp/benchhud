@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="/static/xterm.css">
 <script src="/static/xterm.js"></script>
 <script src="/static/addon-fit.js"></script>
+<script src="/static/panel.js"></script>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
   #term { position: absolute; inset: 0; }
@@ -121,16 +122,20 @@ const handlers = {
   live() { document.body.classList.remove("hidden-output"); banner.textContent = ""; },
 };
 
-const events = new EventSource(`/terminal/events${query}`);
-events.onmessage = (message) => {
-  const event = JSON.parse(message.data);
-  const handler = handlers[event.t];
-  if (handler) handler(event);
-};
-events.onerror = () => {
-  // EventSource retries by itself; hide stale output meanwhile.
-  if (mode === "share") handlers.off();
-};
+// openFeed is panel.js's: the stream view stays loaded in OBS across an upgrade,
+// and reloads itself when the benchhud behind it has changed (#501).
+openFeed(
+  `/terminal/events${query}`,
+  (message) => {
+    const event = JSON.parse(message.data);
+    const handler = handlers[event.t];
+    if (handler) handler(event);
+  },
+  () => {
+    // EventSource retries by itself; hide stale output meanwhile.
+    if (mode === "share") handlers.off();
+  },
+);
 </script>
 </body>
 </html>
