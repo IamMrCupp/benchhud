@@ -36,6 +36,19 @@ off, and the dialog says why.
 else may have written. Every label that shows it is plain-text, and none of it
 goes into a tooltip, which Qt would render as markup.
 
+**Link-outs are a click, and can be locked.** When your own data doesn't have
+the chip, the mark can be looked up on a marking site, and a document can be
+opened where its maker publishes it (:mod:`benchhud.chips.linkout`). Either
+tells a third party what's on the bench. So an address is only ever handed to
+the browser by a click on a button that names the host — never as you type —
+and only what's typed, or the document's own address, goes with it. The
+caller says whether linking out is allowed right now, the way it supplies the
+datasheet opener; the main window answers no while a recon engagement is
+active. **With nothing to ask, the answer is no**: a button that's wrongly off
+costs a trip to the browser by hand, one that's wrongly on names a client's
+part to a stranger. The question is asked again at every click. benchhud
+itself still makes no network request.
+
 Read-only, and nothing raises into the HUD: a source or an opener that fails
 gets a log line and a plain message.
 
@@ -57,6 +70,7 @@ from PySide6.QtGui import QFont, QFontDatabase, QKeyEvent, QShowEvent
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -70,9 +84,17 @@ from PySide6.QtWidgets import (
 )
 
 from benchhud.chips.find import Candidate, find_chips
+from benchhud.chips.linkout import (
+    MARKING_SITES,
+    MarkingSite,
+    WebAddress,
+    document_address,
+    sendable,
+)
 from benchhud.chips.marking import MatchKind, normalise_mark
 from benchhud.chips.model import Chip, Document, Substitute
 from benchhud.chips.source import ChipSource, NullChipSource
+from benchhud.shell.browser import open_in_browser
 from benchhud.shell.qt_util import hint, notice, set_tone
 
 log = logging.getLogger(__name__)
@@ -98,6 +120,12 @@ OpenDocument = Callable[[Chip, Document | None], OpenOutcome | bool]
 #: Runs a job off the GUI thread.
 Executor = Callable[[Callable[[], None]], None]
 
+#: "May this window link out right now?" Asked on the GUI thread at every
+#: click and whenever the buttons are redrawn, so it has to be quick.
+LinkOutAllowed = Callable[[], bool]
+#: Hands an address to the operator's browser; true when it was taken.
+OpenUrl = Callable[[str], object]
+
 #: How long typing has to pause before a lookup starts.
 DEBOUNCE_MS = 120
 #: A lookup slower than this says it's still looking.
@@ -114,6 +142,16 @@ NO_OPENER = "No datasheet folder is set up, so there's nothing to open."
 PROMPT = "Type the mark printed on the chip, or a part number in full."
 NOT_PICKED = "Nothing picked — ↓ moves through the candidates."
 NOT_PICKED_ENTER = NOT_PICKED[:-1] + ", Enter opens the picked one's datasheet."
+
+LINK_OUT_LOCKED = (
+    "Web lookups are off while a recon engagement is active — "
+    "they'd tell an outside site what's on the bench."
+)
+LINK_OUT_UNWIRED = "Web lookups are off: nothing has told this window they're allowed."
+WEB_PROMPT = "Type a mark to look it up on the marking sites."
+NOT_SENDABLE = "Only a plain mark, of 40 characters at most, is sent to a marking site."
+NO_MAKERS_PAGE = "No maker's page is listed for this."
+REFUSED_ADDRESS = "The address listed isn't a plain https:// one, so it isn't opened."
 
 _COLUMNS = ("Part number", "Maker", "Package", "Functions", "Mark", "Match")
 _MARK_COLUMN = 4
@@ -196,6 +234,9 @@ class FindChipDialog(QDialog):
         *,
         configured: bool | None = None,
         open_unavailable: str = NO_OPENER,
+        link_out_allowed: LinkOutAllowed | None = None,
+        link_out_locked: str = LINK_OUT_LOCKED,
+        open_url: OpenUrl = open_in_browser,
         executor: Executor = _thread_executor,
         parent: QWidget | None = None,
     ) -> None:
@@ -208,6 +249,9 @@ class FindChipDialog(QDialog):
         self._configured = configured
         self._open_document = open_document
         self._open_unavailable = open_unavailable
+        self._link_out_allowed = link_out_allowed
+        self._link_out_locked = link_out_locked
+        self._open_url = open_url
         self._executor = executor
 
         self._wanted = ""  # what's typed now
@@ -222,6 +266,8 @@ class FindChipDialog(QDialog):
         self._detail_key: str | None = None  # the chip in the detail pane
         self._opening = False
         self._opening_from = ""  # the box's text when the opener started
+        # What became of the last link-out, until the text or the pick moves on.
+        self._web_said: tuple[str, str | None] | None = None
 
         # Fixed pitch wherever a mark is shown: 0/O and 1/l/I matter on one.
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
@@ -273,6 +319,7 @@ class FindChipDialog(QDialog):
         self.details.setAllColumnsShowFocus(True)
         self.details.header().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.details.itemDoubleClicked.connect(lambda item, _column: self._activate_detail(item))
+        self.details.currentItemChanged.connect(lambda *_: self._refresh_web())
 
         detail_pane = QWidget()
         detail_layout = QVBoxLayout(detail_pane)
@@ -302,11 +349,29 @@ class FindChipDialog(QDialog):
         if open_document is None:
             hint(self.open_label).setText(open_unavailable)
 
+        # The link-outs: one button per marking site, named for the host it
+        # opens, and a line that says what would be sent — or why they're off.
+        self.web_label = _data_label(QLabel())
+        self.site_buttons: list[QPushButton] = []
+        web_row = QHBoxLayout()
+        web_row.addWidget(self.web_label, 1)
+        for site in MARKING_SITES:
+            site_button = QPushButton(site.host)
+            # Never the dialog's default: Enter must not be able to link out.
+            site_button.setAutoDefault(False)
+            site_button.setDefault(False)
+            site_button.clicked.connect(lambda _checked=False, site=site: self.search_on(site))
+            self.site_buttons.append(site_button)
+            web_row.addWidget(site_button)
+        self.maker_button = QPushButton("Maker's page")
+        self.maker_button.clicked.connect(self.open_makers_page)
+
         self.open_button = QPushButton("Open datasheet")
         self.open_button.clicked.connect(self.open_selected)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         buttons.addButton(self.open_button, QDialogButtonBox.ButtonRole.ActionRole)
+        buttons.addButton(self.maker_button, QDialogButtonBox.ButtonRole.ActionRole)
         # Enter belongs to the picked candidate, from the box and from either
         # list (see eventFilter). No button may claim it as the dialog's default.
         for button in buttons.buttons():
@@ -320,6 +385,7 @@ class FindChipDialog(QDialog):
         layout.addWidget(splitter, 1)
         layout.addWidget(self.status_label)
         layout.addWidget(self.open_label)
+        layout.addLayout(web_row)
         layout.addWidget(buttons)
 
         self.setTabOrder(self.query_edit, self.tree)
@@ -392,6 +458,14 @@ class FindChipDialog(QDialog):
         if not event.spontaneous():
             self.query_edit.setFocus()
             self.query_edit.selectAll()
+        self._refresh_web()  # an engagement may have started while this was away
+
+    def changeEvent(self, event: QEvent) -> None:
+        """Coming back to the window asks again whether link-outs are allowed:
+        the operator may have just started an engagement in the main window."""
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            self._refresh_web()
 
     def _enter(self) -> None:
         """Enter is the next step: look up, then pick, then open."""
@@ -433,6 +507,8 @@ class FindChipDialog(QDialog):
     def _on_text_changed(self) -> None:
         self._wanted = normalise_mark(self.query_edit.text())
         self._pending_move = 0
+        self._web_said = None
+        self._refresh_web()  # builds addresses for the buttons; sends nothing
         if not self._configured:
             return
         if not self._wanted:
@@ -586,8 +662,10 @@ class FindChipDialog(QDialog):
     def _on_selection(self) -> None:
         candidate = self.selected()
         key = None if candidate is None else candidate.chip.key
-        if key != self._detail_key and not self._opening:
-            self._say_open("")  # what was said was about another chip
+        if key != self._detail_key:
+            self._web_said = None  # what was said was about another chip
+            if not self._opening:
+                self._say_open("")
         self._detail_key = key
 
         self.details.clear()
@@ -608,6 +686,7 @@ class FindChipDialog(QDialog):
                     self.found_label, "This chip's details can't be shown — the log has the reason."
                 )
         self._refresh_open_button()
+        self._refresh_web()
 
     def _show_chip(self, candidate: Candidate) -> None:
         chip = candidate.chip
@@ -629,7 +708,7 @@ class FindChipDialog(QDialog):
             "Documents",
             [
                 (
-                    (d.kind, d.filename, _pages(d)),
+                    (d.kind, d.filename, _document_facts(d)),
                     d,
                     "Enter opens this document." if can_open else self._open_unavailable,
                 )
@@ -788,6 +867,137 @@ class FindChipDialog(QDialog):
         if self.query_edit.text() == self._opening_from:
             self.query_edit.selectAll()  # done with this one: the next mark types over it
 
+    # --- linking out ------------------------------------------------------------
+
+    def _may_link_out(self) -> bool:
+        """Whether an address may go to the browser right now.
+
+        Asked fresh every time, never remembered: an engagement can start
+        while the window is open. No one to ask, or an answer that raises, is
+        a no.
+        """
+        if self._link_out_allowed is None:
+            return False
+        try:
+            return bool(self._link_out_allowed())
+        except Exception:
+            log.exception("chip finder: asking whether to link out failed")
+            return False
+
+    def _locked_reason(self) -> str:
+        return LINK_OUT_UNWIRED if self._link_out_allowed is None else self._link_out_locked
+
+    def _makers_page(self) -> tuple[WebAddress | None, str]:
+        """The address **Maker's page** would open, or why there isn't one.
+
+        The document picked in the detail list when one is; otherwise the
+        first of the chip's documents that says where its maker has it.
+        """
+        candidate = self.selected()
+        if candidate is None:
+            return None, "Pick a candidate first."
+        item = self.details.currentItem()
+        row = None if item is None else item.data(0, Qt.ItemDataRole.UserRole)
+        documents = [row] if isinstance(row, Document) else list(candidate.chip.documents)
+        listed = False
+        for document in documents:
+            address = document_address(document)
+            if address is not None:
+                return address, ""
+            listed = listed or bool(getattr(document, "url", None))
+        return None, REFUSED_ADDRESS if listed else NO_MAKERS_PAGE
+
+    def _refresh_web(self) -> None:
+        """Redraw the link-out buttons and their line. Builds addresses; opens nothing."""
+        allowed = self._may_link_out()
+        locked = self._locked_reason()
+        typed = normalise_mark(self.query_edit.text())
+        mark = sendable(typed)
+        for site, button in zip(MARKING_SITES, self.site_buttons, strict=True):
+            address = site.address(typed) if allowed else None
+            button.setEnabled(address is not None)
+            if not allowed:
+                tip = locked
+            elif not typed:
+                tip = "Type a mark first."
+            elif mark is None:
+                tip = NOT_SENDABLE
+            else:
+                tip = site.does if address is not None else site.cant
+            button.setToolTip(tip)  # the dialog's own words: never what's typed
+
+        page, why_not = self._makers_page()
+        self.maker_button.setEnabled(allowed and page is not None)
+        if not allowed:
+            self.maker_button.setToolTip(locked)
+        elif page is None:
+            self.maker_button.setToolTip(why_not)
+        else:
+            # The host passed linkout's check: letters, digits, dots, hyphens.
+            self.maker_button.setToolTip(
+                f"Opens {page.host} in your browser — where this document's maker publishes it."
+            )
+
+        if self._web_said is not None:
+            text, tone = self._web_said
+        elif not allowed:
+            text, tone = locked, "warning"
+        elif not typed:
+            text, tone = WEB_PROMPT, None
+        elif mark is None:
+            text, tone = NOT_SENDABLE, None
+        else:
+            text, tone = f"Look “{mark}” up on the web:", None
+        self.web_label.setText(text)
+        set_tone(self.web_label, tone)
+
+    def _say_web(self, text: str, tone: str | None) -> None:
+        self._web_said = (text, tone)
+        self._refresh_web()
+
+    def search_on(self, site: MarkingSite) -> bool:
+        """Look what's typed up on ``site``, in the operator's browser.
+
+        Only a click gets here. ``False`` when nothing was opened, with the
+        reason on the dialog.
+        """
+        if not self._may_link_out():
+            self._say_web(self._locked_reason(), "warning")
+            return False
+        typed = normalise_mark(self.query_edit.text())
+        address = site.address(typed)
+        if address is None:
+            self._say_web(site.cant if sendable(typed) else NOT_SENDABLE, "warning")
+            return False
+        return self._hand_over(address)
+
+    def open_makers_page(self) -> bool:
+        """Open the picked document where its maker publishes it.
+
+        Only a click gets here. ``False`` when nothing was opened, with the
+        reason on the dialog.
+        """
+        if not self._may_link_out():
+            self._say_web(self._locked_reason(), "warning")
+            return False
+        address, why_not = self._makers_page()
+        if address is None:
+            self._say_web(why_not, "warning")
+            return False
+        return self._hand_over(address)
+
+    def _hand_over(self, address: WebAddress) -> bool:
+        try:
+            taken = bool(self._open_url(address.url))
+        except Exception:
+            log.exception("chip finder: handing %s to the browser failed", address.host)
+            taken = False
+        if taken:
+            self._say_web(f"Handed {address.host} to your browser.", "ok")
+        else:
+            self._say_web(f"Couldn't hand {address.host} to a browser.", "error")
+        return taken
+
     def _say_open(self, text: str, tone: str | None = None) -> None:
         if self._open_document is None:
             return  # the line already holds why nothing opens, and keeps it
@@ -795,9 +1005,12 @@ class FindChipDialog(QDialog):
         set_tone(self.open_label, tone)
 
 
-def _pages(document: Document) -> str:
+def _document_facts(document: Document) -> str:
+    """A document row's last column: pages, its note, and where its maker has it."""
     pages = _plural(document.pages, "page") if document.pages else ""
-    return " — ".join(part for part in (pages, document.note or "") if part)
+    address = document_address(document)
+    at = f"at {address.host}" if address is not None else ""
+    return " — ".join(part for part in (pages, document.note or "", at) if part)
 
 
 def _what(chip: Chip, document: Document | None) -> str:
