@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.2](https://github.com/IamMrCupp/benchhud/compare/v0.32.1...v0.32.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* **shell:** flat dropdown and spin box arrows in the look's colours ([577dd98](https://github.com/IamMrCupp/benchhud/commit/577dd9841a71f58b1667d2320846205a21f0da7d))
+
 ## [0.32.1](https://github.com/IamMrCupp/benchhud/compare/v0.32.0...v0.32.1) (2026-11-22)
 
 
