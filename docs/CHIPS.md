@@ -160,6 +160,11 @@ says which source each value came from, and where sources disagree it lists
 every source's value with the one in use marked. This is an operator window, so
 it shows all of that — source names and the values that lost included.
 
+**Show on stream card** puts the picked chip on the Chip panel, where viewers can
+see it. It's a mouse click — not Enter, and never something that happens because
+you picked a row. Only the part number goes: the card looks the chip up for
+itself, so nothing else in this window goes with it.
+
 ---
 
 ## On an inventory row
@@ -167,6 +172,11 @@ it shows all of that — source names and the values that lost included.
 With a chip source set up, selecting a part in the **Inventory** panel that has
 an MPN shows what the chip reference knows about it under the Use on job row —
 maker, package, functions, description, marks — with **Open datasheet**.
+
+When the reference knows the part, **Show on stream card** is there too, and
+puts that chip on the Chip panel. Same rules as in Find chip: a mouse click — no
+key reaches it — and only the part number goes. Nothing about the part, the shelf
+or the job.
 
 A part with no MPN shows nothing. An MPN the reference doesn't know gets one line
 saying so. With no chip sources, the panel is exactly what it was.
@@ -176,7 +186,10 @@ saying so. With no chip sources, the panel is exactly what it was.
 ## The chip panel — what goes on stream
 
 The **Chip** panel is a card for one chip, and it's stream output: a viewer can
-read it. Type a part number into it and it shows:
+read it. A chip gets there three ways — type a part number into the panel, or
+press **Show on stream card** in Find chip or on an inventory row. That brings
+the Chip tab forward, opening it if you'd closed it, and replaces whatever chip
+was on the card. Whichever way it arrives, the card shows:
 
 - the part number, the maker and family
 - the package
@@ -193,8 +206,9 @@ disagree on package" — without naming the sources or the other values.
 chip, and your overlay is first in line. So your overlay's description,
 functions and marking codes for a chip are what go on air. Notes never do — but
 a description is a description. If there's something in an overlay you wouldn't
-say on stream, don't put that chip on the card. A per-source switch to keep a
-source off the card is
+say on stream, don't put that chip on the card — and know that **Show on stream
+card** is one click. It shows the merged chip, your overlay's wording included.
+A per-source switch to keep a source off the card is
 [an open issue](https://github.com/IamMrCupp/benchhud/issues/482).
 
 Find chip and the inventory row's datasheet line are for you; the card is for

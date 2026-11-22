@@ -524,6 +524,7 @@ class MainWindow(QMainWindow):
             on_consumed=self._note_parts_used,
             chips=lambda: self._chip_source,
             datasheets=lambda: self._datasheet_library,
+            show_on_card=self.show_chip_on_card,
         )
         self.panels.add_panel(self.inventory_panel, None)
         self.terminal_panel = TerminalPanel(terminal_view_factory)
@@ -1061,6 +1062,7 @@ class MainWindow(QMainWindow):
                 open_unavailable=NO_DATASHEET_FOLDER,
                 link_out_allowed=self.may_link_out,
                 link_out_locked=LINK_OUT_LOCKED_BY_ENGAGEMENT,
+                show_on_card=self.show_chip_on_card,
                 parent=self,
             )
         dialog.show()
@@ -1068,6 +1070,32 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
         dialog.refresh_link_outs()  # already showing: no show event to ask again
         return dialog
+
+    def show_chip_on_card(self, mpn: str) -> None:
+        """Put the chip with this part number on the Chip panel, and bring it forward.
+
+        What Find chip and the inventory row call for **Show on stream card**.
+        The card is stream output, so this is only ever an explicit action —
+        and all that reaches the card is the part number: it looks the chip up
+        itself, in whatever source is current, and shows what a card shows.
+
+        The Chip tab is raised, and shown if it had been closed: the operator
+        asked for the chip to be shown, and a card behind another tab — or
+        not there at all — shows nothing. It's shown without taking the
+        keyboard: a floating dock coming back mustn't pull the focus out of
+        Find chip's box, where the next mark is about to be typed.
+        """
+        self.chip_panel.set_chip(mpn)
+        dock = self.panels.dock(self.chip_panel.panel_id)
+        if dock is not None:
+            quietly = Qt.WidgetAttribute.WA_ShowWithoutActivating
+            was = dock.testAttribute(quietly)
+            dock.setAttribute(quietly, True)
+            try:
+                dock.show()
+                dock.raise_()
+            finally:
+                dock.setAttribute(quietly, was)
 
     def _chip_opener(self) -> OpenDocument | None:
         """What Find chip opens documents with — ``None`` with no datasheet folder."""
