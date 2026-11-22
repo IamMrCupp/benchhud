@@ -79,7 +79,7 @@ def build_chip_source(entries: Iterable[SourceEntry]) -> ChipSource:
         reason = left_out(entry, taken)
         if reason is None:
             taken.add(name_key(entry.name))
-            sources.append(DirChipSource.from_config(entry.path, entry.name))
+            sources.append(DirChipSource.from_config(entry.path.strip(), entry.name))
         elif entry.enabled:
             log.warning("chips: leaving out source %r: %s", entry.name, reason)
     return CompositeChipSource(sources) if sources else NullChipSource()
@@ -89,16 +89,17 @@ def _thread(job: Callable[[], None]) -> None:
     threading.Thread(target=job, name="chips-load", daemon=True).start()
 
 
-def warm(source: ChipSource, run: Executor = _thread) -> bool:
+def warm(source: ChipSource, run: Executor | None = None) -> bool:
     """Have ``source`` read its directories now, off the calling thread.
 
-    Returns whether there was anything to read — the null source has nothing,
-    and no thread is started for it.
+    ``run`` is what takes the job; left out, it's a daemon thread. Returns
+    whether there was anything to read — the null source has nothing, and no
+    thread is started for it.
     """
     reload = getattr(source, "reload", None)
     if not callable(reload):
         return False
-    run(reload)
+    (run or _thread)(reload)
     return True
 
 
@@ -108,4 +109,4 @@ def probe_folder(path: str) -> LoadReport:
     For a screen that shows what a folder holds before it's saved. It reads
     the directory, so call it off the GUI thread.
     """
-    return DirChipSource.from_config(path, "probe").report()
+    return DirChipSource.from_config(path.strip(), "probe").report()

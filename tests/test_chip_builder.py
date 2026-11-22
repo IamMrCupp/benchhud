@@ -124,6 +124,8 @@ def test_an_entry_that_cannot_be_a_source_is_dropped_and_the_rest_kept(bad) -> N
         ({"name": "a", "kind": 7, "path": "~/x"}, _entry("a", "~/x")),
         ({"name": "a", "kind": " ", "path": "~/x"}, _entry("a", "~/x")),
         ({"name": " a ", "kind": " dir ", "path": "~/x"}, _entry("a", "~/x")),
+        ({"name": "a", "kind": "Dir", "path": "~/x"}, _entry("a", "~/x")),
+        ({"name": "a", "path": "  ~/x  "}, _entry("a", "~/x")),
         ({"name": "a", "path": "~/x", "enabled": "no"}, _entry("a", "~/x")),
         ({"name": "a", "path": "~/x", "enabled": 0}, _entry("a", "~/x")),
         ({"name": "a", "path": "~/x", "enabled": False}, _entry("a", "~/x", enabled=False)),
@@ -157,6 +159,23 @@ def test_chips_survive_a_save_and_a_load(tmp_path) -> None:
     text = path.read_text()
     assert text.index('name = "local"') < text.index('name = "community"')
     assert "[[chips.sources]]" in text
+
+
+def test_no_sources_saves_no_empty_list_to_trip_a_hand_edit(tmp_path) -> None:
+    import tomllib
+
+    config = Config()
+    config.chips.datasheet_dir = "~/datasheets"
+    path = cfg.save(config, tmp_path / "config.toml")
+    text = path.read_text()
+    assert "\nsources =" not in text  # no `sources = []` line
+    assert "[chips]" in text
+    assert cfg.load(path) == config
+    # What config.example.toml tells people to add, appended below what was saved.
+    path.write_text(text + '\n[[chips.sources]]\nname = "community"\npath = "~/src/chip-data"\n')
+    tomllib.loads(path.read_text())  # no "cannot mutate" error
+    assert cfg.load(path).chips.sources == [_entry("community", "~/src/chip-data")]
+    assert cfg.load(path).chips.datasheet_dir == "~/datasheets"
 
 
 # --- which entries become sources ------------------------------------------
@@ -256,6 +275,12 @@ def test_a_name_freed_by_a_switched_off_entry_can_be_used(tmp_path) -> None:
         ]
     )
     assert [s.root for s in source.sources] == [tmp_path / "new"]
+
+
+def test_a_padded_folder_is_read_the_same_as_the_tab_shows_it(tmp_path) -> None:
+    source = build_chip_source([_entry("community", f"  {_build_dir(tmp_path)}  ")])
+    assert source.get("EX1234QFN") is not None
+    assert probe_folder(f"  {tmp_path}  ").chips == 4
 
 
 def test_building_reads_nothing(tmp_path, monkeypatch) -> None:
@@ -373,8 +398,18 @@ def test_a_report_says_why_nothing_loaded(tmp_path) -> None:
     assert why.startswith(str(tmp_path / "nowhere"))
 
     (tmp_path / "empty").mkdir()
-    (why,) = DirChipSource(root=tmp_path / "empty").report().problems
-    assert "no index.json and no chips/" in why
+    (why,) = DirChipSource(root=tmp_path / "empty", name="odd: name").report().problems
+    assert why == f"no index.json and no chips/ in {tmp_path / 'empty'}"
+
+
+def test_the_log_line_still_names_the_source(tmp_path, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.chips.dir_source")
+    DirChipSource(root=tmp_path / "nowhere", name="community").reload()
+    (line,) = [record.getMessage() for record in caplog.records]
+    assert (
+        line
+        == f"chips: source 'community': {tmp_path / 'nowhere'} is not a directory this can read"
+    )
 
 
 def test_a_report_lists_what_was_skipped_along_the_way(tmp_path) -> None:

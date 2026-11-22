@@ -407,8 +407,8 @@ def _chip_source_from_dict(data: Any) -> ChipSourceConfig | None:
     path = data.get("path", "")
     return ChipSourceConfig(
         name=name.strip(),
-        kind=kind.strip() if isinstance(kind, str) and kind.strip() else "dir",
-        path=path if isinstance(path, str) else "",
+        kind=kind.strip().lower() if isinstance(kind, str) and kind.strip() else "dir",
+        path=path.strip() if isinstance(path, str) else "",
         enabled=data.get("enabled", True) is not False,
     )
 
@@ -592,6 +592,10 @@ class Config:
         d = asdict(self)
         if d["shell"].get("layout") is None:
             d["shell"].pop("layout", None)
+        # An empty list would be written as `sources = []`, and TOML then
+        # refuses a `[[chips.sources]]` block added by hand below it.
+        if not d["chips"]["sources"]:
+            d["chips"].pop("sources")
         return d
 
 

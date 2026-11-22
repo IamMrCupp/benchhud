@@ -940,7 +940,9 @@ class MainWindow(QMainWindow):
         No sources configured is the null source: nothing is read and no
         thread is started.
         """
-        source = build_chip_source(self._config.chips.sources)
+        # A copy of what it was built from, to tell later whether that changed.
+        self._chip_entries = [replace(entry) for entry in self._config.chips.sources]
+        source = build_chip_source(self._chip_entries)
         warm_chip_source(source)
         return source
 
@@ -950,8 +952,17 @@ class MainWindow(QMainWindow):
         return self._chip_source
 
     def reconfigure_chip_source(self) -> None:
-        """Rebuild the chip source after a Preferences change."""
-        self._chip_source = self._make_chip_source()
+        """After a Preferences OK: rebuild the chip source, or just re-read it.
+
+        With the list of sources unchanged the source is kept and read again
+        on a worker — a lookup meanwhile answers from the copy it holds, and
+        OK doubles as "pick up what changed on disk". A new source has no copy
+        yet, so it's only built when the list really changed.
+        """
+        if self._chip_entries == self._config.chips.sources:
+            warm_chip_source(self._chip_source)
+        else:
+            self._chip_source = self._make_chip_source()
 
     def open_board_file(self, path) -> bool:
         """Open a board file in the configured viewer (or the OS handler)."""

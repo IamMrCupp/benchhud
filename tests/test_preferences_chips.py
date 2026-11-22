@@ -8,13 +8,16 @@ probe is a fake unless a test says otherwise. Every chip is made up.
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFileDialog, QTabWidget
 
-from benchhud.chips import CompositeChipSource, NullChipSource
+from benchhud.chips import CompositeChipSource, NullChipSource, builder
+from benchhud.chips import dir_source as dir_source_module
+from benchhud.chips.builder import probe_folder
 from benchhud.chips.dir_source import FROM_FILES, FROM_INDEX, LoadReport
 from benchhud.config import ChipSourceConfig, Config
 from benchhud.shell import main_window as main_window_module
@@ -257,7 +260,7 @@ def test_an_answer_that_arrives_after_the_dialog_is_gone_is_dropped(qtbot) -> No
 
 
 def test_folders_are_read_off_the_gui_thread_for_real(qtbot, tmp_path) -> None:
-    # The real runner and the real probe, against a real folder.
+    # The real runner and the real reading, against a real folder.
     build = tmp_path / "build"
     build.mkdir()
     shutil.copy(FIXTURE, build / "index.json")
@@ -265,13 +268,99 @@ def test_folders_are_read_off_the_gui_thread_for_real(qtbot, tmp_path) -> None:
         ChipSourceConfig(name="community", path=str(build)),
         ChipSourceConfig(name="gone", path=str(tmp_path / "nowhere")),
     )
-    dialog = PreferencesDialog(config, _FakeScanner())
+    read_on: list[threading.Thread] = []
+
+    def probe(folder: str) -> LoadReport:
+        read_on.append(threading.current_thread())
+        return probe_folder(folder)
+
+    dialog = PreferencesDialog(config, _FakeScanner(), chip_probe=probe)
     qtbot.addWidget(dialog)
     qtbot.waitUntil(lambda: "Checking…" not in _column(dialog, LOADED), timeout=10_000)
     loaded = _column(dialog, LOADED)
     assert loaded[0] == "4 chips, from the built index"
     assert loaded[1].startswith("Nothing loaded:")
     assert "is not a directory this can read" in loaded[1]
+    assert len(read_on) == 2
+    assert all(thread is not threading.main_thread() for thread in read_on)
+    assert {thread.name for thread in read_on} == {"chips-check"}
+
+
+def test_a_name_freed_by_a_source_that_is_left_out_can_be_used(qtbot) -> None:
+    config = _config(
+        ChipSourceConfig(name="community", path="/private", enabled=False),
+        ChipSourceConfig(name="community", path="/data"),
+    )
+    dialog = _dialog(qtbot, config)
+    assert _column(dialog, LOADED) == [
+        "Left out: switched off",
+        "412 chips, from the built index",
+    ]
+
+
+def test_a_nameless_row_is_judged_under_the_name_it_will_be_saved_with(qtbot) -> None:
+    probe = _Probe(**{"/a/chips": _FILES, "/b/chips": _INDEX})
+    dialog = _dialog(qtbot, _config(ChipSourceConfig(name="chips", path="/a/chips")), probe=probe)
+    dialog.add_chip_source_button.click()
+    dialog.chips_table.item(1, FOLDER).setText("/b/chips")  # no name: it'll be "chips" too
+    assert _column(dialog, LOADED) == [
+        "3 chips, from the chip files",
+        'Left out: the name "chips" is already used above',
+    ]
+    assert probe.asked == ["/a/chips"]
+    dialog.apply_to_config()
+    assert [source.name for source in dialog._config.chips.sources] == ["chips", "chips"]
+
+
+def test_check_again_does_not_take_an_answer_from_before_the_click(qtbot) -> None:
+    probe = _Probe(**{"/data": _INDEX})
+    held = _Held()
+    dialog = _dialog(
+        qtbot, _config(ChipSourceConfig(name="c", path="/data")), probe=probe, run=held
+    )
+    before, held.jobs = held.jobs, []
+    assert len(before) == 1
+
+    probe.reports["/data"] = LoadReport(chips=413, read_from=FROM_INDEX, origin=Path("/data"))
+    dialog.check_chip_sources_button.click()
+    assert len(held.jobs) == 1  # read afresh, not waiting on the old read
+
+    probe.reports["/data"] = _INDEX  # what the old read would have seen
+    before[0]()
+    assert _column(dialog, LOADED) == ["Checking…"]  # the old answer is dropped
+    probe.reports["/data"] = LoadReport(chips=413, read_from=FROM_INDEX, origin=Path("/data"))
+    held.run()
+    assert _column(dialog, LOADED) == ["413 chips, from the built index"]
+
+
+def test_an_answer_that_is_not_a_report_is_nothing_loaded_and_asked_once(qtbot) -> None:
+    asked: list[str] = []
+
+    def probe(folder: str):
+        asked.append(folder)
+        return "fine"
+
+    dialog = _dialog(qtbot, _config(ChipSourceConfig(name="c", path="/data")), probe=probe)
+    assert _column(dialog, LOADED) == ["Nothing loaded: reading /data gave no answer"]
+    assert asked == ["/data"]
+
+
+def test_no_worker_to_be_had_is_said_in_the_row_and_can_be_tried_again(qtbot) -> None:
+    probe = _Probe(**{"/data": _INDEX})
+    workers = {"available": False}
+
+    def run(job) -> None:
+        if not workers["available"]:
+            raise RuntimeError("can't start new thread")
+        job()
+
+    dialog = _dialog(qtbot, _config(ChipSourceConfig(name="c", path="/data")), probe=probe, run=run)
+    (status,) = _column(dialog, LOADED)
+    assert status == "Nothing loaded: couldn't start reading /data: can't start new thread"
+    assert probe.asked == []
+    workers["available"] = True
+    dialog.check_chip_sources_button.click()
+    assert _column(dialog, LOADED) == ["412 chips, from the built index"]
 
 
 @pytest.mark.parametrize(
@@ -479,54 +568,93 @@ def test_what_is_saved_loads_back_the_same(qtbot, tmp_path) -> None:
 # --- the main window's chip source -----------------------------------------
 
 
-def test_with_no_sources_the_window_has_the_null_source_and_reads_nothing(
-    qtbot, monkeypatch
-) -> None:
-    started: list[object] = []
-    monkeypatch.setattr(main_window_module, "warm_chip_source", started.append)
-    window = MainWindow(scanner=_FakeScanner())
-    qtbot.addWidget(window)
-    assert isinstance(window.chip_source, NullChipSource)
-    # Asked to warm it, as always — and there's nothing to warm.
-    assert len(started) == 1 and isinstance(started[0], NullChipSource)
-
-
-def test_with_no_sources_no_thread_is_started(qtbot, monkeypatch) -> None:
-    from benchhud.chips import builder
-
-    threads: list[object] = []
-    monkeypatch.setattr(builder, "_thread", threads.append)
-    monkeypatch.setattr(main_window_module, "warm_chip_source", lambda s: builder.warm(s))
-    window = MainWindow(scanner=_FakeScanner())
-    qtbot.addWidget(window)
-    assert threads == []
-
-
-def test_configured_sources_are_built_and_read_off_the_gui_thread(
-    qtbot, monkeypatch, tmp_path
-) -> None:
-    warmed: list[object] = []
-    monkeypatch.setattr(main_window_module, "warm_chip_source", warmed.append)
+def _build(tmp_path: Path) -> Path:
     build = tmp_path / "build"
     build.mkdir()
     shutil.copy(FIXTURE, build / "index.json")
+    return build
+
+
+@pytest.fixture
+def worker_jobs(monkeypatch) -> list:
+    """Jobs the chip source hands to its worker thread, held instead of run."""
+    jobs: list = []
+    monkeypatch.setattr(builder, "_thread", jobs.append)
+    return jobs
+
+
+@pytest.fixture
+def folder_reads(monkeypatch) -> list:
+    """Every directory read, as it happens."""
+    reads: list = []
+    real = dir_source_module._load
+    monkeypatch.setattr(
+        dir_source_module, "_load", lambda root, name: (reads.append(root), real(root, name))[1]
+    )
+    return reads
+
+
+def test_with_no_sources_the_window_has_the_null_source_and_starts_no_thread(
+    qtbot, worker_jobs, folder_reads
+) -> None:
+    window = MainWindow(scanner=_FakeScanner())
+    qtbot.addWidget(window)
+    assert isinstance(window.chip_source, NullChipSource)
+    assert worker_jobs == []
+    assert folder_reads == []
+
+
+def test_configured_sources_are_built_and_read_off_the_gui_thread(
+    qtbot, tmp_path, worker_jobs, folder_reads
+) -> None:
+    build = _build(tmp_path)
     window = MainWindow(
         _config(ChipSourceConfig(name="community", path=str(build))), scanner=_FakeScanner()
     )
     qtbot.addWidget(window)
     source = window.chip_source
     assert isinstance(source, CompositeChipSource)
-    assert warmed == [source]  # handed to the warmer, which owns the thread
     assert [s.name for s in source.sources] == ["community"]
+    # Built, and the read handed to the worker — not done here.
+    assert len(worker_jobs) == 1
+    assert folder_reads == []
+    worker_jobs.pop()()
+    assert folder_reads == [build]
     assert source.get("EX1234QFN").package == "QFN-20 (3x3)"
+    assert folder_reads == [build]  # already in memory: the lookup read nothing
+
+
+def test_ok_with_the_sources_unchanged_keeps_the_source_and_reads_it_again(
+    qtbot, tmp_path, worker_jobs, folder_reads
+) -> None:
+    build = _build(tmp_path)
+    window = MainWindow(
+        _config(ChipSourceConfig(name="community", path=str(build))),
+        scanner=_FakeScanner(),
+        on_persist=lambda config: None,
+    )
+    qtbot.addWidget(window)
+    source = window.chip_source
+    worker_jobs.pop()()
+
+    dialog = window.open_preferences()
+    # The tab reads the folder itself, on its own worker; let that finish so
+    # it isn't counted below.
+    qtbot.waitUntil(lambda: "Checking…" not in _column(dialog, LOADED), timeout=10_000)
+    before = len(folder_reads)
+    dialog.accept()  # nothing about chips changed
+    assert window.chip_source is source  # the copy it holds keeps answering
+    assert len(worker_jobs) == 1  # and it's read again, on the worker
+    assert source.get("EX1234QFN") is not None
+    assert len(folder_reads) == before  # not on this thread
+    worker_jobs.pop()()
+    assert folder_reads[before:] == [build]
 
 
 def test_ok_in_preferences_rebuilds_the_chip_source(qtbot, monkeypatch, tmp_path) -> None:
     warmed: list[object] = []
     monkeypatch.setattr(main_window_module, "warm_chip_source", warmed.append)
-    build = tmp_path / "build"
-    build.mkdir()
-    shutil.copy(FIXTURE, build / "index.json")
+    build = _build(tmp_path)
     window = MainWindow(scanner=_FakeScanner(), on_persist=lambda config: None)
     qtbot.addWidget(window)
     assert isinstance(window.chip_source, NullChipSource)

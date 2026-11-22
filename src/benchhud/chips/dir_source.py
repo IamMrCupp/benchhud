@@ -119,19 +119,19 @@ _MOST_PROBLEMS = 100
 _problems: ContextVar[list[str] | None] = ContextVar("benchhud_chips_load_problems", default=None)
 
 
-def _warn(message: str, *args: object) -> None:
+def _warn(message: str, *args: object, source: str | None = None) -> None:
     """Log a problem, and keep it for the report of the load that hit it.
 
-    The log line says which source; the report is already about one source,
-    so the kept line starts at what went wrong.
+    With ``source`` the log line names the source. The kept line doesn't: a
+    report is already about one source, so it starts at what went wrong.
     """
-    log.warning(message, *args)
+    if source is None:
+        log.warning("chips: " + message, *args)
+    else:
+        log.warning("chips: source %r: " + message, source, *args)
     held = _problems.get()
     if held is not None:
-        text = (message % args).removeprefix("chips: ")
-        if text.startswith("source "):
-            text = text.partition(": ")[2]
-        held.append(text)
+        held.append(message % args)
 
 
 @dataclass(frozen=True)
@@ -306,12 +306,12 @@ def _read_toml(path: Path, *, missing_ok: bool = False) -> dict[str, Any] | None
             return tomllib.load(handle)
     except FileNotFoundError as exc:
         if not missing_ok:
-            _warn("chips: can't read %s: %s", path, exc)
+            _warn("can't read %s: %s", path, exc)
         return None
     # TOMLDecodeError and bad UTF-8 are ValueErrors; nesting a few hundred
     # levels deep runs the parser out of stack.
     except (OSError, ValueError, RecursionError) as exc:
-        _warn("chips: can't read %s: %s", path, exc)
+        _warn("can't read %s: %s", path, exc)
         return None
 
 
@@ -343,7 +343,7 @@ def _walk(top: Path, *, say: bool) -> tuple[list[Path], list[Path]]:
 
     def cant_list(exc: OSError) -> None:
         if say:
-            _warn("chips: can't list %s: %s", exc.filename or top, exc)
+            _warn("can't list %s: %s", exc.filename or top, exc)
 
     folders, files = [top], []
     for here, folder_names, file_names in os.walk(top, onerror=cant_list):
@@ -366,18 +366,18 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
         with path.open("rb") as handle:
             index = json.load(handle)
     except (OSError, ValueError, RecursionError) as exc:
-        _warn("chips: can't read %s: %s", path, exc)
+        _warn("can't read %s: %s", path, exc)
         return None
     if not isinstance(index, Mapping):
-        _warn("chips: %s is not an index (no top-level object)", path)
+        _warn("%s is not an index (no top-level object)", path)
         return None
     version = index.get("format")
     if type(version) is not int or version < 1:
-        _warn("chips: %s has no usable format number; not reading it", path)
+        _warn("%s has no usable format number; not reading it", path)
         return None
     if version > INDEX_FORMAT:
         _warn(
-            "chips: %s is format %d and this benchhud reads format %d; not reading it",
+            "%s is format %d and this benchhud reads format %d; not reading it",
             path,
             version,
             INDEX_FORMAT,
@@ -385,7 +385,7 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
         return None
     records = index.get("chips")
     if not isinstance(records, list):
-        _warn("chips: %s has no list of chips", path)
+        _warn("%s has no list of chips", path)
         return None
     chips: list[Chip] = []
     for position, record in enumerate(records):
@@ -395,7 +395,7 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
             chips.append(chip_from_mapping(record))
         except _Unusable as exc:
             shown = record.get("mpn") if isinstance(record, Mapping) else None
-            _warn("chips: %s: skipping chip %d (%r): %s", path, position, shown, exc)
+            _warn("%s: skipping chip %d (%r): %s", path, position, shown, exc)
     return chips
 
 
@@ -413,7 +413,7 @@ def _chips_from_files(root: Path) -> list[Chip]:
                 raise _Unusable(f"schema is {version!r}; this benchhud reads {CHIP_SCHEMA}")
             chip = chip_from_mapping(data)
         except _Unusable as exc:
-            _warn("chips: skipping %s: %s", path, exc)
+            _warn("skipping %s: %s", path, exc)
             continue
         # What the build works out, worked out the same way. A chip file has
         # no package_family key of its own, so nothing is taken from one.
@@ -468,7 +468,7 @@ def _first_of_each(chips: Iterable[Chip], origin: Path, read_from: str) -> _Load
     for chip in chips:
         held = by_key.setdefault(chip.key, chip)
         if held is not chip:
-            _warn("chips: %s: %r is there twice; keeping the first", origin, chip.mpn.strip())
+            _warn("%s: %r is there twice; keeping the first", origin, chip.mpn.strip())
     return _Loaded(chips=tuple(by_key.values()), by_key=by_key, origin=origin, read_from=read_from)
 
 
@@ -479,7 +479,7 @@ def _load(root: Path | None, name: str) -> _Loaded:
         chips = _chips_from_index(root)
         return _first_of_each(chips, root, FROM_INDEX) if chips is not None else _Loaded()
     if not _is_dir(root):
-        _warn("chips: source %r: %s is not a directory this can read", name, root)
+        _warn("%s is not a directory this can read", root, source=name)
         return _Loaded()
 
     has_chip_files = _is_dir(root / "chips")
@@ -490,7 +490,7 @@ def _load(root: Path | None, name: str) -> _Loaded:
         found_an_index = True
         if has_chip_files and not _index_is_current(index, root):
             _warn(
-                "chips: %s may be out of date: something under chips/ or vocab/ changed after"
+                "%s may be out of date: something under chips/ or vocab/ changed after"
                 " it was written. Reading the chip files (run `chipdata build` to use the"
                 " index again)",
                 index,
@@ -502,7 +502,7 @@ def _load(root: Path | None, name: str) -> _Loaded:
     if has_chip_files:
         return _first_of_each(_chips_from_files(root), root / "chips", FROM_FILES)
     if not found_an_index:
-        _warn("chips: source %r: no %s and no chips/ in %s", name, INDEX_NAME, root)
+        _warn("no %s and no chips/ in %s", INDEX_NAME, root, source=name)
     return _Loaded()
 
 

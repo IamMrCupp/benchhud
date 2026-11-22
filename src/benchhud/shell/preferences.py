@@ -87,8 +87,8 @@ def _thread_executor(job: Callable[[], None]) -> None:
 
 
 class PreferencesDialog(QDialog):
-    #: (folder, what reading it came to) — sent from the worker that read it.
-    _chip_folder_checked = Signal(str, object)
+    #: (round, folder, what reading it came to) — sent from the worker that read it.
+    _chip_folder_checked = Signal(int, str, object)
 
     def __init__(
         self,
@@ -693,6 +693,9 @@ class PreferencesDialog(QDialog):
         # folders a worker is reading right now.
         self._chip_reports: dict[str, LoadReport] = {}
         self._chip_checking: set[str] = set()
+        # Goes up with every "Check again", so an answer to an older question
+        # isn't taken for an answer to the new one.
+        self._chip_round = 0
         self._chips_filling = False
         self._chip_folder_checked.connect(self._on_chip_folder_checked)
 
@@ -708,7 +711,7 @@ class PreferencesDialog(QDialog):
             "Untick to leave a source out without deleting it"
         )
         self.chips_table.horizontalHeaderItem(_CHIP_LOADED).setToolTip(
-            "What reading the folder came to"
+            "What reading the folder comes to now. The HUD reads it again when you press OK"
         )
         header = self.chips_table.horizontalHeader()
         header.setSectionResizeMode(_CHIP_NAME, QHeaderView.ResizeMode.ResizeToContents)
@@ -738,7 +741,9 @@ class PreferencesDialog(QDialog):
         self.browse_chip_folder_button.setToolTip("Pick the folder for the selected source")
         self.browse_chip_folder_button.clicked.connect(self.browse_for_chip_folder)
         self.check_chip_sources_button = QPushButton("Check again")
-        self.check_chip_sources_button.setToolTip("Read every folder again")
+        self.check_chip_sources_button.setToolTip(
+            "Read the folders again, to see what OK would load"
+        )
         self.check_chip_sources_button.clicked.connect(self.check_chip_sources)
 
         buttons = QHBoxLayout()
@@ -817,6 +822,9 @@ class PreferencesDialog(QDialog):
             taken: set[str] = set()
             for row, (name, folder, on, kind) in enumerate(self._chip_rows()):
                 item = self.chips_table.item(row, _CHIP_LOADED)
+                # Under the name it will be saved with, so the column agrees
+                # with what OK does.
+                name = _chip_source_name(name, folder)
                 entry = ChipSourceConfig(name=name, kind=kind, path=folder, enabled=on)
                 reason = left_out(entry, taken)
                 if reason is not None:
@@ -843,23 +851,35 @@ class PreferencesDialog(QDialog):
         if folder in self._chip_checking or folder in self._chip_reports:
             return
         self._chip_checking.add(folder)
-        probe, checked = self._chip_probe, self._chip_folder_checked
+        probe, checked, asked_in = self._chip_probe, self._chip_folder_checked, self._chip_round
 
         def job() -> None:
             try:
                 report = probe(folder)
             except Exception as exc:  # a probe is meant not to raise; say so if one does
                 report = LoadReport(problems=(f"reading {folder} failed: {exc}",))
+            if not isinstance(report, LoadReport):
+                report = LoadReport(problems=(f"reading {folder} gave no answer",))
             # The dialog may have closed while the folder was being read.
             with contextlib.suppress(RuntimeError):
-                checked.emit(folder, report)
+                checked.emit(asked_in, folder, report)
 
-        self._run_in_background(job)
+        try:
+            self._run_in_background(job)
+        except Exception as exc:
+            # No worker to be had. Say so in the row, or it would read
+            # "Checking…" for good.
+            self._chip_checking.discard(folder)
+            self._chip_reports[folder] = LoadReport(
+                problems=(f"couldn't start reading {folder}: {exc}",)
+            )
+            self._show_chip_status()
 
-    def _on_chip_folder_checked(self, folder: str, report: object) -> None:
+    def _on_chip_folder_checked(self, asked_in: int, folder: str, report: object) -> None:
+        if asked_in != self._chip_round or not isinstance(report, LoadReport):
+            return  # an answer from before "Check again"
         self._chip_checking.discard(folder)
-        if isinstance(report, LoadReport):
-            self._chip_reports[folder] = report
+        self._chip_reports[folder] = report
         self._show_chip_status()
 
     def _on_chip_cell_changed(self, _item: QTableWidgetItem) -> None:
@@ -903,8 +923,14 @@ class PreferencesDialog(QDialog):
         self._set_chip_rows(rows, select=row)
 
     def check_chip_sources(self) -> None:
-        """Forget what every folder came to and read them all again."""
+        """Forget what every folder came to and read them all again.
+
+        A read still under way was started before the click, so its answer is
+        dropped when it arrives and the folder is read afresh.
+        """
+        self._chip_round += 1
         self._chip_reports.clear()
+        self._chip_checking.clear()
         self._show_chip_status()
 
     def _collect_chip_sources(self) -> list[ChipSourceConfig]:
@@ -914,7 +940,7 @@ class PreferencesDialog(QDialog):
                 continue  # a row added and left empty
             sources.append(
                 ChipSourceConfig(
-                    name=name or Path(folder).name or "chips", kind=kind, path=folder, enabled=on
+                    name=_chip_source_name(name, folder), kind=kind, path=folder, enabled=on
                 )
             )
         return sources
@@ -1039,6 +1065,13 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
     if selected >= 0:
         combo.setCurrentIndex(selected)
     fit_combo_popup(combo)
+
+
+def _chip_source_name(name: str, folder: str) -> str:
+    """The name a chip source row is saved under: its own, else its folder's."""
+    if name or not folder:
+        return name
+    return Path(folder).name or "chips"
 
 
 def describe_load(report: LoadReport) -> tuple[str, str]:
