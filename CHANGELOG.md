@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.31.0](https://github.com/IamMrCupp/benchhud/compare/v0.30.0...v0.31.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** keep a chip source off the stream card with on_air = false ([2f87a8a](https://github.com/IamMrCupp/benchhud/commit/2f87a8ada1853bd3d5a8745f26410b0ff43b0452))
+
+
+### Bug Fixes
+
+* **chips:** a misspelt or misplaced on_air keeps the source off the stream card ([ee9c9db](https://github.com/IamMrCupp/benchhud/commit/ee9c9db6a2a96a2fad159fbe913e463a273f611d))
+
 ## [0.30.0](https://github.com/IamMrCupp/benchhud/compare/v0.29.1...v0.30.0) (2026-11-22)
 
 
