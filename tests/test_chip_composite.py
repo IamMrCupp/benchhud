@@ -7,6 +7,7 @@ bench would have them: ``local`` (a private overlay) ahead of ``community``.
 
 from __future__ import annotations
 
+import itertools
 import logging
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -35,9 +36,9 @@ from benchhud.chips.composite import same_text
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chip-data" / "index.json"
 
-_H1 = "1" * 64
-_H2 = "2" * 64
-_H3 = "3" * 64
+_H1 = "a1" * 32
+_H2 = "b2" * 32
+_H3 = "c3" * 32
 
 
 def _chip(mpn: str = "EX1234QFN", **fields) -> Chip:
@@ -349,6 +350,47 @@ def test_documents_that_share_neither_stay_apart() -> None:
     assert merged.sources_of("documents") == (("local",), ("community",), ("community",))
 
 
+def test_which_documents_end_up_together_does_not_depend_on_the_order() -> None:
+    # One source's document bridges two of another's.
+    two = _chip(documents=(_doc("x.pdf", sha256=(_H1,)), _doc("y.pdf", sha256=(_H2,))))
+    bridge = _chip(documents=(_doc("z.pdf", sha256=(_H1, _H2)),))
+    for first, second in ((two, bridge), (bridge, two)):
+        merged = _merge(first, second)
+        (document,) = merged.chip.documents
+        assert set(document.sha256) == {_H1, _H2}
+        assert merged.sources_of("documents") == (("local", "community"),)
+    assert _merge(two, bridge).chip.documents[0].filename == "x.pdf"
+    assert _merge(bridge, two).chip.documents[0].filename == "z.pdf"
+
+
+def test_a_name_that_was_merged_away_still_matches() -> None:
+    # a.pdf and b.pdf share a hash; a hashless b.pdf is the same file by name.
+    chips = [
+        _chip(documents=(_doc("a.pdf", sha256=(_H1,)),)),
+        _chip(documents=(_doc("b.pdf", sha256=(_H1,)),)),
+        _chip(documents=(_doc("b.pdf", pages=9),)),
+    ]
+    for order in itertools.permutations(chips):
+        merged = _merge(*order)
+        (document,) = merged.chip.documents
+        assert document.sha256 == (_H1,)
+        assert document.pages == 9
+        assert merged.sources_of("documents") == (("local", "community", "third"),)
+
+
+def test_a_hash_is_kept_once_however_it_is_written() -> None:
+    merged = _merge(
+        _chip(documents=(_doc(sha256=(_H1,)),)),
+        _chip(documents=(_doc(sha256=(_H1.upper(), f" {_H1} ", "", _H2.upper(), _H2)),)),
+    )
+    assert merged.chip.documents[0].sha256 == (_H1, _H2.upper())
+
+
+def test_a_page_count_of_nought_is_still_a_page_count() -> None:
+    merged = _merge(_chip(documents=(_doc(pages=0),)), _chip(documents=(_doc(pages=20),)))
+    assert merged.chip.documents[0].pages == 0
+
+
 def test_the_first_page_count_stands() -> None:
     merged = _merge(_chip(documents=(_doc(pages=14),)), _chip(documents=(_doc(pages=20),)))
     assert merged.chip.documents[0].pages == 14
@@ -399,6 +441,39 @@ def test_board_sightings_are_one_per_board_and_designator() -> None:
         ("community",),
         ("community",),
     )
+
+
+def test_sightings_with_no_designator_are_one_per_board() -> None:
+    merged = _merge(
+        _chip(used_in=(UsedIn(board="EXAMPLE-BOARD-1", role="standby 3.3 V"),)),
+        _chip(used_in=(UsedIn(board="example-board-1", role="something else"),)),
+    )
+    assert merged.chip.used_in == (UsedIn(board="EXAMPLE-BOARD-1", role="standby 3.3 V"),)
+
+
+def test_credits_are_compared_without_case() -> None:
+    merged = _merge(_chip(sources=("bench-notes",)), _chip(sources=("Bench-Notes", "other")))
+    assert merged.chip.sources == ("bench-notes", "other")
+
+
+def test_a_later_source_can_disagree_after_one_that_agrees() -> None:
+    merged = _merge(_chip(package="QFN-20"), _chip(package="qfn-20"), _chip(package="QFN-24"))
+    assert merged.conflict("package").values == (
+        ("local", "QFN-20"),
+        ("community", "qfn-20"),
+        ("third", "QFN-24"),
+    )
+
+
+def test_a_source_named_twice_is_named_once() -> None:
+    merged = _merge(_chip(description="A"), _chip(description="B"), names=("same", "same"))
+    assert merged.sources == ("same",)
+
+
+def test_a_chip_with_no_part_number_or_maker_anywhere_keeps_the_blanks() -> None:
+    merged = _merge(Chip(mpn="", manufacturer=""), Chip(mpn=" ", manufacturer=" "))
+    assert (merged.chip.mpn, merged.chip.manufacturer) == ("", "")
+    assert merged.source_of("mpn") is None
 
 
 def test_an_entry_a_source_lists_twice_names_that_source_once() -> None:
@@ -648,6 +723,178 @@ def test_a_source_with_a_matcher_of_its_own_keeps_its_candidate() -> None:
     assert [m.chip.mpn for m in found] == ["EX1234QFN", "EX7000QFN"]
     assert found[1].score == 7
     assert found[1].chip.package == "QFN-16"  # shown merged all the same
+
+
+class _OfferOnly:
+    """A source that offers a chip for a marking but can't find it by number."""
+
+    name = "offer-only"
+
+    def __init__(self, chip: Chip, *, fail: bool = False) -> None:
+        self.chip = chip
+        self.fail = fail
+
+    def get(self, mpn: str) -> Chip | None:
+        if self.fail:
+            raise RuntimeError("get fell over")
+        return None
+
+    def by_marking(self, text: str) -> list[MarkingMatch]:
+        return match_markings([self.chip], text)
+
+
+class _Junk:
+    """A source whose marking lookup hands back things that aren't matches."""
+
+    name = "junk"
+
+    def __init__(self, *matches: object) -> None:
+        self.matches = matches
+
+    def get(self, mpn: str) -> Chip | None:
+        return None
+
+    def by_marking(self, text: str) -> list:
+        return list(self.matches)
+
+
+class _Nameless:
+    """A broken source that can't even say what it's called."""
+
+    @property
+    def name(self) -> str:
+        raise RuntimeError("no name")
+
+    def get(self, mpn: str) -> Chip | None:
+        raise RuntimeError("get fell over")
+
+    def by_marking(self, text: str) -> list[MarkingMatch]:
+        raise RuntimeError("by_marking fell over")
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_a_chip_a_source_offers_but_cannot_look_up_is_still_a_candidate(fail: bool) -> None:
+    offered = _chip("EX7000QFN", description="Offered", markings=(Marking("X1="),))
+    extra = _chip("EX7000QFN", package="QFN-16")
+    source = CompositeChipSource(
+        [InMemoryChipSource([extra], "local"), _OfferOnly(offered, fail=fail)]
+    )
+    (match,) = source.by_marking("X1=6A")
+    assert match.chip == _chip(
+        "EX7000QFN", package="QFN-16", description="Offered", markings=(Marking("X1="),)
+    )
+    assert [m.chip.mpn for m in CompositeChipSource([_OfferOnly(offered)]).by_marking("X1=")] == [
+        "EX7000QFN"
+    ]
+
+
+def _mangled_matches() -> list[object]:
+    chip = _chip("EX7000QFN", markings=(Marking("ZZ"),))
+
+    class NoPartNumber:
+        key = "ex7000qfn"
+
+    return [
+        MarkingMatch(chip, None, MatchKind.PARTIAL, False, 7),  # type: ignore[arg-type]
+        MarkingMatch(chip, chip.markings[0], MatchKind.PARTIAL, False, None),  # type: ignore[arg-type]
+        MarkingMatch(chip, chip.markings[0], MatchKind.PARTIAL, False, "7"),  # type: ignore[arg-type]
+        MarkingMatch(NoPartNumber(), chip.markings[0], MatchKind.PARTIAL, False, 7),  # type: ignore[arg-type]
+        MarkingMatch(replace(chip, mpn=123), chip.markings[0], MatchKind.PARTIAL, False, 7),  # type: ignore[arg-type]
+        ("EX7000QFN", 7),
+        None,
+    ]
+
+
+@pytest.mark.parametrize("junk", _mangled_matches())
+def test_a_match_that_is_not_a_match_is_ignored(junk: object) -> None:
+    source = CompositeChipSource([_Junk(junk), InMemoryChipSource([_FULL], "community")])
+    assert [m.chip for m in source.by_marking("X1=6A")] == [_FULL]
+    assert CompositeChipSource([_Junk(junk)]).by_marking("X1=6A") == []
+
+
+def test_one_mangled_chip_costs_only_the_source_that_gave_it(caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="benchhud.chips.composite")
+    good = InMemoryChipSource([_FULL], "community")
+    for mangled in (replace(_FULL, functions=None), replace(_FULL, package=20)):  # type: ignore[arg-type]
+        bad = InMemoryChipSource([mangled], "local")
+        for sources in ([bad, good], [good, bad]):
+            source = CompositeChipSource(sources)
+            assert source.get("EX1234QFN") == _FULL
+            assert source.merged("EX1234QFN").sources == ("community",)
+            assert [m.chip for m in source.by_marking("X1=6A")] == [_FULL]
+    assert all("local" in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize("asked", [123, None, ("EX1234QFN",)])
+def test_a_part_number_that_is_not_text_is_no_chip(asked: object) -> None:
+    source = _composite([_FULL])
+    assert source.get(asked) is None  # type: ignore[arg-type]
+    assert source.merged(asked) is None  # type: ignore[arg-type]
+
+
+def test_a_chip_whose_part_number_is_not_text_is_ignored() -> None:
+    source = CompositeChipSource(
+        [_Wrong(replace(_FULL, mpn=123)), InMemoryChipSource([_FULL], "community")]  # type: ignore[arg-type]
+    )
+    assert source.get("EX1234QFN") == _FULL
+
+
+def test_a_source_that_cannot_say_its_name_still_cannot_break_a_lookup(caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="benchhud.chips.composite")
+    source = CompositeChipSource([_Nameless(), InMemoryChipSource([_FULL], "community")])
+    assert source.get("EX1234QFN") == _FULL
+    assert [m.chip for m in source.by_marking("X1=6A")] == [_FULL]
+    assert all("_Nameless" in record.getMessage() for record in caplog.records)
+    assert caplog.records
+
+
+def test_candidates_come_back_in_ranked_order_whoever_offered_them() -> None:
+    odd = _chip("EX7000QFN", markings=(Marking("ZZ"),))
+
+    class Keen(_OwnMatcher):
+        def by_marking(self, text: str) -> list[MarkingMatch]:
+            return [replace(m, score=999_999) for m in super().by_marking(text)]
+
+    source = CompositeChipSource([InMemoryChipSource([_FULL], "local"), Keen(odd)])
+    assert [m.chip.mpn for m in source.by_marking("X1=6A")] == ["EX7000QFN", "EX1234QFN"]
+
+
+def test_the_best_score_any_source_offered_is_the_one_kept() -> None:
+    odd = _chip("EX7000QFN", markings=(Marking("ZZ"),))
+
+    class Scored(_OwnMatcher):
+        def __init__(self, chip: Chip, score: int) -> None:
+            super().__init__(chip)
+            self.score = score
+
+        def by_marking(self, text: str) -> list[MarkingMatch]:
+            return [replace(m, score=self.score) for m in super().by_marking(text)]
+
+    for scores in ((7, 9, 8), (9, 7, 8), (8, 7, 9)):
+        source = CompositeChipSource([Scored(odd, score) for score in scores])
+        (match,) = source.by_marking("X1=6A")
+        assert match.score == 9
+
+
+def test_a_candidate_shows_the_merged_marking() -> None:
+    source = _composite(
+        [_chip(markings=(Marking("X1=", examples=("X1=6A",)),))],
+        [_chip(markings=(Marking("X1=", examples=("X1=7C",), note="Top line."),))],
+    )
+    (match,) = source.by_marking("X1=6A")
+    assert match.marking == Marking("X1=", examples=("X1=6A", "X1=7C"), note="Top line.")
+
+
+def test_the_sources_are_held_as_they_were_given() -> None:
+    lists = [InMemoryChipSource([_FULL], "local")]
+    source = CompositeChipSource(s for s in lists)  # a generator: one pass only
+    assert source.get("EX1234QFN") == _FULL
+    assert source.get("EX1234QFN") == _FULL
+    source = CompositeChipSource(lists)
+    lists.clear()  # the caller's list changing later changes nothing
+    assert source.get("EX1234QFN") == _FULL
+    assert CompositeChipSource(None).sources == ()  # type: ignore[arg-type]
+    assert CompositeChipSource(None).get("EX1234QFN") is None  # type: ignore[arg-type]
 
 
 # --- with real directory sources ------------------------------------------

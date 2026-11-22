@@ -33,11 +33,16 @@ documents       They share a SHA-256, **or** they have the same kind and
                 the same revision saved by two sites hashes differently. Their
                 hashes are joined.
 substitutes     The same part number, case ignored.
-used_in         The same board and the same designator. A sighting with no
-                designator is its own entry.
+used_in         The same board and the same designator. Sightings with no
+                designator are one entry per board, apart from any with one.
 ==============  =============================================================
 
-When two entries are the same one, the parts the first lacks (a note, a page
+"The same" carries across: if a document shares a hash with a second and the
+second shares a name with a third, all three are one document. So which
+entries end up together doesn't depend on the order of the sources — only
+whose wording is shown does. Repeats inside one source are dropped too.
+
+When entries are the same one, the parts the first lacks (a note, a page
 count, a URL) are filled from the next. Those inner fields don't raise
 conflicts; only the chip's own single values do.
 
@@ -64,7 +69,9 @@ A source that fails
 -------------------
 
 Sources promise not to raise. If one does anyway it's logged with its
-traceback and counted as having nothing; the others still answer.
+traceback and counted as having nothing; the others still answer. The same
+goes for a source that hands back something that isn't a chip, or a chip too
+mangled to merge: that source's answer is dropped, not everyone's.
 """
 
 from __future__ import annotations
@@ -167,20 +174,37 @@ def _join[T](
 
     ``same`` says whether two entries are the same one; ``fill`` returns the
     first with whatever it lacks taken from the second.
+
+    Entries are gathered into groups of "the same one". A newcomer joins every
+    group that holds a match for it, and groups it bridges become one — so
+    the grouping is the same whatever order the sources come in. Each group is
+    then one entry: its earliest member, filled from the rest in order.
     """
-    entries: list[T] = []
-    behind: list[list[str]] = []
+    # Each group: its members as (arrival, source, entry), in arrival order.
+    groups: list[list[tuple[int, str, T]]] = []
+    arrival = 0
     for source, chip in found:
         for entry in getattr(chip, name):
-            at = next((i for i, held in enumerate(entries) if same(held, entry)), None)
-            if at is None:
-                entries.append(entry)
-                behind.append([source])
-            else:
-                entries[at] = fill(entries[at], entry)
-                if source not in behind[at]:
-                    behind[at].append(source)
-    return tuple(entries), tuple(tuple(names) for names in behind)
+            member = (arrival, source, entry)
+            arrival += 1
+            hits = [i for i, group in enumerate(groups) if any(same(m[2], entry) for m in group)]
+            if not hits:
+                groups.append([member])
+                continue
+            home = groups[hits[0]]
+            home.append(member)
+            for i in reversed(hits[1:]):  # the newcomer bridges these into the first
+                home.extend(groups.pop(i))
+            home.sort(key=lambda m: m[0])
+    entries: list[T] = []
+    behind: list[tuple[str, ...]] = []
+    for group in groups:
+        entry = group[0][2]
+        for _, _, other in group[1:]:
+            entry = fill(entry, other)
+        entries.append(entry)
+        behind.append(tuple(dict.fromkeys(source for _, source, _ in group)))
+    return tuple(entries), tuple(behind)
 
 
 def _unique(first: Sequence[str], second: Sequence[str]) -> tuple[str, ...]:
@@ -211,12 +235,16 @@ def _same_document(a: Document, b: Document) -> bool:
 
 
 def _fill_document(a: Document, b: Document) -> Document:
-    known = _hashes(a)
+    # Each hash once, however it's cased, in the first spelling seen.
+    hashes: dict[str, str] = {}
+    for written in (*a.sha256, *b.sha256):
+        if written.strip():
+            hashes.setdefault(written.strip().lower(), written)
     return Document(
         kind=a.kind,
         filename=a.filename,
         pages=a.pages if a.pages is not None else b.pages,
-        sha256=(*a.sha256, *(h for h in dict.fromkeys(b.sha256) if h.strip().lower() not in known)),
+        sha256=tuple(hashes.values()),
         url=a.url or b.url,
         note=a.note or b.note,
     )
@@ -252,7 +280,8 @@ def merge_chips(found: _Found) -> MergedChip:
     """One chip from the same chip in several sources.
 
     ``found`` is ``(source name, chip)`` in the configured order, every chip
-    the same part number. Raises ``ValueError`` when it's empty — there is no
+    the same part number — two spellings of it agree like any other text, so
+    they aren't a conflict. Raises ``ValueError`` when it's empty: there is no
     chip to make.
     """
     if not found:
@@ -266,8 +295,7 @@ def merge_chips(found: _Found) -> MergedChip:
         values[name] = value
         if source is not None:
             scalar_sources.append((name, source))
-        # Two spellings of one part number are still the same chip.
-        if conflict is not None and name != "mpn":
+        if conflict is not None:
             conflicts.append(conflict)
 
     for name in SCALAR_FIELDS:
@@ -306,6 +334,20 @@ def _name_of(source: object) -> str:
         return type(source).__name__
 
 
+def _sound(match: object) -> bool:
+    """Whether a source's marking match is one this can rank and show."""
+    try:
+        return (
+            isinstance(match, MarkingMatch)
+            and isinstance(match.chip, Chip)
+            and isinstance(match.marking, Marking)
+            and type(match.score) is int
+            and bool(match.chip.key)
+        )
+    except Exception:
+        return False
+
+
 @dataclass
 class CompositeChipSource:
     """Several sources as one. ``sources`` is in order of precedence, first wins."""
@@ -313,53 +355,82 @@ class CompositeChipSource:
     sources: Sequence[ChipSource] = field(default_factory=tuple)
     name: str = "chips"
 
-    def _holding(self, mpn: str) -> list[tuple[str, Chip]]:
-        """``(source name, chip)`` from every source that has this part number."""
-        wanted = mpn_key(mpn)
-        if not wanted:
+    def __post_init__(self) -> None:
+        # Held as a tuple: a list the caller keeps editing, or a generator
+        # that's empty the second time round, would change the answer.
+        self.sources = tuple(self.sources or ())
+
+    def _holding(self, mpn: str, offered: dict[int, Chip] | None = None) -> list[tuple[str, Chip]]:
+        """``(source name, chip)`` from every source that has this part number.
+
+        ``offered`` is chips some sources have already handed over for it, by
+        the source's place in the order — used when a source's own lookup by
+        part number comes back empty for a chip it just offered.
+        """
+        if not isinstance(mpn, str) or not (wanted := mpn_key(mpn)):
             return []
         found: list[tuple[str, Chip]] = []
-        for source in self.sources:
+        for place, source in enumerate(self.sources):
+            name = _name_of(source)
+            chip = None
             try:
-                chip = source.get(mpn)
+                answer = source.get(mpn)
+                # Anything but this chip is a source's mistake, not an answer.
+                if isinstance(answer, Chip) and answer.key == wanted:
+                    chip = answer
             except Exception:
-                log.exception("chips: source %r failed looking up a part number", _name_of(source))
+                log.exception("chips: source %r failed looking up a part number", name)
+            if chip is None:
+                chip = (offered or {}).get(place)
+            if chip is None:
                 continue
-            # Anything but this chip is a source's mistake, not an answer.
-            if isinstance(chip, Chip) and chip.key == wanted:
-                found.append((_name_of(source), chip))
+            try:
+                merge_chips([(name, chip)])
+            except Exception:
+                # A chip too mangled to merge costs only the source that gave it.
+                log.exception("chips: source %r gave a chip that can't be merged", name)
+                continue
+            found.append((name, chip))
         return found
 
-    def merged(self, mpn: str) -> MergedChip | None:
-        """The chip with this part number, merged, with where each part came from."""
-        found = self._holding(mpn)
+    def _merge(self, mpn: str, offered: dict[int, Chip] | None = None) -> MergedChip | None:
+        found = self._holding(mpn, offered)
         if not found:
             return None
         try:
             return merge_chips(found)
         except Exception:
-            # A source handed over something chip-shaped that isn't a chip.
+            # Each chip merged on its own; together they didn't.
             log.exception("chips: merging %r from %s failed", mpn, [name for name, _ in found])
             return None
+
+    def merged(self, mpn: str) -> MergedChip | None:
+        """The chip with this part number, merged, with where each part came from."""
+        return self._merge(mpn)
 
     def get(self, mpn: str) -> Chip | None:
         merged = self.merged(mpn)
         return merged.chip if merged is not None else None
 
     def by_marking(self, text: str) -> list[MarkingMatch]:
-        offered: dict[str, MarkingMatch] = {}
-        for source in self.sources:
+        # Per chip: the best match any source offered, and each source's chip.
+        best: dict[str, MarkingMatch] = {}
+        offered: dict[str, dict[int, Chip]] = {}
+        for place, source in enumerate(self.sources):
             try:
-                for match in source.by_marking(text):
-                    best = offered.get(match.chip.key)
-                    if match.chip.key and (best is None or match.score > best.score):
-                        offered[match.chip.key] = match
+                matches = [match for match in source.by_marking(text) if _sound(match)]
             except Exception:
                 log.exception("chips: source %r failed looking up a marking", _name_of(source))
+                continue
+            for match in matches:
+                key = match.chip.key
+                offered.setdefault(key, {}).setdefault(place, match.chip)
+                if key not in best or match.score > best[key].score:
+                    best[key] = match
         chips = {
             key: merged.chip
-            for key, match in offered.items()
-            if (merged := self.merged(match.chip.mpn)) is not None
+            for key, match in best.items()
+            if (merged := self._merge(match.chip.mpn, offered[key])) is not None
         }
         # Ranked on the merged chips, so a candidate shows under the best
         # marking any source has for it.
@@ -368,5 +439,5 @@ class CompositeChipSource:
         # have; its word is kept, on the merged chip.
         for key, chip in chips.items():
             if key not in ranked:
-                ranked[key] = replace(offered[key], chip=chip)
+                ranked[key] = replace(best[key], chip=chip)
         return sorted(ranked.values(), key=lambda match: match.sort_key)
