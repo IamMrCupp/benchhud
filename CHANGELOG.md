@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.27.0](https://github.com/IamMrCupp/benchhud/compare/v0.26.0...v0.27.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** show a chip from the chip reference on a stream-safe panel ([ecece28](https://github.com/IamMrCupp/benchhud/commit/ecece28ca6611490300171822e8b69334eec13c8))
+* **chips:** show a chip from the chip reference on a stream-safe panel ([3bc5115](https://github.com/IamMrCupp/benchhud/commit/3bc51159e5c7196266d4ce24990e1b7060240423))
+* **inventory:** show a part's chip details and open its datasheet from the row ([5fc2d41](https://github.com/IamMrCupp/benchhud/commit/5fc2d41571caf68a80f2656466c9faf9d25fbe99))
+* **inventory:** show a part's chip details and open its datasheet from the row ([fdbfb97](https://github.com/IamMrCupp/benchhud/commit/fdbfb97079492a6ea5b1b0ba759d4893fe04c826))
+* **inventory:** show a part's chip details and open its datasheet from the row ([e2116fa](https://github.com/IamMrCupp/benchhud/commit/e2116fa164c9feff03fb30c3ddd2bcd077eba339))
+
+
+### Bug Fixes
+
+* **chips:** the chip panel re-reads before a refresh, wraps a long part number, and drops invisible characters ([ecece28](https://github.com/IamMrCupp/benchhud/commit/ecece28ca6611490300171822e8b69334eec13c8))
+* **chips:** the chip panel re-reads before a refresh, wraps a long part number, and drops invisible characters ([3bc5115](https://github.com/IamMrCupp/benchhud/commit/3bc51159e5c7196266d4ce24990e1b7060240423))
+* **inventory:** give the datasheet line its own row so it isn't cut off in a narrow dock ([5fc2d41](https://github.com/IamMrCupp/benchhud/commit/5fc2d41571caf68a80f2656466c9faf9d25fbe99))
+* **inventory:** give the datasheet line its own row so it isn't cut off in a narrow dock ([fdbfb97](https://github.com/IamMrCupp/benchhud/commit/fdbfb97079492a6ea5b1b0ba759d4893fe04c826))
+* **inventory:** give the datasheet line its own row so it isn't cut off in a narrow dock ([e2116fa](https://github.com/IamMrCupp/benchhud/commit/e2116fa164c9feff03fb30c3ddd2bcd077eba339))
+* **inventory:** never name a local file on the chip row, and keep long names from widening the dock ([5fc2d41](https://github.com/IamMrCupp/benchhud/commit/5fc2d41571caf68a80f2656466c9faf9d25fbe99))
+* **inventory:** never name a local file on the chip row, and keep long names from widening the dock ([fdbfb97](https://github.com/IamMrCupp/benchhud/commit/fdbfb97079492a6ea5b1b0ba759d4893fe04c826))
+* **inventory:** never name a local file on the chip row, and keep long names from widening the dock ([e2116fa](https://github.com/IamMrCupp/benchhud/commit/e2116fa164c9feff03fb30c3ddd2bcd077eba339))
+
 ## [0.26.0](https://github.com/IamMrCupp/benchhud/compare/v0.25.0...v0.26.0) (2026-11-22)
 
 
