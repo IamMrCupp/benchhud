@@ -40,14 +40,17 @@ goes into a tooltip, which Qt would render as markup.
 the chip, the mark can be looked up on a marking site, and a document can be
 opened where its maker publishes it (:mod:`benchhud.chips.linkout`). Either
 tells a third party what's on the bench. So an address is only ever handed to
-the browser by a click on a button that names the host — never as you type —
-and only what's typed, or the document's own address, goes with it. The
-caller says whether linking out is allowed right now, the way it supplies the
+the browser by a mouse click on a button that says where it goes — a site
+button is named for its host; **Maker's page** names it in its tooltip and
+on the document's row. Never as you type, and never from the keyboard: those
+buttons don't take the focus, so no key can reach them. Only what's in the
+box at that moment, or the document's own address, goes with it. The caller
+says whether linking out is allowed right now, the way it supplies the
 datasheet opener; the main window answers no while a recon engagement is
 active. **With nothing to ask, the answer is no**: a button that's wrongly off
 costs a trip to the browser by hand, one that's wrongly on names a client's
-part to a stranger. The question is asked again at every click. benchhud
-itself still makes no network request.
+part to a stranger. Only a plain ``True`` is a yes, and the question is asked
+again at every click. benchhud itself still makes no network request.
 
 Read-only, and nothing raises into the HUD: a source or an opener that fails
 gets a log line and a plain message.
@@ -86,6 +89,7 @@ from PySide6.QtWidgets import (
 from benchhud.chips.find import Candidate, find_chips
 from benchhud.chips.linkout import (
     MARKING_SITES,
+    MAX_SENT,
     MarkingSite,
     WebAddress,
     document_address,
@@ -121,7 +125,9 @@ OpenDocument = Callable[[Chip, Document | None], OpenOutcome | bool]
 Executor = Callable[[Callable[[], None]], None]
 
 #: "May this window link out right now?" Asked on the GUI thread at every
-#: click and whenever the buttons are redrawn, so it has to be quick.
+#: click and whenever the buttons are redrawn, so it has to be quick. Only
+#: ``True`` itself is a yes: a slip that hands back some other truthy thing —
+#: the engagement's ref, say — must not unlock anything.
 LinkOutAllowed = Callable[[], bool]
 #: Hands an address to the operator's browser; true when it was taken.
 OpenUrl = Callable[[str], object]
@@ -148,8 +154,9 @@ LINK_OUT_LOCKED = (
     "they'd tell an outside site what's on the bench."
 )
 LINK_OUT_UNWIRED = "Web lookups are off: nothing has told this window they're allowed."
+LINK_OUT_UNKNOWN = "Web lookups are off: whether they're allowed couldn't be checked."
 WEB_PROMPT = "Type a mark to look it up on the marking sites."
-NOT_SENDABLE = "Only a plain mark, of 40 characters at most, is sent to a marking site."
+NOT_SENDABLE = f"Only a plain mark, of {MAX_SENT} characters at most, is sent to a marking site."
 NO_MAKERS_PAGE = "No maker's page is listed for this."
 REFUSED_ADDRESS = "The address listed isn't a plain https:// one, so it isn't opened."
 
@@ -222,6 +229,15 @@ class FindChipDialog(QDialog):
     configured". A caller whose source can be empty for want of config (a
     directory source with a blank path, a merge of no sources) passes
     ``False``, so the dialog says that and not "no chip matches".
+
+    ``link_out_allowed`` answers "may this window link out right now?"; left
+    out, link-outs are off. ``open_url`` hands an address to the browser and
+    defaults to :func:`benchhud.shell.browser.open_in_browser`.
+
+    ``open_unavailable`` and ``link_out_locked`` are the caller's own words
+    for why something is off. They're shown in tooltips as well as on the
+    dialog, so they're trusted the way the dialog's own strings are: no
+    markup, and nothing taken from a data file.
     """
 
     _looked_up = Signal(str, object)  # (the text looked up, candidates or None)
@@ -236,13 +252,13 @@ class FindChipDialog(QDialog):
         open_unavailable: str = NO_OPENER,
         link_out_allowed: LinkOutAllowed | None = None,
         link_out_locked: str = LINK_OUT_LOCKED,
-        open_url: OpenUrl = open_in_browser,
+        open_url: OpenUrl | None = None,
         executor: Executor = _thread_executor,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Find chip")
-        self.resize(860, 760)
+        self.resize(860, 800)
         self._source = source
         if configured is None:
             configured = not isinstance(source, NullChipSource)
@@ -250,8 +266,9 @@ class FindChipDialog(QDialog):
         self._open_document = open_document
         self._open_unavailable = open_unavailable
         self._link_out_allowed = link_out_allowed
-        self._link_out_locked = link_out_locked
-        self._open_url = open_url
+        self._link_out_locked = link_out_locked or LINK_OUT_LOCKED
+        self._link_out_unknown = False  # the last time it was asked, the asking failed
+        self._open_url = open_url if open_url is not None else open_in_browser
         self._executor = executor
 
         self._wanted = ""  # what's typed now
@@ -354,17 +371,23 @@ class FindChipDialog(QDialog):
         self.web_label = _data_label(QLabel())
         self.site_buttons: list[QPushButton] = []
         web_row = QHBoxLayout()
-        web_row.addWidget(self.web_label, 1)
         for site in MARKING_SITES:
             site_button = QPushButton(site.host)
-            # Never the dialog's default: Enter must not be able to link out.
-            site_button.setAutoDefault(False)
-            site_button.setDefault(False)
             site_button.clicked.connect(lambda _checked=False, site=site: self.search_on(site))
             self.site_buttons.append(site_button)
             web_row.addWidget(site_button)
+        web_row.addStretch(1)
         self.maker_button = QPushButton("Maker's page")
         self.maker_button.clicked.connect(self.open_makers_page)
+        for link_button in (*self.site_buttons, self.maker_button):
+            # A link-out takes the mouse. These never hold the focus, so no
+            # key reaches them — not Space, not whatever a desktop theme
+            # counts as "press" — and a click leaves the focus in the box,
+            # where the next mark is typed. Nor can one be the dialog's
+            # default, which Enter would press.
+            link_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            link_button.setAutoDefault(False)
+            link_button.setDefault(False)
 
         self.open_button = QPushButton("Open datasheet")
         self.open_button.clicked.connect(self.open_selected)
@@ -385,6 +408,7 @@ class FindChipDialog(QDialog):
         layout.addWidget(splitter, 1)
         layout.addWidget(self.status_label)
         layout.addWidget(self.open_label)
+        layout.addWidget(self.web_label)  # a row of its own: it never loses its width
         layout.addLayout(web_row)
         layout.addWidget(buttons)
 
@@ -879,13 +903,19 @@ class FindChipDialog(QDialog):
         if self._link_out_allowed is None:
             return False
         try:
-            return bool(self._link_out_allowed())
+            answer = self._link_out_allowed()
         except Exception:
-            log.exception("chip finder: asking whether to link out failed")
+            if not self._link_out_unknown:  # once, not at every keystroke
+                log.exception("chip finder: asking whether to link out failed")
+            self._link_out_unknown = True
             return False
+        self._link_out_unknown = False
+        return answer is True
 
     def _locked_reason(self) -> str:
-        return LINK_OUT_UNWIRED if self._link_out_allowed is None else self._link_out_locked
+        if self._link_out_allowed is None:
+            return LINK_OUT_UNWIRED
+        return LINK_OUT_UNKNOWN if self._link_out_unknown else self._link_out_locked
 
     def _makers_page(self) -> tuple[WebAddress | None, str]:
         """The address **Maker's page** would open, or why there isn't one.
@@ -938,10 +968,13 @@ class FindChipDialog(QDialog):
                 f"Opens {page.host} in your browser — where this document's maker publishes it."
             )
 
-        if self._web_said is not None:
-            text, tone = self._web_said
-        elif not allowed:
+        if not allowed:
+            # Before anything else, and over anything said earlier: while
+            # link-outs are off, the line says so.
+            self._web_said = None
             text, tone = locked, "warning"
+        elif self._web_said is not None:
+            text, tone = self._web_said
         elif not typed:
             text, tone = WEB_PROMPT, None
         elif mark is None:
@@ -958,11 +991,11 @@ class FindChipDialog(QDialog):
     def search_on(self, site: MarkingSite) -> bool:
         """Look what's typed up on ``site``, in the operator's browser.
 
-        Only a click gets here. ``False`` when nothing was opened, with the
-        reason on the dialog.
+        Called by that site's button and nothing else. ``False`` when
+        nothing was opened, with the reason on the dialog.
         """
         if not self._may_link_out():
-            self._say_web(self._locked_reason(), "warning")
+            self._refresh_web()  # the buttons go off and the line says why
             return False
         typed = normalise_mark(self.query_edit.text())
         address = site.address(typed)
@@ -974,11 +1007,11 @@ class FindChipDialog(QDialog):
     def open_makers_page(self) -> bool:
         """Open the picked document where its maker publishes it.
 
-        Only a click gets here. ``False`` when nothing was opened, with the
-        reason on the dialog.
+        Called by the **Maker's page** button and nothing else. ``False``
+        when nothing was opened, with the reason on the dialog.
         """
         if not self._may_link_out():
-            self._say_web(self._locked_reason(), "warning")
+            self._refresh_web()  # the buttons go off and the line says why
             return False
         address, why_not = self._makers_page()
         if address is None:

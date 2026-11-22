@@ -82,6 +82,20 @@ _SWITCH = Chip(
 _CHIPS = [_BUCK, _LDO, _SUB, _SWITCH]
 
 
+@pytest.fixture(autouse=True)
+def no_real_browser(monkeypatch):
+    """No test in this file may reach the operator's real browser.
+
+    A dialog built without ``open_url`` falls back to the real opener, and
+    only the lock stands in front of it. This takes the real one away, and
+    fails the test that got as far as calling it.
+    """
+    reached: list[str] = []
+    monkeypatch.setattr(chip_dialog, "open_in_browser", lambda url: reached.append(url) or False)
+    yield
+    assert reached == [], "a test handed an address to the real browser opener"
+
+
 def _inline(job) -> None:
     job()
 
@@ -1380,26 +1394,123 @@ def test_while_a_recon_engagement_is_active_link_outs_are_off(qtbot) -> None:
 def test_the_caller_can_word_the_lock(qtbot) -> None:
     dialog, _, _ = _web_dialog(qtbot, gate=_Gate(False), link_out_locked="Not during a job.")
     assert dialog.web_label.text() == "Not during a job."
+    # But can't word it away: a lock with no reason shown isn't allowed.
+    dialog, _, _ = _web_dialog(qtbot, gate=_Gate(False), link_out_locked="")
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
 
 
+def test_the_reason_keeps_its_width_however_narrow_the_dialog(qtbot) -> None:
+    dialog, _, _ = _web_dialog(qtbot, gate=_Gate(False))
+    dialog.show()
+    dialog.resize(dialog.minimumSizeHint())
+    qtbot.wait(10)
+    assert dialog.web_label.width() > 200
+    assert dialog.web_label.height() < 120
+
+
+@pytest.mark.parametrize("which", range(len(MARKING_SITES) + 1))
 def test_an_engagement_that_starts_after_the_buttons_were_drawn_still_locks_the_click(
-    qtbot,
+    qtbot, which
 ) -> None:
+    # One dialog per button: each is clicked while it's still drawn as on.
     dialog, gate, browser = _web_dialog(qtbot)
     _type(dialog, "W5")
-    assert all(button.isEnabled() for button in _web_buttons(dialog))
+    button = _web_buttons(dialog)[which]
+    assert button.isEnabled()
 
     gate.allowed = False  # "Import from engagement…" in the main window, just now
-    for button in _web_buttons(dialog):
-        if button.isEnabled():
-            button.click()  # still drawn as on; the question is asked again
+    button.click()  # the question is asked again, and the answer has changed
     assert browser.urls == []
     assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
-    assert not any(button.isEnabled() for button in _web_buttons(dialog))
+    assert dialog.web_label.property("tone") == "warning"
+    assert not any(b.isEnabled() for b in _web_buttons(dialog))
 
     gate.allowed = True  # the engagement is over; the next redraw turns them back on
     _type(dialog, "W6")
-    assert all(button.isEnabled() for button in dialog.site_buttons)
+    assert all(b.isEnabled() for b in dialog.site_buttons)
+    assert dialog.web_label.text() == "Look “W6” up on the web:"
+
+
+def test_the_lock_is_said_over_whatever_the_line_said_before(qtbot) -> None:
+    dialog, gate, browser = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    _site_button(dialog, "www.ti.com").click()
+    assert dialog.web_label.text() == "Handed www.ti.com to your browser."
+
+    gate.allowed = False
+    dialog.hide()
+    dialog.show()  # nothing typed, nothing picked: only the lock changed
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+    assert dialog.web_label.property("tone") == "warning"
+
+    assert dialog.search_on(MARKING_SITES[0]) is False  # a refused click…
+    gate.allowed = True
+    dialog.hide()
+    dialog.show()  # …leaves nothing behind once the lock is gone
+    assert dialog.web_label.text() == "Look “W5” up on the web:"
+    assert all(b.isEnabled() for b in _web_buttons(dialog))
+    assert len(browser.urls) == 1
+
+
+def test_the_lock_is_looked_at_again_when_the_window_comes_back_to_the_front(
+    qtbot, monkeypatch
+) -> None:
+    dialog, gate, _ = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    assert all(b.isEnabled() for b in _web_buttons(dialog))
+
+    gate.allowed = False  # an engagement was imported in the main window
+    monkeypatch.setattr(dialog, "isActiveWindow", lambda: True)
+    QCoreApplication.sendEvent(dialog, QEvent(QEvent.Type.ActivationChange))
+    assert not any(b.isEnabled() for b in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+
+
+@pytest.mark.parametrize("answer", ["yes", "ENG-0001", 1, [True], object(), None, 0, False])
+def test_only_a_plain_true_unlocks(qtbot, answer) -> None:
+    # The wiring slip this is for: handing back the engagement's ref — truthy
+    # exactly while an engagement is active — instead of "is there none?".
+    browser = _Browser()
+    dialog = _dialog(
+        qtbot,
+        InMemoryChipSource(list(_WEB_CHIPS)),
+        open_url=browser,
+        link_out_allowed=lambda: answer,
+    )
+    _type(dialog, "W5")
+    assert not any(b.isEnabled() for b in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+    assert dialog.search_on(MARKING_SITES[0]) is False
+    assert dialog.open_makers_page() is False
+    assert browser.urls == []
+
+
+def test_no_key_can_reach_a_link_out_button(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    dialog.show()
+    _type(dialog, "W5")
+    for button in _web_buttons(dialog):
+        assert button.isEnabled()
+        assert button.focusPolicy() == Qt.FocusPolicy.NoFocus
+        assert not button.isDefault()
+        assert not button.autoDefault()
+
+    # Tab from the box goes round the dialog without ever landing on one.
+    dialog.query_edit.setFocus()
+    seen = []
+    for _ in range(12):
+        dialog.focusNextChild()
+        seen.append(dialog.focusWidget())
+    assert not any(widget in _web_buttons(dialog) for widget in seen)
+
+    # A click leaves the focus in the box, so the next mark is typed there —
+    # and Space afterwards goes to the box, not back to the button.
+    qtbot.mouseClick(_site_button(dialog, "smd.yooneed.one"), Qt.MouseButton.LeftButton)
+    assert browser.urls == ["https://smd.yooneed.one/search?code=W5"]
+    assert dialog.focusWidget() is dialog.query_edit
+    qtbot.keyClick(dialog.focusWidget(), Qt.Key.Key_Space)
+    qtbot.keyClick(dialog.focusWidget(), Qt.Key.Key_Return)
+    assert len(browser.urls) == 1
 
 
 def test_the_lock_is_looked_at_again_when_the_window_is_shown(qtbot) -> None:
@@ -1427,7 +1538,11 @@ def test_a_question_that_cannot_be_answered_is_a_no(qtbot, caplog) -> None:
     assert dialog.search_on(MARKING_SITES[0]) is False
     assert dialog.open_makers_page() is False
     assert browser.urls == []
-    assert "asking whether to link out failed" in caplog.text
+    # It says what it knows — not that an engagement is active — and it's
+    # logged once, not at every keystroke.
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_UNKNOWN
+    _type(dialog, "W6")
+    assert caplog.text.count("asking whether to link out failed") == 1
 
 
 def test_the_link_out_words_are_text_too(qtbot) -> None:

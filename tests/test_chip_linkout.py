@@ -51,6 +51,17 @@ def test_the_longest_mark_that_is_sent() -> None:
     assert sendable("X" * MAX_SENT) == "X" * MAX_SENT
 
 
+@pytest.mark.parametrize("typed", [42, b"X1", ["X1"], object()])
+def test_what_is_not_text_is_not_sent(typed) -> None:
+    assert sendable(typed) is None
+    assert MARKING_SITES[0].address(typed) is None
+
+
+def test_whitespace_of_any_kind_goes_as_one_space() -> None:
+    # Trimmed the way a mark is matched, before anything is refused.
+    assert sendable("X1\u2003\t4410") == "X1 4410"
+
+
 # --- the sites ----------------------------------------------------------------
 
 
@@ -175,6 +186,7 @@ def test_a_site_whose_builder_strays_to_another_host_opens_nothing() -> None:
         ("https://example.com/", "example.com"),
         ("https://docs.example.com/a/b.pdf?rev=C&lang=en#page=3", "docs.example.com"),
         ("https://example.com/a%20b/(1)~x_y,z;k=v@2", "example.com"),
+        ("https://example.com/a%2Fb%3d", "example.com"),
         ("https://xn--bcher-kva.example.com/x", "xn--bcher-kva.example.com"),
         ("  https://example.com/x  ", "example.com"),  # stray space around it in the file
     ],
@@ -225,6 +237,22 @@ def test_the_host_is_shown_in_lower_case_and_opened_that_way() -> None:
         "https://www.example.com/<b>x</b>",
         'https://www.example.com/"x"',
         "https://www.exämple.com/x",  # a look-alike host isn't shown or opened
+        # Characters that fold to an ASCII letter when case is ignored: each
+        # would be shown as typed here and opened as something else.
+        "https://www.t\u0131.com/x",  # dotless i
+        "https://www.T\u0130.com/x",  # capital I with a dot
+        "https://example\u017f.com/x",  # long s
+        "https://\u212aernel.example.com/x",  # the Kelvin sign
+        "http\u017f://www.example.com/x",
+        "https://\uff45xample.com/x",  # fullwidth e
+        "https://example.com\u200b.evil.example.org/x",  # a zero-width space
+        "https://ex\u0430mple.com/x",  # Cyrillic a
+        "https://example.com./x",  # a trailing dot
+        "https://2130706433/",  # an IP address written as one number
+        "https://0x7f000001/",
+        "https://127.1/",
+        "https://example.com/%zz",  # a % that isn't the start of an escape
+        "https://example.com/100%",
         "https://www.example.com/ü",
         "https://-bad.example.com/x",
         "https://bad-.example.com/x",

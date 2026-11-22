@@ -38,12 +38,34 @@ def test_an_https_address_is_handed_over() -> None:
         "https://exa mple.com/",
         "https://user@www.example.com/",
         "https://www.example.com:8443/",
+        # What Qt's own parser would take, and where it would take it: this
+        # door checks the address itself and doesn't lean on its caller.
+        "https://127.0.0.1/",
+        "https://[::1]/",
+        "https://2130706433/",
+        "https://0x7f000001/",
+        "https://127.1/",
+        "https://@example.com/",
+        "https://com/",
+        "https://example.com./",
+        "https://\uff45xample.com/",  # fullwidth e: Qt reads it as example.com
+        "https://example.com\u200b.evil.example.org/",
+        "https://ex\u0430mple.com/",  # Cyrillic a
+        "https://www.t\u0131.com/",  # dotless i
+        None,
+        42,
     ],
 )
 def test_anything_else_is_refused_before_the_os_is_asked(url) -> None:
     launch = _Launcher()
     assert open_in_browser(url, launch=launch) is False
     assert launch.urls == []
+
+
+def test_the_host_goes_out_as_it_was_checked() -> None:
+    launch = _Launcher()
+    assert open_in_browser("HTTPS://WWW.Example.COM/Parts", launch=launch) is True
+    assert launch.urls == ["https://www.example.com/Parts"]
 
 
 def test_an_os_that_will_not_take_it_is_a_no() -> None:
