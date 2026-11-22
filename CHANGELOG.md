@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.28.0](https://github.com/IamMrCupp/benchhud/compare/v0.27.0...v0.28.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** look a mark up on the marking sites, or open a document's maker page, from Find chip ([b2cae43](https://github.com/IamMrCupp/benchhud/commit/b2cae432941ca5f7b624511b8030c2f27a50db41))
+
+
+### Bug Fixes
+
+* **chips:** Find chip's link-outs refuse look-alike hosts, take the mouse only, and say the lock first ([b2cae43](https://github.com/IamMrCupp/benchhud/commit/b2cae432941ca5f7b624511b8030c2f27a50db41))
+* **config:** keep 0/1 switches and fractions working, log a dropped value, and write the file in one step ([0089f0d](https://github.com/IamMrCupp/benchhud/commit/0089f0d9ac80c11fe92e4dc48a4bfcc33992332c))
+* **config:** start on defaults when the config can't be read, and never save one that can't ([0089f0d](https://github.com/IamMrCupp/benchhud/commit/0089f0d9ac80c11fe92e4dc48a4bfcc33992332c))
+
 ## [0.27.0](https://github.com/IamMrCupp/benchhud/compare/v0.26.0...v0.27.0) (2026-11-22)
 
 
