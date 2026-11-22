@@ -6,13 +6,11 @@
 ### Features
 
 * **chips:** look a chip up by its mark or part number in a Find chip dialog ([bead5aa](https://github.com/IamMrCupp/benchhud/commit/bead5aaa24127d4ab9a78bb3b90bc7a3e4081680))
-* **chips:** look a chip up by its mark or part number in a Find chip dialog ([7b44715](https://github.com/IamMrCupp/benchhud/commit/7b4471530de45eca50135a8e94522df7bd1f68de))
 
 
 ### Bug Fixes
 
 * **chips:** Find chip's keys never act on a list that's behind the box, and chip text stays out of tooltips ([bead5aa](https://github.com/IamMrCupp/benchhud/commit/bead5aaa24127d4ab9a78bb3b90bc7a3e4081680))
-* **chips:** Find chip's keys never act on a list that's behind the box, and chip text stays out of tooltips ([7b44715](https://github.com/IamMrCupp/benchhud/commit/7b4471530de45eca50135a8e94522df7bd1f68de))
 
 ## [0.25.0](https://github.com/IamMrCupp/benchhud/compare/v0.24.0...v0.25.0) (2026-11-22)
 
