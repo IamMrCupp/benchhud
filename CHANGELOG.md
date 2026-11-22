@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/IamMrCupp/benchhud/compare/v0.22.1...v0.23.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** find a chip's documents in a local folder, by hash then by name ([dc86641](https://github.com/IamMrCupp/benchhud/commit/dc8664188a0119e0eea58e8d05269ac904983777))
+
 ## [0.22.1](https://github.com/IamMrCupp/benchhud/compare/v0.22.0...v0.22.1) (2026-11-21)
 
 
