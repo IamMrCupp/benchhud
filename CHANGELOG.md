@@ -3,6 +3,11 @@
 ## [0.22.1](https://github.com/IamMrCupp/benchhud/compare/v0.22.0...v0.22.1) (2026-11-21)
 
 
+### Features
+
+* **chips:** read chips from a chip-data checkout or a built index ([5e74241](https://github.com/IamMrCupp/benchhud/commit/5e7424117e07f0f854c35c46c1d4fa866bac6d7f))
+
+
 ### Bug Fixes
 
 * **chips:** keep the directory source from raising on files it can't read ([ec921cb](https://github.com/IamMrCupp/benchhud/commit/ec921cbea8a018aeafb8173c60e40b9da6cfe104))
