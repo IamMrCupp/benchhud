@@ -197,7 +197,13 @@ viewer = "auto"                        # auto | openboardview | flexbv
 # and doesn't download anything; update a checkout yourself.
 #
 # With no sources there's no chip data and nothing else changes.
-datasheet_dir = ""        # e.g. "~/datasheets" — kept here; not used yet
+
+# Where you keep datasheets, searched recursively. A chip lists its documents by
+# fingerprint — a filename and a SHA-256 — and never the file; this is where the
+# files are looked for. A file whose hash matches is that document, whatever
+# it's called; failing that, one with the same name is offered and marked as a
+# name match. Leave it empty if you don't keep any.
+datasheet_dir = ""        # e.g. "~/datasheets"
 
 # One block per source, in order of precedence: where two sources disagree
 # about a chip, the first one listed wins and the other is kept as a conflict.

@@ -17,6 +17,10 @@ one source). Each of those but "switched off" writes a log line.
 Building reads nothing. Reading a directory is the slow part, and it belongs
 off the GUI thread: :func:`warm` hands the read to a worker, so the first
 lookup finds everything already in memory.
+
+The datasheet library is built the same way from ``[chips] datasheet_dir``:
+:func:`build_datasheet_library` reads nothing, :func:`warm_library` lists the
+folder on a worker, and no folder means no library and no thread.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from collections.abc import Callable, Iterable
 from typing import Protocol
 
 from benchhud.chips.composite import CompositeChipSource
+from benchhud.chips.datasheets import DatasheetLibrary
 from benchhud.chips.dir_source import DirChipSource, LoadReport
 from benchhud.chips.source import ChipSource, NullChipSource
 
@@ -100,6 +105,27 @@ def warm(source: ChipSource, run: Executor | None = None) -> bool:
     if not callable(reload):
         return False
     (run or _thread)(reload)
+    return True
+
+
+def build_datasheet_library(path: str) -> DatasheetLibrary:
+    """The datasheet library for ``[chips] datasheet_dir``. Reads nothing.
+
+    A blank folder is a library that isn't configured: it finds nothing and
+    never touches the disk.
+    """
+    return DatasheetLibrary.from_config(path.strip())
+
+
+def warm_library(library: DatasheetLibrary, run: Executor | None = None) -> bool:
+    """Have ``library`` list its folder now, off the calling thread.
+
+    Listing only — a file is hashed when a lookup needs it. Returns whether
+    there was a folder to list; with none, no thread is started.
+    """
+    if not library.configured:
+        return False
+    (run or _thread)(library.reload)
     return True
 
 
