@@ -39,8 +39,8 @@ ticket system is a protocol with a fake, not a dependency.
   adapters cross-mapped to assigned assets, with a manual port→asset bind),
   `pinout` (a static JTAG/SWD/UART/CAN/SPI/I²C crib beside the engagement,
   stream-safe), `chip` (one chip from the chip reference as a card — part
-  number, maker, package, function, marks — looked up off the GUI thread,
-  stream-safe), `captures` (firmware-dump / capture artifact metadata by ref,
+  number, maker, package, function, marks — looked up off the GUI thread in
+  the on-air chip sources only, stream-safe), `captures` (firmware-dump / capture artifact metadata by ref,
   off air), plus `telemetry` (superseded by
   `power`, class retained).
 - **`capture/`** — `FrameSource` protocol, `SyntheticFrameSource`,
@@ -144,9 +144,12 @@ ticket system is a protocol with a fake, not a dependency.
   single value wins it, a later one that disagrees is kept as a `Conflict`,
   lists are joined; `merged()` gives a `MergedChip` saying which source each
   part came from, while `get` / `by_marking` still return plain chips),
-  `builder` (`build_chip_source` — the `[chips]` config's ordered
-  `[[chips.sources]]` to one source: the null source when there are none, a
-  composite otherwise; `warm` hands the first read to a worker thread). The
+  `builder` (`build_chip_sources` — the `[chips]` config's ordered
+  `[[chips.sources]]` to two views of the same sources: `everything` for the
+  operator's screens, and `on_air`, a second composite over the entries not
+  marked `on_air = false`, which is all the Chip panel is handed; the null
+  source when there are none; `warm` hands the first read to a worker
+  thread). The
   main window builds it at start and after Preferences; Preferences → Chips
   edits the list and shows what each folder loaded, read on a worker.
   `datasheets` (`DatasheetLibrary` — the folder of documents, found by

@@ -324,6 +324,12 @@ class BoardsConfig:
     viewer: str = "auto"
 
 
+#: Whether a chip source is on air when its entry doesn't say. The one place
+#: that default lives: the config loader, a new row in Preferences and the
+#: dataclass below all read it from here.
+CHIP_SOURCE_ON_AIR = True
+
+
 @dataclass
 class ChipSourceConfig:
     """One place chip data is read from (a ``[[chips.sources]]`` entry)."""
@@ -334,6 +340,9 @@ class ChipSourceConfig:
     kind: str = "dir"
     path: str = ""
     enabled: bool = True
+    # Whether the Chip panel — stream output — may show what this source says.
+    # Off air, Find chip and the inventory row still use it; the card doesn't.
+    on_air: bool = CHIP_SOURCE_ON_AIR
 
 
 @dataclass
@@ -440,7 +449,54 @@ def _chip_source_from_dict(data: Any) -> ChipSourceConfig | None:
         kind=kind.strip().lower() if isinstance(kind, str) and kind.strip() else "dir",
         path=path.strip() if isinstance(path, str) else "",
         enabled=data.get("enabled", True) is not False,
+        on_air=_chip_source_on_air(name.strip(), data),
     )
+
+
+def _meant_as_on_air(key: Any) -> bool:
+    """Whether a key reads as a go at ``on_air`` that isn't it.
+
+    ``on-air``, ``onair``, ``On_Air``, ``off_air``: the switch, misspelt. TOML
+    takes any of them without complaint and they'd be ignored, which is the
+    one outcome that mustn't be silent here.
+    """
+    return key != "on_air" and _air_key(key) in ("onair", "offair", "air")
+
+
+def _air_key(key: Any) -> str:
+    """A key as it's compared for that: letters and digits only, case ignored."""
+    return "".join(c for c in key.casefold() if c.isalnum()) if isinstance(key, str) else ""
+
+
+def _chip_source_on_air(name: str, data: Mapping[str, Any]) -> bool:
+    """Whether a ``[[chips.sources]]`` entry is on air.
+
+    No ``on_air`` key is the default. A key that's there and isn't a plain
+    true or false keeps the source **off** air, and says so in the log:
+    somebody wrote the key to hold a source back, and a typo mustn't be what
+    puts it on the stream. The same goes for a key that's the switch misspelt
+    (``on-air``, ``onair``, ``off_air``) — whatever it's set to.
+    """
+    misspelt = sorted(key for key in data if _meant_as_on_air(key))
+    if misspelt:
+        log.warning(
+            "config: chip source %r has %s, which isn't a key — the switch is on_air;"
+            " keeping it off the stream card",
+            name,
+            ", ".join(misspelt),
+        )
+        return False
+    if "on_air" not in data:
+        return CHIP_SOURCE_ON_AIR
+    switch = _switch(data["on_air"])
+    if switch is None:
+        log.warning(
+            "config: chip source %r has an on_air that isn't true or false;"
+            " keeping it off the stream card",
+            name,
+        )
+        return False
+    return switch
 
 
 @dataclass
@@ -617,6 +673,23 @@ class Config:
             cfg.chips.sources = [
                 source for source in map(_chip_source_from_dict, raw_sources) if source
             ]
+        # The switch written on [chips] itself, where it isn't a key. It's
+        # per source — but someone wrote it to hold something back, so unless
+        # it plainly says "on air" every source is kept off, and it's said.
+        misplaced = sorted(k for k in chips_d if k == "on_air" or _meant_as_on_air(k))
+        if misplaced:
+            # Only "on air: yes" asks for nothing to be held back.
+            holds_back = any(
+                _air_key(key) != "onair" or _switch(chips_d[key]) is not True for key in misplaced
+            )
+            log.warning(
+                "config: [chips] has %s, which belongs on a [[chips.sources]] entry%s",
+                ", ".join(misplaced),
+                "; keeping every chip source off the stream card" if holds_back else "",
+            )
+            if holds_back:
+                for source in cfg.chips.sources:
+                    source.on_air = False
         _apply("flash", cfg.flash, _table(data, "flash"), ("command", "programmer"))
         _apply("minipro", cfg.minipro, _table(data, "minipro"), ("command", "last_chip"))
         _apply(

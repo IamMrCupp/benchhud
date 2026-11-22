@@ -14,6 +14,20 @@ it has no folder, or when its name was already taken by an entry above it
 (the name is what a value's provenance is recorded under, so it has to mean
 one source). Each of those but "switched off" writes a log line.
 
+**Two views of the same sources.** An entry can be kept off air
+(``on_air = false``): the operator's screens — Find chip, the inventory row —
+still use it, and the Chip panel, which is stream output, doesn't.
+:func:`build_chip_sources` hands back both: ``everything``, and ``on_air``,
+which is a second composite over the on-air sources only. It's built from the
+sources, never filtered out of a merged chip — a merged value doesn't remember
+enough to be un-merged safely. The two share the source objects, so a folder
+is read once.
+
+When there are sources and none is on air, ``on_air`` is a composite of
+nothing rather than the null source: it has no chip for any part number, and
+the card says "no such chip" like it would for any miss — not "no chip data",
+which would be wrong, and not anything about sources being held back.
+
 Building reads nothing. Reading a directory is the slow part, and it belongs
 off the GUI thread: :func:`warm` hands the read to a worker, so the first
 lookup finds everything already in memory.
@@ -28,6 +42,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Protocol
 
 from benchhud.chips.composite import CompositeChipSource
@@ -52,6 +67,17 @@ class SourceEntry(Protocol):
     kind: str
     path: str
     enabled: bool
+    on_air: bool
+
+
+@dataclass(frozen=True)
+class ChipSources:
+    """The configured sources, as the two things that look chips up in them."""
+
+    #: Every source. For the operator's screens.
+    everything: ChipSource
+    #: The on-air sources only. For the Chip panel, which is stream output.
+    on_air: ChipSource
 
 
 def name_key(name: str) -> str:
@@ -76,18 +102,38 @@ def left_out(entry: SourceEntry, taken: Iterable[str] = ()) -> str | None:
     return None
 
 
-def build_chip_source(entries: Iterable[SourceEntry]) -> ChipSource:
-    """The source for these config entries, in their order. Reads nothing."""
+def build_chip_sources(entries: Iterable[SourceEntry]) -> ChipSources:
+    """Both views of these config entries, in their order. Reads nothing.
+
+    An off-air entry is a source like any other — it takes its name and its
+    place in the order — and is simply not in ``on_air``. Only an entry whose
+    ``on_air`` is plainly ``True`` is on air.
+    """
     sources: list[ChipSource] = []
+    on_air: list[ChipSource] = []
     taken: set[str] = set()
     for entry in entries:
         reason = left_out(entry, taken)
         if reason is None:
             taken.add(name_key(entry.name))
-            sources.append(DirChipSource.from_config(entry.path.strip(), entry.name))
+            source = DirChipSource.from_config(entry.path.strip(), entry.name)
+            sources.append(source)
+            if entry.on_air is True:
+                on_air.append(source)
         elif entry.enabled:
             log.warning("chips: leaving out source %r: %s", entry.name, reason)
-    return CompositeChipSource(sources) if sources else NullChipSource()
+    if not sources:
+        return ChipSources(NullChipSource(), NullChipSource())
+    return ChipSources(CompositeChipSource(sources), CompositeChipSource(on_air))
+
+
+def build_chip_source(entries: Iterable[SourceEntry]) -> ChipSource:
+    """Every source for these config entries, as one. Reads nothing.
+
+    For the operator's screens. Stream output takes
+    :func:`build_chip_sources`' ``on_air`` instead.
+    """
+    return build_chip_sources(entries).everything
 
 
 def _thread(job: Callable[[], None]) -> None:

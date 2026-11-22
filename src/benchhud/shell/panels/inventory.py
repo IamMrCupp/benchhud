@@ -23,8 +23,15 @@ When a chip source is configured, selecting a part that has an MPN shows what
 the chip reference knows about that part number — maker, package, functions,
 description, markings — and offers **Open datasheet** for the file the
 datasheet library holds. That's generic reference about a part number: it
-names no job, no customer and no engagement, so the panel is exactly as
-stream-safe as it was.
+names no job, no customer and no engagement.
+
+**It reads every chip source, a source kept off air included** (``on_air =
+false``, #482). That switch is about the Chip panel's card; this row is the
+operator's lookup and shows what the operator's own overlay says. So with an
+off-air source configured, this panel is *not* as stream-safe as its tag
+says: select a part that source describes and its words are drawn here.
+Whether the row should read the on-air sources instead is an open question
+(#508).
 
 - **No chip source configured:** none of this exists. The panel looks and
   behaves as it did before chips.

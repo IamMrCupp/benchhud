@@ -72,7 +72,7 @@ from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
-from benchhud.chips.builder import build_chip_source, build_datasheet_library, warm_library
+from benchhud.chips.builder import build_chip_sources, build_datasheet_library, warm_library
 from benchhud.chips.builder import warm as warm_chip_source
 from benchhud.chips.datasheets import DatasheetLibrary
 from benchhud.chips.model import Chip, Document
@@ -552,7 +552,8 @@ class MainWindow(QMainWindow):
         self.panels.add_panel(self.interface_panel, None)
         self.pinout_panel = PinoutPanel(active_ref=lambda: self._active_engagement)
         self.panels.add_panel(self.pinout_panel, None)
-        self.chip_panel = ChipPanel(lambda: self._chip_source)
+        # Stream output: the on-air sources only, never every source (#482).
+        self.chip_panel = ChipPanel(lambda: self._on_air_chip_source)
         self.panels.add_panel(self.chip_panel, None)
         self.capture_panel = CapturePanel(
             lambda: self._recon_source,
@@ -1008,17 +1009,34 @@ class MainWindow(QMainWindow):
 
         No sources configured is the null source: nothing is read and no
         thread is started.
+
+        Also sets what the Chip panel looks chips up in: the sources that are
+        on air, and only those. The two share their sources, so reading
+        "every source" has read the on-air ones.
         """
-        # A copy of what it was built from, to tell later whether that changed.
-        self._chip_entries = [replace(entry) for entry in self._config.chips.sources]
-        source = build_chip_source(self._chip_entries)
-        warm_chip_source(source)
-        return source
+        entries = [replace(entry) for entry in self._config.chips.sources]
+        sources = build_chip_sources(entries)
+        self._on_air_chip_source: ChipSource = sources.on_air
+        # A copy of what it was built from, to tell later whether that changed
+        # — a source going on or off air included. Kept once it's built, so a
+        # build that failed isn't taken for "nothing changed" next time.
+        self._chip_entries = entries
+        warm_chip_source(sources.everything)
+        return sources.everything
 
     @property
     def chip_source(self) -> ChipSource:
-        """Where chips are looked up — the null source when none is configured."""
+        """Where the operator's screens look chips up — every configured source.
+
+        The null source when none is configured. Not for stream output: that
+        is :attr:`on_air_chip_source`.
+        """
         return self._chip_source
+
+    @property
+    def on_air_chip_source(self) -> ChipSource:
+        """Where the Chip panel looks chips up — the on-air sources only."""
+        return self._on_air_chip_source
 
     def reconfigure_chip_source(self) -> None:
         """After a Preferences OK: rebuild the chip source, or just re-read it.
@@ -1033,12 +1051,14 @@ class MainWindow(QMainWindow):
             warm_chip_source(self._chip_source)
         else:
             self._chip_source = self._make_chip_source()
+        # The stream card first, before anything else gets a chance to go
+        # wrong: a source just taken off air has to come off the card.
+        self.chip_panel.refresh()
         if self._chip_dialog is not None:
             # Find chip may be open. A new list: it looks in the new source
             # from here on. The same list: the folders may have changed, so it
-            # has them read again before it looks — like the chip panel below.
+            # has them read again before it looks — like the chip panel above.
             self._chip_dialog.set_source(self._chip_source, reread=same_list)
-        self.chip_panel.refresh()
 
     def _make_datasheet_library(self) -> DatasheetLibrary:
         """Build the datasheet library from config and list it, off this thread.

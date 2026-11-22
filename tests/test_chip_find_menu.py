@@ -1188,4 +1188,4 @@ def test_the_chips_doc_is_linked_and_names_every_site_it_can_send_a_mark_to() ->
         assert f"`{site.host}`" in doc  # a site added to the code is a site the doc must own up to
     assert "stays active until you end it" in doc
     assert "End engagement…" in doc
-    assert "issues/482" in doc
+    assert "on_air = false" in doc  # the switch #482 asked for, in place of its caveat
