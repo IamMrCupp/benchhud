@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.0](https://github.com/IamMrCupp/benchhud/compare/v0.23.0...v0.24.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** merge several chip sources into one, with provenance and conflicts ([b6b1774](https://github.com/IamMrCupp/benchhud/commit/b6b17748c05315346fd7259405a6279904bb7dc9))
+
+
+### Bug Fixes
+
+* **chips:** keep one source's bad answer from sinking a merged lookup ([b6b1774](https://github.com/IamMrCupp/benchhud/commit/b6b17748c05315346fd7259405a6279904bb7dc9))
+
 ## [0.23.0](https://github.com/IamMrCupp/benchhud/compare/v0.22.1...v0.23.0) (2026-11-22)
 
 
