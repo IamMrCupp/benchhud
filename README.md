@@ -65,8 +65,9 @@ glows — on the scope image, with the rest of the board left alone.*
   bring its own scene up when it starts and hand it back when it exits. Off
   until you turn it on. [More →](docs/OBS-SCENES.md)
 - **Terminal** — your shell in a panel, and optionally on stream as a read-only
-  OBS source with a pause button for anything private. macOS and Linux.
-  [More →](docs/TERMINAL.md)
+  OBS source with a pause button for anything private. macOS, Linux and
+  Windows — the Windows backend passes on CI and hasn't run on a Windows bench
+  yet. [More →](docs/TERMINAL.md)
 - **Flash** — read, back up and write SPI flash chips with flashrom, and chips on
   a T48 programmer with minipro. A backup is two reads that must match, and
   every dump is filed with the job.
@@ -247,6 +248,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [WINDOWS-SETUP.md](docs/WINDOWS-SETUP.md) | The Windows virtual camera: registering it, and adding it to OBS. |
 | [PACKAGING.md](docs/PACKAGING.md) | The packages: the Ubuntu `.deb`, the Windows MSI, the signed macOS `.app`, releases, and what CI builds when. |
 | [BROWSER-SOURCES.md](docs/BROWSER-SOURCES.md) | The data panels as OBS Browser sources: URLs, what goes on air. |
+| [OBS-SCENES.md](docs/OBS-SCENES.md) | Picking OBS's live scene from the Tools dock, and tools that bring their own scene up. |
 | [TERMINAL.md](docs/TERMINAL.md) | The terminal panel and its read-only stream view. |
 | [POWER-ON.md](docs/POWER-ON.md) | Power-on current signatures compared with a known-good board. |
 | [READINGS.md](docs/READINGS.md) | Test-point readings compared with a known-good board. |
@@ -255,6 +257,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |
 | [CHIPS.md](docs/CHIPS.md) | The chip reference: sources, datasheets, Find chip, and what goes on stream. |
+| [BENCHMARK.md](docs/BENCHMARK.md) | `scripts/bench_hud.py`: the frame pipeline timed headless, so a perf change is measured the same way before and after. |
 
 ## License
 
