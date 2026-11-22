@@ -75,6 +75,8 @@ from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
 from benchhud.chips.builder import build_chip_source, build_datasheet_library, warm_library
 from benchhud.chips.builder import warm as warm_chip_source
 from benchhud.chips.datasheets import DatasheetLibrary
+from benchhud.chips.model import Chip, Document
+from benchhud.chips.opening import open_held
 from benchhud.chips.source import ChipSource
 from benchhud.config import Config, OutputConfig, PersistCallback
 from benchhud.demo import DemoSignal
@@ -133,6 +135,7 @@ from benchhud.recon import (
 )
 from benchhud.shell.about import about_html
 from benchhud.shell.board_dialogs import BoardSearchDialog, BoardsToSourceDialog
+from benchhud.shell.chip_dialog import FindChipDialog, OpenDocument, OpenOutcome
 from benchhud.shell.composite_view import CompositeView
 from benchhud.shell.dock_groups import (
     DOCK_GROUPS,
@@ -326,6 +329,18 @@ def largest_screen(screens):
 JOB_COMMAND_TIMEOUT_S = 5.0
 
 
+#: Find chip's reason for "Open datasheet" being off when no folder is set.
+NO_DATASHEET_FOLDER = (
+    "No datasheet folder is set, so there's nothing to open. Choose one in Preferences → Chips."
+)
+#: Find chip's reason for its link-outs being off. The last sentence is there
+#: because it's true: nothing in the app ends an engagement.
+LINK_OUT_LOCKED_BY_ENGAGEMENT = (
+    "Web lookups are off while a recon engagement is active — they'd tell an outside site"
+    " what's on the bench. An engagement stays active until benchhud is restarted."
+)
+
+
 class MainWindow(QMainWindow):
     """Top-level HUD window."""
 
@@ -426,6 +441,8 @@ class MainWindow(QMainWindow):
         self._board_library = self._make_board_library()
         self._chip_source: ChipSource = self._make_chip_source()
         self._datasheet_library: DatasheetLibrary = self._make_datasheet_library()
+        #: Chips → Find chip… — made the first time it's asked for, then kept.
+        self._chip_dialog: FindChipDialog | None = None
 
         self._stabilise_camera_paths()
         self.setObjectName("BenchhudMainWindow")
@@ -557,6 +574,7 @@ class MainWindow(QMainWindow):
         self._update_terminal_panel()
 
         self._build_boards_menu()
+        self._build_chips_menu()
         self._build_view_menu()
         self._default_state = self.saveState()  # for "Reset layout"
 
@@ -737,6 +755,15 @@ class MainWindow(QMainWindow):
         self.boards_to_source_action.triggered.connect(self.open_boards_to_source)
         menu.addAction(self.boards_to_source_action)
 
+    def _build_chips_menu(self) -> None:
+        menu = self.menuBar().addMenu("Chips")
+        # No shortcut, like Find board: on Linux every Ctrl chord is one the
+        # Terminal panel's shell may be waiting for.
+        self.find_chip_action = QAction("Find chip…", self)
+        self.find_chip_action.setToolTip("Look a chip up by the mark on it, or its part number")
+        self.find_chip_action.triggered.connect(self.open_chip_search)
+        menu.addAction(self.find_chip_action)
+
     def _build_view_menu(self) -> None:
         menu = self.menuBar().addMenu("View")
         # Every panel, by group: a dock's heading bar has no close button, and a
@@ -900,6 +927,9 @@ class MainWindow(QMainWindow):
         engagement = resolve_engagement(self._recon_source, ref)
         if engagement is not None:
             self._active_engagement = engagement.ref
+            if self._chip_dialog is not None:
+                # Find chip's web lookups go off with it — see may_link_out.
+                self._chip_dialog.refresh_link_outs()
         return engagement
 
     def selected_job_ref(self) -> str | None:
@@ -966,10 +996,16 @@ class MainWindow(QMainWindow):
         OK doubles as "pick up what changed on disk". A new source has no copy
         yet, so it's only built when the list really changed.
         """
-        if self._chip_entries == self._config.chips.sources:
+        same_list = self._chip_entries == self._config.chips.sources
+        if same_list:
             warm_chip_source(self._chip_source)
         else:
             self._chip_source = self._make_chip_source()
+        if self._chip_dialog is not None:
+            # Find chip may be open. A new list: it looks in the new source
+            # from here on. The same list: the folders may have changed, so it
+            # has them read again before it looks — like the chip panel below.
+            self._chip_dialog.set_source(self._chip_source, reread=same_list)
         self.chip_panel.refresh()
 
     def _make_datasheet_library(self) -> DatasheetLibrary:
@@ -1000,6 +1036,65 @@ class MainWindow(QMainWindow):
             warm_library(self._datasheet_library)
         else:
             self._datasheet_library = self._make_datasheet_library()
+            if self._chip_dialog is not None:
+                # A folder set or cleared turns Find chip's Open datasheet on or off.
+                self._chip_dialog.set_open_document(self._chip_opener(), NO_DATASHEET_FOLDER)
+
+    # --- Chips → Find chip… -----------------------------------------------
+
+    def open_chip_search(self) -> FindChipDialog:
+        """ "What is this chip?" — by the mark on it or its part number.
+
+        One dialog, kept: it's shown beside the HUD, not over it, and coming
+        back to it finds the text and the pick where they were left. It's
+        given this window's chip source, an opener over the datasheet library,
+        and the answer to "may this link out right now?". When Preferences
+        changes the sources or the datasheet folder, the dialog is told
+        (:meth:`reconfigure_chip_source`, :meth:`reconfigure_datasheet_library`).
+        Returned for tests.
+        """
+        dialog = self._chip_dialog
+        if dialog is None:
+            dialog = self._chip_dialog = FindChipDialog(
+                self._chip_source,
+                self._chip_opener(),
+                open_unavailable=NO_DATASHEET_FOLDER,
+                link_out_allowed=self.may_link_out,
+                link_out_locked=LINK_OUT_LOCKED_BY_ENGAGEMENT,
+                parent=self,
+            )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        dialog.refresh_link_outs()  # already showing: no show event to ask again
+        return dialog
+
+    def _chip_opener(self) -> OpenDocument | None:
+        """What Find chip opens documents with — ``None`` with no datasheet folder."""
+        return self._open_chip_document if self._datasheet_library.configured else None
+
+    def _open_chip_document(self, chip: Chip, document: Document | None) -> OpenOutcome:
+        """Find the file held for a chip's document and open it.
+
+        Called on Find chip's worker thread: finding can hash the folder. The
+        library is read here, not captured, so a folder changed in Preferences
+        is the one searched. What it says is :mod:`benchhud.chips.opening`'s —
+        the same words as the inventory row, exact copy or name match.
+        """
+        done = open_held(self._datasheet_library, chip, document)
+        return OpenOutcome(done.opened, done.detail)
+
+    def may_link_out(self) -> bool:
+        """Whether a chip lookup may be handed to an outside site right now.
+
+        Not while a recon engagement is active: a marking search would tell a
+        third party what's on the target. Asked by Find chip at every click.
+
+        **An engagement, once imported, stays active until benchhud is
+        restarted** — nothing in the app ends one. So after the first import
+        this is no for the rest of the run, and the dialog says so.
+        """
+        return self._active_engagement is None
 
     def open_board_file(self, path) -> bool:
         """Open a board file in the configured viewer (or the OS handler)."""

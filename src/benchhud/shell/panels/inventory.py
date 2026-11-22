@@ -72,13 +72,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from benchhud.chips.datasheets import (
-    DATASHEET_KIND,
-    ChipDocument,
-    DatasheetLibrary,
-    open_document,
+from benchhud.chips.datasheets import ChipDocument, DatasheetLibrary, open_document
+from benchhud.chips.model import Chip
+from benchhud.chips.opening import (
+    find_datasheet,
+    held_line,
+    not_held_line,
+    opened_line,
 )
-from benchhud.chips.model import Chip, Document
 from benchhud.chips.source import ChipSource, NullChipSource
 from benchhud.inventory.source import InventorySource, InventoryWriteError, Part
 from benchhud.shell.panel import PANEL_MARGINS, Panel
@@ -125,64 +126,19 @@ def chip_summary(chip: Chip) -> str:
     return "\n".join(lines)
 
 
-#: A document name longer than this is cut in the middle to show.
-_NAME_LIMIT = 40
-
-
-def document_name(document: Document) -> str:
-    """The name a chip gives a document, fit to show; ``""`` when it gives none.
-
-    Only the last part: a fingerprint can carry the folders of whoever wrote
-    it down (``C:\\Users\\…\\EX1234.pdf``), and those are nobody's business
-    on a panel that can be on stream. A long name is cut in the middle, where
-    it matters least.
-    """
-    name = (document.filename or "").strip().replace("\\", "/").rsplit("/", 1)[-1].strip()
-    if len(name) > _NAME_LIMIT:
-        keep = (_NAME_LIMIT - 1) // 2
-        name = f"{name[:keep]}…{name[-(_NAME_LIMIT - 1 - keep) :]}"
-    return name
-
-
-def find_datasheet(library: DatasheetLibrary, chip: Chip) -> ChipDocument | None:
-    """The chip's datasheet and the file held for it, or ``None`` when none is.
-
-    The same pick as :meth:`DatasheetLibrary.datasheet` — the first datasheet
-    with a file, an exact match over an earlier name match — but it keeps the
-    document, so the row can show the chip's name for it and not the file's.
-    This is the call that hashes: off the GUI thread only.
-    """
-    held = [
-        entry
-        for entry in library.for_chip(chip)
-        if entry.document.kind == DATASHEET_KIND and entry.file is not None
-    ]
-    return next((entry for entry in held if entry.file.exact), held[0] if held else None)
-
-
 def datasheet_status(
     chip: Chip, held: ChipDocument | None, *, library_configured: bool
 ) -> tuple[str, str]:
     """``(the line above the button, the button's text)`` for a chip's datasheet.
 
     A name match says it's a name match in both, so it can be told from an
-    exact one before the file is opened.
+    exact one before the file is opened. The lines are
+    :mod:`benchhud.chips.opening`'s, shared with the Find chip dialog.
     """
     if held is not None and held.file is not None:
-        name = document_name(held.document) or "the datasheet listed"
-        if held.file.exact:
-            return f"{name} — held, an exact copy", "Open datasheet"
-        return (
-            f"{name} — held, matched by name only; it may be another revision",
-            "Open datasheet (by name)",
-        )
-    listed = [d for d in chip.documents if d.kind == DATASHEET_KIND]
-    if not listed:
-        return "No datasheet is listed for this chip", "Open datasheet"
-    name = document_name(listed[0]) or "one with no name"
-    if not library_configured:
-        return f"No datasheet folder set — the chip lists {name}", "Open datasheet"
-    return f"Not held — the chip lists {name}", "Open datasheet"
+        button = "Open datasheet" if held.file.exact else "Open datasheet (by name)"
+        return held_line(held), button
+    return not_held_line(chip, library_configured=library_configured), "Open datasheet"
 
 
 def _row_text(part: Part) -> str:
@@ -430,16 +386,8 @@ class InventoryPanel(Panel):
         held = self._datasheet
         if held is None or held.file is None:
             return
-        name = document_name(held.document) or "the datasheet"
-        if not self._open_datasheet(held.file.path):
-            self._show_message(f"Couldn't open {name}.", error=True)
-        elif held.file.exact:
-            self._show_message(f"Opened {name}.", error=False)
-        else:
-            self._show_message(
-                f"Opened {name} — matched by name only, so check it's the right revision.",
-                error=False,
-            )
+        opened = self._open_datasheet(held.file.path)
+        self._show_message(opened_line(held, opened), error=not opened)
 
     # --- behaviour -------------------------------------------------------
 

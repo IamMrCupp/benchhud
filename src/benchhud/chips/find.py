@@ -22,15 +22,27 @@ of the mark on some other chip, and both are shown.
 No Qt, no I/O of its own. It doesn't catch what a source raises — a source
 isn't meant to raise, and the caller that keeps this off the GUI thread is the
 one that knows what to say when it does.
+
+**Where a value came from.** When the source puts several sources together
+(:class:`~benchhud.chips.composite.CompositeChipSource` over two or more),
+:func:`with_provenance` hangs each candidate's
+:class:`~benchhud.chips.composite.MergedChip` on it: which source supplied
+each value, and where they disagree. With one source there's nothing to tell
+apart, and a candidate carries none.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
 
+from benchhud.chips.composite import MergedChip
 from benchhud.chips.marking import MarkingMatch, normalise_mark
 from benchhud.chips.model import Chip
 from benchhud.chips.source import ChipSource
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -39,11 +51,15 @@ class Candidate:
 
     ``by_part_number`` says the text is this chip's part number; ``match`` is
     the marking that matched, when one did. At least one of the two holds.
+
+    ``merged`` is where each of the chip's values came from, when it was put
+    together from several sources — see :func:`with_provenance`.
     """
 
     chip: Chip
     by_part_number: bool = False
     match: MarkingMatch | None = None
+    merged: MergedChip | None = None
 
 
 def find_chips(source: ChipSource, text: str | None) -> list[Candidate]:
@@ -70,4 +86,39 @@ def find_chips(source: ChipSource, text: str | None) -> list[Candidate]:
             continue
         seen.add(key)
         found.append(Candidate(match.chip, match=match))
+    return found
+
+
+def tells_sources_apart(source: object) -> bool:
+    """Whether ``source`` merges two or more sources and can say which said what."""
+    sources = getattr(source, "sources", None)
+    return callable(getattr(source, "merged", None)) and (
+        isinstance(sources, tuple | list) and len(sources) > 1
+    )
+
+
+def with_provenance(
+    source: object, candidates: Iterable[Candidate], limit: int | None = None
+) -> list[Candidate]:
+    """``candidates`` with each one's :class:`MergedChip` attached, where there is one.
+
+    Only for a source that tells its sources apart; any other gives the
+    candidates back as they were. ``limit`` is how many from the top to do it
+    for — the ones that will be shown. A candidate whose provenance can't be
+    had, or no longer describes the chip in hand, simply goes without: it's
+    extra, and the chip is still the chip.
+    """
+    found = list(candidates)
+    if not tells_sources_apart(source):
+        return found
+    for index, candidate in enumerate(found):
+        if limit is not None and index >= limit:
+            break
+        try:
+            merged = source.merged(candidate.chip.mpn)  # type: ignore[attr-defined]
+        except Exception:
+            log.exception("chips: no provenance for %r", candidate.chip.mpn)
+            continue
+        if isinstance(merged, MergedChip) and merged.chip == candidate.chip:
+            found[index] = replace(candidate, merged=merged)
     return found
