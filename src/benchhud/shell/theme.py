@@ -14,7 +14,11 @@ readout, and an oscilloscope's channel colours need a dark screen to read.
 
 from __future__ import annotations
 
+import atexit
+import shutil
+import tempfile
 from importlib.resources import files
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -22,7 +26,7 @@ from PySide6.QtWidgets import QApplication, QGroupBox, QWidget
 
 from benchhud.shell.fonts import apply_ui_font
 from benchhud.shell.qt_util import heading_font, plain_font
-from benchhud.themes import DARK, DEFAULT_APPEARANCE, Look, Theme, resolve
+from benchhud.themes import DARK, DEFAULT_APPEARANCE, RGBA, Look, Theme, resolve
 
 #: The dark palette, kept under its old name: ``@name`` in the stylesheets
 #: below is one of these keys. The values for every look are in
@@ -219,6 +223,63 @@ QCheckBox:disabled, QRadioButton:disabled { color: @faint; }
 """
 
 
+#: A dropdown's arrow and a spin box's pair, drawn flat in the look's colours.
+#: Left to Qt, the buttons got a bevelled frame with a dark edge that stood out
+#: on the light look; styling the button away drops Qt's arrow with it, so the
+#: arrows are drawn here instead.
+_ARROW_QSS = """
+QComboBox { padding-right: 22px; }
+QComboBox::drop-down {
+    subcontrol-origin: padding; subcontrol-position: center right;
+    width: 22px; border: none; background: transparent;
+}
+QComboBox::down-arrow { image: url("{down}"); width: 10px; height: 10px; }
+QComboBox::down-arrow:disabled { image: url("{down-off}"); }
+QComboBox::down-arrow:on { top: 1px; }
+
+QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
+    subcontrol-origin: border; width: 18px; border: none; background: transparent;
+}
+QAbstractSpinBox::up-button { subcontrol-position: top right; margin-top: 2px; }
+QAbstractSpinBox::down-button { subcontrol-position: bottom right; margin-bottom: 2px; }
+QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {
+    background: @hover; border-radius: 4px;
+}
+QAbstractSpinBox::up-arrow { image: url("{up}"); width: 8px; height: 8px; }
+QAbstractSpinBox::down-arrow { image: url("{down}"); width: 8px; height: 8px; }
+QAbstractSpinBox::up-arrow:disabled, QAbstractSpinBox::up-arrow:off {
+    image: url("{up-off}");
+}
+QAbstractSpinBox::down-arrow:disabled, QAbstractSpinBox::down-arrow:off {
+    image: url("{down-off}");
+}
+"""
+
+_ARROW_PATHS = {"down": "M2 4h8L6 9z", "up": "M2 8h8L6 3z"}
+_arrow_dir: Path | None = None
+
+
+def _arrow(direction: str, colour: RGBA) -> str:
+    """The path to an arrow SVG in ``colour``, written once per colour per run.
+
+    A stylesheet's image has to be a file, and a custom theme's colour can be
+    anything, so they're made to order in a folder that goes when the app does.
+    """
+    global _arrow_dir
+    if _arrow_dir is None:
+        _arrow_dir = Path(tempfile.mkdtemp(prefix="benchhud-arrows-"))
+        atexit.register(shutil.rmtree, _arrow_dir, True)
+    r, g, b, a = colour
+    path = _arrow_dir / f"{direction}-{r:02x}{g:02x}{b:02x}-{round(a * 100)}.svg"
+    if not path.exists():
+        path.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" '
+            f'viewBox="0 0 12 12"><path d="{_ARROW_PATHS[direction]}" '
+            f'fill="#{r:02x}{g:02x}{b:02x}" fill-opacity="{a:g}"/></svg>'
+        )
+    return path.as_posix()
+
+
 def _coloured(qss: str, colours: dict[str, str]) -> str:
     """``qss`` with each ``@name`` replaced by its colour."""
     for name in sorted(colours, key=len, reverse=True):
@@ -257,7 +318,16 @@ def stylesheet(look: Look | None = None) -> str:
     colours = look.qss()
     mark = "check.svg" if look.dark_check else "check-light.svg"
     check = str(files("benchhud.resources").joinpath(mark)).replace("\\", "/")
-    return _coloured(_QSS, colours) + _coloured(_INDICATOR_QSS, colours).replace("{check}", check)
+    arrows = _coloured(_ARROW_QSS, colours)
+    for name, direction, tone in (
+        ("down", "down", "muted"),
+        ("down-off", "down", "faint"),
+        ("up", "up", "muted"),
+        ("up-off", "up", "faint"),
+    ):
+        arrows = arrows.replace("{" + name + "}", _arrow(direction, look.colours[tone]))
+    indicators = _coloured(_INDICATOR_QSS, colours).replace("{check}", check)
+    return _coloured(_QSS, colours) + indicators + arrows
 
 
 def system_is_dark(app: QApplication) -> bool:

@@ -209,3 +209,45 @@ def test_a_fixed_look_ignores_the_system_changing(qtbot, tmp_path) -> None:
     window._system_scheme_changed()
 
     assert QApplication.instance().styleSheet() == ""
+
+
+# --- dropdown and spin box arrows ----------------------------------------------
+
+
+def _images(qss: str, selector: str) -> list[Path]:
+    """The image files the rules for ``selector`` point at."""
+    found = []
+    for rule in re.findall(re.escape(selector) + r"[^{]*\{[^}]*\}", qss):
+        found += [Path(p) for p in re.findall(r'image: url\("([^"]+)"\)', rule)]
+    return found
+
+
+@pytest.mark.parametrize("choice", ["light", "dark"])
+def test_arrows_are_drawn_flat_in_the_looks_colours(choice) -> None:
+    """Qt's own buttons had a bevelled dark edge that stood out on the light look."""
+    look = resolve(choice, system_dark=True, themes=[])
+    qss = stylesheet(look)
+
+    assert re.search(r"QComboBox::drop-down \{[^}]*border: none", qss)
+    muted = look.qss()["muted"]
+    for selector in ("QComboBox::down-arrow", "QAbstractSpinBox::up-arrow"):
+        arrows = _images(qss, selector)
+        assert arrows and all(a.is_file() for a in arrows), selector
+        assert muted in arrows[0].read_text()
+
+
+def test_a_disabled_arrow_is_fainter(qtbot) -> None:
+    look = resolve("light", system_dark=True, themes=[])
+    disabled = _images(stylesheet(look), "QComboBox::down-arrow:disabled")
+    assert disabled and look.qss()["faint"] in disabled[0].read_text()
+
+
+def test_a_custom_themes_arrows_follow_its_muted_colour(tmp_path) -> None:
+    from benchhud.themes import load_themes
+
+    (tmp_path / "amber.json").write_text(
+        json.dumps({"base": "dark", "colors": {"muted": "#b07a10"}})
+    )
+    look = resolve("theme:amber.json", system_dark=True, themes=load_themes(tmp_path)[0])
+    arrows = _images(stylesheet(look), "QComboBox::down-arrow")
+    assert "#b07a10" in arrows[0].read_text()
