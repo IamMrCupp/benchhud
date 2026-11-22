@@ -47,6 +47,11 @@ glows — on the scope image, with the rest of the board left alone.*
   the whole open ticket queue as a boards-to-source list. Opens in OpenBoardView
   or FlexBV; file a schematic PDF beside the board and FlexBV cross-probes it.
   [More →](docs/BOARDS.md)
+- **Chip reference** — type the mark printed on a chip, or a part number, and get
+  the chip: maker, package, function, and its datasheet if you hold it. Read
+  offline from folders you keep — your own notes on top of shared data — with a
+  stream-safe card for the part on the bench.
+  [More →](docs/CHIPS.md)
 - **Tool launcher** — opens the repair tools you already use (OpenBoardView,
   minipro-gui, whatever's in your config) straight from the HUD.
 - **Virtual camera out** — the composite is written to a v4l2loopback device, so
@@ -237,6 +242,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [JOBS.md](docs/JOBS.md) | The repair log: jobs, captures, fault logging, reports. |
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |
+| [CHIPS.md](docs/CHIPS.md) | The chip reference: sources, datasheets, Find chip, and what goes on stream. |
 
 ## License
 

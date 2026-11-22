@@ -52,6 +52,19 @@ costs a trip to the browser by hand, one that's wrongly on names a client's
 part to a stranger. Only a plain ``True`` is a yes, and the question is asked
 again at every click. benchhud itself still makes no network request.
 
+**Which source said what.** When the chip data is several sources put
+together, the detail pane says which one each value came from, and where two
+disagree it lists every source's value, the one shown first. With a single
+source there's nothing to tell apart and the pane is as it always was. This
+is an operator dialog, so source names and the values that lost are fine here.
+
+**It follows Preferences.** One dialog is kept and shown again, so the text
+and the pick survive a trip back to the board. When the sources or the
+datasheet folder change, the main window hands it the new ones
+(:meth:`FindChipDialog.set_source`, :meth:`FindChipDialog.set_open_document`)
+and what's typed is looked up again — an answer still on its way from the old
+source is dropped.
+
 Read-only, and nothing raises into the HUD: a source or an opener that fails
 gets a log line and a plain message.
 
@@ -86,7 +99,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from benchhud.chips.find import Candidate, find_chips
+from benchhud.chips.composite import MergedChip
+from benchhud.chips.find import Candidate, find_chips, with_provenance
 from benchhud.chips.linkout import (
     MARKING_SITES,
     MAX_SENT,
@@ -143,7 +157,10 @@ MAX_SHOWN = 200
 #: number not much more; this only stops a stray paste from being a lookup.
 MAX_TYPED = 100
 
-NO_DATA = "No chip data is configured, so there's nothing to look up."
+NO_DATA = (
+    "No chip data is configured, so there's nothing to look up."
+    " Add a source in Preferences → Chips."
+)
 NO_OPENER = "No datasheet folder is set up, so there's nothing to open."
 PROMPT = "Type the mark printed on the chip, or a part number in full."
 NOT_PICKED = "Nothing picked — ↓ moves through the candidates."
@@ -162,6 +179,19 @@ REFUSED_ADDRESS = "The address listed isn't a plain https:// one, so it isn't op
 
 _COLUMNS = ("Part number", "Maker", "Package", "Functions", "Mark", "Match")
 _MARK_COLUMN = 4
+
+#: Columns in the detail list: three of data, then which sources have the row.
+_DETAIL_COLUMNS = 4
+_SOURCE_COLUMN = 3
+
+#: A chip's single values, as the detail pane names them, in the order shown.
+_FIELD_NAMES = {
+    "manufacturer": "maker",
+    "family": "family",
+    "package": "package",
+    "package_family": "package family",
+    "description": "description",
+}
 
 _KIND_LABELS = {
     MatchKind.EXACT: "exact",
@@ -206,6 +236,37 @@ def match_label(candidate: Candidate) -> str:
 
 def _plural(count: int, one: str) -> str:
     return f"{count:,} {one if count == 1 else one + 's'}"
+
+
+class _Answer(list):
+    """A lookup's candidates, tagged with which source they were found in.
+
+    The tag is :attr:`FindChipDialog._round` when the lookup started. If the
+    source was swapped while it ran, the tag no longer matches and the answer
+    is dropped.
+    """
+
+    round = 0
+
+
+def provenance_line(merged: MergedChip) -> str:
+    """Which source each single value came from, in a sentence.
+
+    ``From local: package  ·  from community: maker, description``. The part
+    number isn't listed: it's the chip's identity, the same in every source.
+    """
+    by_source: dict[str, list[str]] = {}
+    for name, source in merged.scalar_sources:
+        label = _FIELD_NAMES.get(name)
+        if label is not None:
+            by_source.setdefault(source, []).append(label)
+    parts = [f"from {source}: {', '.join(labels)}" for source, labels in by_source.items()]
+    line = "  ·  ".join(parts)
+    line = line[:1].upper() + line[1:]
+    if merged.conflicts:
+        disputed = ", ".join(_FIELD_NAMES.get(c.field, c.field) for c in merged.conflicts)
+        line = f"{line}.  Sources disagree on {disputed} — every value is listed below."
+    return line
 
 
 def _data_label(label: QLabel) -> QLabel:
@@ -263,6 +324,9 @@ class FindChipDialog(QDialog):
         if configured is None:
             configured = not isinstance(source, NullChipSource)
         self._configured = configured
+        # Goes up when the source is swapped, so an answer from the old one
+        # isn't taken for an answer from the new.
+        self._round = 0
         self._open_document = open_document
         self._open_unavailable = open_unavailable
         self._link_out_allowed = link_out_allowed
@@ -319,17 +383,20 @@ class FindChipDialog(QDialog):
         self.title_label.setFont(title_font)
         self.facts_label = _data_label(QLabel())
         self.description_label = _data_label(QLabel())
+        # Which source each value came from — only when there are several.
+        self.sources_label = _data_label(hint(QLabel()))
         self.found_label = _data_label(hint(QLabel()))
         for label in (
             self.title_label,
             self.facts_label,
             self.description_label,
+            self.sources_label,
             self.found_label,
         ):
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         self.details = QTreeWidget()
-        self.details.setColumnCount(3)
+        self.details.setColumnCount(_DETAIL_COLUMNS)
         self.details.setHeaderHidden(True)
         self.details.setRootIsDecorated(False)
         self.details.setItemsExpandable(False)
@@ -344,6 +411,7 @@ class FindChipDialog(QDialog):
         detail_layout.addWidget(self.title_label)
         detail_layout.addWidget(self.facts_label)
         detail_layout.addWidget(self.description_label)
+        detail_layout.addWidget(self.sources_label)
         detail_layout.addWidget(self.found_label)
         detail_layout.addWidget(self.details, 1)
 
@@ -363,8 +431,7 @@ class FindChipDialog(QDialog):
         # only in a tooltip.
         self.status_label = _data_label(QLabel())
         self.open_label = _data_label(QLabel())
-        if open_document is None:
-            hint(self.open_label).setText(open_unavailable)
+        self._show_open_state()
 
         # The link-outs: one button per marking site, named for the host it
         # opens, and a line that says what would be sent — or why they're off.
@@ -432,6 +499,62 @@ class FindChipDialog(QDialog):
         self._say("" if not self._configured else PROMPT)
         self._on_selection()
         self.query_edit.setFocus()
+
+    # --- following a change in Preferences ------------------------------------
+
+    def set_source(self, source: ChipSource, *, configured: bool | None = None) -> None:
+        """Look things up in ``source`` from now on.
+
+        What's listed came from the old source, so what's typed is looked up
+        again; an answer the old source is still working on is dropped when
+        it arrives. ``configured`` means what it does in the constructor.
+        """
+        if configured is None:
+            configured = not isinstance(source, NullChipSource)
+        self._source = source
+        self._configured = configured
+        self._round += 1
+        self.notice_label.setVisible(not configured)
+        self._debounce.stop()
+        self._pending_move = 0
+        if not configured or not self._wanted:
+            self._show("", [])
+            if not configured:
+                self._say("")  # the notice says why there's nothing to look up
+            return
+        self._shown = None  # the list answers the old source, not this one
+        self._dispatch()
+
+    def set_open_document(
+        self, open_document: OpenDocument | None, open_unavailable: str = NO_OPENER
+    ) -> None:
+        """Open documents with ``open_document`` from now on; ``None`` turns it off.
+
+        An opener that's already running finishes, and says what it did.
+        """
+        self._open_document = open_document
+        self._open_unavailable = open_unavailable
+        if not self._opening:
+            self._show_open_state()
+        self._on_selection()  # the detail rows say whether Enter opens them
+
+    def refresh_link_outs(self) -> None:
+        """Ask again whether link-outs are allowed, and redraw them to match.
+
+        For the main window to call the moment an engagement becomes active:
+        the buttons would refuse a click anyway, but they shouldn't sit there
+        looking live.
+        """
+        self._refresh_web()
+
+    def _show_open_state(self) -> None:
+        """The open line at rest: empty, or why nothing can be opened."""
+        off = self._open_document is None
+        self.open_label.setObjectName("hint" if off else "")
+        self.open_label.setText(self._open_unavailable if off else "")
+        set_tone(self.open_label, None)
+        self.open_label.style().unpolish(self.open_label)
+        self.open_label.style().polish(self.open_label)
 
     # --- keyboard ------------------------------------------------------------
 
@@ -554,9 +677,10 @@ class FindChipDialog(QDialog):
         if self._looking or not self._configured or self._wanted == self._shown:
             return  # one at a time: _on_looked_up starts the next
         text = self._wanted
+        source, asked_in = self._source, self._round
         self._looking = True
         self._slow.start()
-        if not self._run(lambda: self._look_up(text)):
+        if not self._run(lambda: self._look_up(text, source, asked_in)):
             self._looking = False
             self._slow.stop()
             self._show(text, None)
@@ -569,15 +693,21 @@ class FindChipDialog(QDialog):
             return False
         return True
 
-    def _look_up(self, text: str) -> None:
+    def _look_up(
+        self, text: str, source: ChipSource | None = None, asked_in: int | None = None
+    ) -> None:
         """The lookup itself. Runs off the GUI thread.
 
         Whatever the source does, an answer goes back — a lookup that never
-        answered would hold every later one up behind it.
+        answered would hold every later one up behind it. Where each value
+        came from is fetched here too, for the candidates that will be shown,
+        so picking one never sends the GUI thread back to the source.
         """
-        found: list[Candidate] | None = None
+        source = self._source if source is None else source
+        found: _Answer | None = None
         try:
-            found = find_chips(self._source, text)
+            found = _Answer(with_provenance(source, find_chips(source, text), MAX_SHOWN))
+            found.round = self._round if asked_in is None else asked_in
         except BaseException:
             log.exception("chip finder: looking up %r failed", text)
         with contextlib.suppress(RuntimeError):  # the dialog went while it ran
@@ -590,6 +720,10 @@ class FindChipDialog(QDialog):
     def _on_looked_up(self, text: str, found: list[Candidate] | None) -> None:
         self._looking = False
         self._slow.stop()
+        if getattr(found, "round", self._round) != self._round:
+            # Found in a source that's since been swapped: not an answer any more.
+            self._dispatch()
+            return
         if text == self._wanted:
             try:
                 self._show(text, found)
@@ -693,7 +827,12 @@ class FindChipDialog(QDialog):
         self._detail_key = key
 
         self.details.clear()
-        for label in (self.title_label, self.facts_label, self.description_label):
+        for label in (
+            self.title_label,
+            self.facts_label,
+            self.description_label,
+            self.sources_label,
+        ):
             self._set_line(label, "")
         if candidate is None:
             waiting = self.tree.topLevelItemCount() > 0
@@ -722,33 +861,73 @@ class FindChipDialog(QDialog):
         self._set_line(self.description_label, chip.description or "")
         self._set_line(self.found_label, self._found_text(candidate))
 
+        # Several sources put together: say which one each part came from.
+        merged = candidate.merged
+        self._set_line(self.sources_label, provenance_line(merged) if merged else "")
+
+        def behind(name: str, count: int) -> list[str]:
+            """Per row of a list, the sources that have it — blank with one source."""
+            sources = merged.sources_of(name) if merged is not None else ()
+            if len(sources) != count:
+                return [""] * count
+            return [", ".join(names) for names in sources]
+
+        if merged is not None and merged.conflicts:
+            self._section(
+                "Sources disagree",
+                [
+                    (
+                        (
+                            _FIELD_NAMES.get(conflict.field, conflict.field),
+                            value,
+                            "shown" if place == 0 else "",
+                            source,
+                        ),
+                        None,
+                        "",
+                    )
+                    for conflict in merged.conflicts
+                    for place, (source, value) in enumerate(conflict.values)
+                ],
+            )
+
         can_open = self._open_document is not None
+        marked = behind("markings", len(chip.markings))
         self._section(
             "Markings",
-            [((m.code, ", ".join(m.examples), m.note or ""), None, "") for m in chip.markings],
+            [
+                ((m.code, ", ".join(m.examples), m.note or "", source), None, "")
+                for m, source in zip(chip.markings, marked, strict=True)
+            ],
             mono_columns=(0, 1),
         )
+        listed = behind("documents", len(chip.documents))
         self._section(
             "Documents",
             [
                 (
-                    (d.kind, d.filename, _document_facts(d)),
+                    (d.kind, d.filename, _document_facts(d), source),
                     d,
                     "Enter opens this document." if can_open else self._open_unavailable,
                 )
-                for d in chip.documents
+                for d, source in zip(chip.documents, listed, strict=True)
             ],
         )
+        swaps = behind("substitutes", len(chip.substitutes))
         self._section(
             "Substitutes",
             [
-                ((s.mpn, s.note or "", ""), s, "Enter looks this part number up.")
-                for s in chip.substitutes
+                ((s.mpn, s.note or "", "", source), s, "Enter looks this part number up.")
+                for s, source in zip(chip.substitutes, swaps, strict=True)
             ],
         )
+        seen = behind("used_in", len(chip.used_in))
         self._section(
             "Seen on",
-            [((u.board, u.designator or "", u.role or ""), None, "") for u in chip.used_in],
+            [
+                ((u.board, u.designator or "", u.role or "", source), None, "")
+                for u, source in zip(chip.used_in, seen, strict=True)
+            ],
         )
 
     @staticmethod
@@ -773,14 +952,16 @@ class FindChipDialog(QDialog):
     def _section(
         self,
         title: str,
-        rows: list[tuple[tuple[str, str, str], object, str]],
+        rows: list[tuple[tuple[str, str, str, str], object, str]],
         *,
         mono_columns: tuple[int, ...] = (),
     ) -> None:
         """One titled group in the detail list; an empty one says so.
 
-        A row's tooltip is the dialog's own words, never the chip's: Qt
-        renders a tooltip that looks like markup as markup.
+        A row is three columns of data and a fourth naming the sources that
+        have it (blank when there's one source). A row's tooltip is the
+        dialog's own words, never the chip's: Qt renders a tooltip that looks
+        like markup as markup.
         """
         head = QTreeWidgetItem([title if rows else f"{title} — none listed"])
         head.setFlags(Qt.ItemFlag.ItemIsEnabled)
@@ -795,7 +976,7 @@ class FindChipDialog(QDialog):
             for column in mono_columns:
                 row.setFont(column, self._mono)
             if tip:
-                for column in range(3):
+                for column in range(_DETAIL_COLUMNS):
                     row.setToolTip(column, tip)
             head.addChild(row)
         head.setExpanded(True)

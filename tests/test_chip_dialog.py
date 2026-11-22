@@ -1598,6 +1598,7 @@ def test_the_dialog_reads_chip_reference_and_nothing_else() -> None:
         "PySide6.QtCore",
         "PySide6.QtGui",
         "PySide6.QtWidgets",
+        "benchhud.chips.composite",  # which source said what: chip reference too
         "benchhud.chips.find",
         "benchhud.chips.linkout",
         "benchhud.chips.marking",

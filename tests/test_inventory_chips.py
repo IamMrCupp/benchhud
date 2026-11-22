@@ -30,15 +30,11 @@ from benchhud.chips import (
 )
 from benchhud.chips.builder import build_datasheet_library, warm_library
 from benchhud.chips.datasheets import ChipDocument, DatasheetFile, DatasheetLibrary, MatchedBy
+from benchhud.chips.opening import document_name
 from benchhud.config import ChipSourceConfig, Config
 from benchhud.inventory import InMemoryInventorySource, Part
 from benchhud.shell.main_window import MainWindow
-from benchhud.shell.panels.inventory import (
-    InventoryPanel,
-    chip_summary,
-    datasheet_status,
-    document_name,
-)
+from benchhud.shell.panels.inventory import InventoryPanel, chip_summary, datasheet_status
 from benchhud.shell.preferences import PreferencesDialog
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chip-data" / "index.json"

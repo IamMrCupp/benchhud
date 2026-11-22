@@ -23,8 +23,12 @@ ticket system is a protocol with a fake, not a dependency.
   the `Panel` base, `CompositeView` (the centre pane's live composite),
   `Preferences` (device dropdowns, tools editor, intake + boards settings),
   `qt_image` (BGR→QImage), `theme` / `fonts` / `icon` / `about`, the dialogs
-  `ticket_picker`, `engagement_picker` and `board_dialogs` (Find board / Boards
-  to source), and the panels: `scope`, `thermal`, `power` (the styled meter),
+  `ticket_picker`, `engagement_picker`, `board_dialogs` (Find board / Boards
+  to source) and `chip_dialog` (**Chips → Find chip…**: one kept, non-modal
+  window; the main window hands it the chip source, an opener over the
+  datasheet library and "may this link out now?", and tells it when
+  Preferences changes either; `browser` is the one door an address leaves
+  by), and the panels: `scope`, `thermal`, `power` (the styled meter),
   `controls`, `launcher`, `jobs`, `inventory` (with a chip source configured,
   the selected part's MPN is looked up on a worker and the row shows the
   chip's reference details and **Open datasheet**; the main window builds
@@ -142,8 +146,16 @@ ticket system is a protocol with a fake, not a dependency.
   `[[chips.sources]]` to one source: the null source when there are none, a
   composite otherwise; `warm` hands the first read to a worker thread). The
   main window builds it at start and after Preferences; Preferences → Chips
-  edits the list and shows what each folder loaded, read on a worker. Nothing
-  looks a chip up yet. Pure Python below the dialog; no network, no git.
+  edits the list and shows what each folder loaded, read on a worker.
+  `datasheets` (`DatasheetLibrary` — the folder of documents, found by
+  SHA-256 first and by name second, hashed on demand), `opening` (finding
+  and opening the file held for a chip's document, and the one set of words
+  for "exact copy" versus "name match" that the inventory row and Find chip
+  share), `find` (`find_chips` — what was typed, tried as a mark and as a part
+  number, as one list; `with_provenance` hangs each candidate's `MergedChip`
+  on it), `linkout` (the address for a mark on a marking site, and the check
+  a document's own address has to pass). Pure Python below the Qt code; no
+  network, no git. See [CHIPS.md](CHIPS.md).
 - **`launcher/`** — `ToolLauncher` (subprocess) + `catalog` (configured tools).
 
 ## Measuring it
