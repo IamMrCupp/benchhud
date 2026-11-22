@@ -341,7 +341,7 @@ class ChipSourceConfig:
     path: str = ""
     enabled: bool = True
     # Whether the Chip panel — stream output — may show what this source says.
-    # Off air, Find chip and the inventory row still use it; the card doesn't.
+    # Off air, Find chip still uses it; the card and the inventory row don't.
     on_air: bool = CHIP_SOURCE_ON_AIR
 
 

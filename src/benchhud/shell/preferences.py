@@ -72,8 +72,8 @@ _CHIP_NAME, _CHIP_FOLDER, _CHIP_ON, _CHIP_ON_AIR, _CHIP_LOADED = range(5)
 #: Said under the Chips table when there are sources and none is on air. It's
 #: here, on the operator's screen, because the card itself gives no hint.
 NO_SOURCE_ON_AIR = (
-    "No source is on air, so the Chip panel won't find any chip."
-    " Find chip and the inventory row still use every source."
+    "No source is on air, so the Chip panel and the inventory row won't find any chip."
+    " Find chip still uses every source."
 )
 
 
@@ -740,8 +740,8 @@ class PreferencesDialog(QDialog):
             "Untick to leave a source out without deleting it"
         )
         self.chips_table.horizontalHeaderItem(_CHIP_ON_AIR).setToolTip(
-            "Untick to keep a source off the Chip panel, which is stream output."
-            " Find chip and the inventory row still use it"
+            "Untick to keep a source out of the HUD window: off the Chip panel, which"
+            " is stream output, and off the inventory row. Find chip still uses it"
         )
         self.chips_table.horizontalHeaderItem(_CHIP_LOADED).setToolTip(
             "What reading the folder comes to now. The HUD reads it again when you press OK"
@@ -760,7 +760,8 @@ class PreferencesDialog(QDialog):
             "Read in this order. Where two sources disagree about a chip, the one higher"
             " up wins and the other is kept as a conflict — so a private overlay goes"
             " above the community data. Untick On air to keep a source off the Chip"
-            " panel, which is stream output; Find chip and the inventory row still use it."
+            " panel, which is stream output, and off the inventory row; Find chip still"
+            " uses it."
         )
         self.chips_order_note.setWordWrap(True)
         self.chips_on_air_note = QLabel(NO_SOURCE_ON_AIR)

@@ -25,13 +25,18 @@ description, markings — and offers **Open datasheet** for the file the
 datasheet library holds. That's generic reference about a part number: it
 names no job, no customer and no engagement.
 
-**It reads every chip source, a source kept off air included** (``on_air =
-false``, #482). That switch is about the Chip panel's card; this row is the
-operator's lookup and shows what the operator's own overlay says. So with an
-off-air source configured, this panel is *not* as stream-safe as its tag
-says: select a part that source describes and its words are drawn here.
-Whether the row should read the on-air sources instead is an open question
-(#508).
+**It reads the on-air chip sources only** (#508). This is a dock in the HUD
+window, beside the Chip panel, and it carries the same stream-safe tag — so
+the window hands it the same source the card gets, and a source kept off air
+(``on_air = false``) is left out of it completely. A part only an off-air
+source describes reads as one the reference doesn't know, the same line any
+unknown MPN gets; a part both describe shows what the on-air sources say; a
+document only an off-air source lists is never named. Nothing here says a
+source is being held back. Find chip — its own window — is where every source
+is looked up.
+
+That also means **Show on stream card** only appears for a chip the card will
+show: the row and the card ask the same source.
 
 - **No chip source configured:** none of this exists. The panel looks and
   behaves as it did before chips.
@@ -343,6 +348,10 @@ class InventoryPanel(Panel):
         mpn = (part.mpn or "").strip() if part is not None else ""
         if not mpn or self._chip_source() is None:
             self.chip_block.setVisible(False)
+            # Hidden isn't enough: the last part's chip, and its document's
+            # name, would still be the labels' text. Nothing is kept.
+            self.chip_label.setText("")
+            self.datasheet_label.setText("")
             return
         self.chip_label.setText(f"Looking up {mpn}…")
         self.datasheet_row.setVisible(False)

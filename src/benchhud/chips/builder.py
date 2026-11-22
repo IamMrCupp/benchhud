@@ -15,8 +15,9 @@ it has no folder, or when its name was already taken by an entry above it
 one source). Each of those but "switched off" writes a log line.
 
 **Two views of the same sources.** An entry can be kept off air
-(``on_air = false``): the operator's screens — Find chip, the inventory row —
-still use it, and the Chip panel, which is stream output, doesn't.
+(``on_air = false``): Find chip — its own window, the operator's alone — still
+uses it, and nothing in the HUD window does: not the Chip panel, which is
+stream output, and not the inventory row, which is a dock beside it.
 :func:`build_chip_sources` hands back both: ``everything``, and ``on_air``,
 which is a second composite over the on-air sources only. It's built from the
 sources, never filtered out of a merged chip — a merged value doesn't remember
@@ -74,9 +75,10 @@ class SourceEntry(Protocol):
 class ChipSources:
     """The configured sources, as the two things that look chips up in them."""
 
-    #: Every source. For the operator's screens.
+    #: Every source. For Find chip, which is its own window.
     everything: ChipSource
-    #: The on-air sources only. For the Chip panel, which is stream output.
+    #: The on-air sources only. For everything in the HUD window: the Chip
+    #: panel, which is stream output, and the inventory row.
     on_air: ChipSource
 
 
@@ -130,7 +132,7 @@ def build_chip_sources(entries: Iterable[SourceEntry]) -> ChipSources:
 def build_chip_source(entries: Iterable[SourceEntry]) -> ChipSource:
     """Every source for these config entries, as one. Reads nothing.
 
-    For the operator's screens. Stream output takes
+    For Find chip. Anything in the HUD window takes
     :func:`build_chip_sources`' ``on_air`` instead.
     """
     return build_chip_sources(entries).everything

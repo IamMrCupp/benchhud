@@ -522,7 +522,9 @@ class MainWindow(QMainWindow):
             lambda: self._inventory_source,
             job_ref=self.selected_job_ref,
             on_consumed=self._note_parts_used,
-            chips=lambda: self._chip_source,
+            # A dock in this window, beside the stream card: the on-air
+            # sources only, like the card, never every source (#508).
+            chips=lambda: self._on_air_chip_source,
             datasheets=lambda: self._datasheet_library,
             show_on_card=self.show_chip_on_card,
         )
@@ -1010,9 +1012,9 @@ class MainWindow(QMainWindow):
         No sources configured is the null source: nothing is read and no
         thread is started.
 
-        Also sets what the Chip panel looks chips up in: the sources that are
-        on air, and only those. The two share their sources, so reading
-        "every source" has read the on-air ones.
+        Also sets what the Chip panel and the inventory row look chips up in:
+        the sources that are on air, and only those. The two share their
+        sources, so reading "every source" has read the on-air ones.
         """
         entries = [replace(entry) for entry in self._config.chips.sources]
         sources = build_chip_sources(entries)
@@ -1026,16 +1028,21 @@ class MainWindow(QMainWindow):
 
     @property
     def chip_source(self) -> ChipSource:
-        """Where the operator's screens look chips up — every configured source.
+        """Where Find chip looks chips up — every configured source.
 
-        The null source when none is configured. Not for stream output: that
-        is :attr:`on_air_chip_source`.
+        The null source when none is configured. Find chip is its own window
+        and the operator's alone. Nothing in the HUD window gets this: the
+        Chip panel and the inventory row take :attr:`on_air_chip_source`.
         """
         return self._chip_source
 
     @property
     def on_air_chip_source(self) -> ChipSource:
-        """Where the Chip panel looks chips up — the on-air sources only."""
+        """Where the HUD window looks chips up — the on-air sources only.
+
+        The Chip panel, which is stream output, and the inventory row, which
+        is a dock beside it.
+        """
         return self._on_air_chip_source
 
     def reconfigure_chip_source(self) -> None:
@@ -1051,9 +1058,14 @@ class MainWindow(QMainWindow):
             warm_chip_source(self._chip_source)
         else:
             self._chip_source = self._make_chip_source()
-        # The stream card first, before anything else gets a chance to go
-        # wrong: a source just taken off air has to come off the card.
-        self.chip_panel.refresh()
+        # The stream card and the inventory row first, before anything else
+        # gets a chance to go wrong: a source just taken off air has to come
+        # off both. The row looks its selected part up again; an answer still
+        # on its way from the source it had before is dropped.
+        try:
+            self.chip_panel.refresh()
+        finally:
+            self.inventory_panel.sync_chip_details()
         if self._chip_dialog is not None:
             # Find chip may be open. A new list: it looks in the new source
             # from here on. The same list: the folders may have changed, so it

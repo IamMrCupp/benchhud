@@ -67,7 +67,8 @@ sense of is skipped with a line in the log, and the rest still load.
 
 **Preferences → Chips** is the list of sources, in order: name, folder, a tick
 to switch one off without deleting it, and an **On air** tick that decides
-whether the stream card may use it. Add, Remove, Move up, Move down, and a
+whether the HUD window — the stream card and the inventory row — may use it.
+Add, Remove, Move up, Move down, and a
 folder picker. The last column says what each folder actually came to —
 `412 chips, from the built index`, `12 chips, from the chip files — 1 note`,
 `Nothing loaded: …` with the reason — read by the same code the app uses, so
@@ -112,34 +113,30 @@ they're put together:
 
 ### Keeping a source off the stream
 
-The Chip panel is stream output. Find chip and the inventory row are where you
-look things up. A source can be in the second and not the first: put
-`on_air = false` on it, or untick **On air** for it in Preferences → Chips.
-That's what a private overlay is for — your own words about a part, there when
-you look it up, and not on the card.
+The Chip panel is stream output, and the inventory row is a dock in the same
+window. Find chip is its own window, and yours. A source can be in Find chip
+and nowhere in the HUD window: put `on_air = false` on it, or untick **On air**
+for it in Preferences → Chips. That's what a private overlay is for — your own
+words about a part, there when you look it up, and not in the picture.
 
-Off air, a source is left out of the card completely. Nothing is merged and
-then trimmed: the card looks the chip up in the on-air sources and nowhere
-else. So:
+Off air, a source is left out of the HUD window completely. Nothing is merged
+and then trimmed: the card and the inventory row look the chip up in the
+on-air sources and nowhere else. So:
 
-- **A chip only an off-air source has isn't on the card.** It reads "No chip
-  with that part number", the same as a typo.
+- **A chip only an off-air source has isn't there.** The card reads "No chip
+  with that part number", the same as a typo. The inventory row reads "…isn't
+  in the chip reference", the same as any part it doesn't know.
 - **A chip both have shows what the on-air sources say.** The overlay's
   description, package and marks stay in Find chip.
+- **A document only an off-air source lists isn't named or offered** on the
+  inventory row.
 - **A disagreement with an off-air source isn't mentioned.** The card only
   flags sources it can see.
-- **The card never says anything is being held back.**
+- **Neither one says anything is being held back.**
 
-Find chip and the inventory row still use every source, off air or not. So
-they can show more than the card will — that's the point.
-
-**The switch covers the card, and only the card.** Find chip is its own window.
-The inventory row isn't: it's a dock in the HUD window, beside the Chip panel,
-and it shows an off-air source's maker, package, description and marks for
-the part you select. If your stream captures the HUD window, keep the
-Inventory dock out of the picture while a source is off air — or don't select
-that part on air. Whether the row should follow the switch too is
-[an open issue](https://github.com/IamMrCupp/benchhud/issues/508).
+Find chip still uses every source, off air or not. So it can show more than
+the HUD window will — that's the point. It's where you look a part up in your
+own notes; keep that window out of the picture.
 
 A source is on air unless you say otherwise, and the switch fails off air:
 
@@ -156,11 +153,12 @@ A benchhud from before this switch doesn't know the key. It treats every
 source as on air, and drops the key if it saves the config — worth knowing
 before you step back a version to test something.
 
-With every source off air the card finds no chip at all. Preferences → Chips
-says so under the table. The card doesn't.
+With every source off air the card and the inventory row find no chip at all.
+Preferences → Chips says so under the table. They don't.
 
-The switch takes hold on OK, a chip already on the card included — it's looked
-up again in what's on air now.
+The switch takes hold on OK, a chip already on the card and a part already
+selected in the inventory included — both are looked up again in what's on air
+now.
 
 ---
 
@@ -235,12 +233,12 @@ maker, package, functions, description, marks — with **Open datasheet**.
 When the reference knows the part, **Show on stream card** is there too, and
 puts that chip on the Chip panel. Same rules as in Find chip: a mouse click — no
 key reaches it — and only the part number goes. Nothing about the part, the shelf
-or the job. And the same limit: the card shows what the on-air sources say,
-which can be less than the row does.
+or the job.
 
-The row itself reads every source, one you keep off air included — see
-[Keeping a source off the stream](#keeping-a-source-off-the-stream) before you
-put this dock in a captured window.
+The row reads the on-air sources only, like the card — it's a dock in the same
+window. A part only a source you keep off air describes reads as one the
+reference doesn't know; look it up in Find chip. See
+[Keeping a source off the stream](#keeping-a-source-off-the-stream).
 
 A part with no MPN shows nothing. An MPN the reference doesn't know gets one line
 saying so. With no chip sources, the panel is exactly what it was.
@@ -341,9 +339,9 @@ either way.
   format newer than this benchhud reads.
 - **`— 1 note` after a count** — hover it. A file was skipped, or an index was
   passed over for being older than the chip files.
-- **The Chip panel says there's no chip with that part number, and Find chip
-  finds it** — the chip is only in a source that's off air. Preferences → Chips,
-  the **On air** column.
+- **The Chip panel or the inventory row says it doesn't know a part, and Find
+  chip finds it** — the chip is only in a source that's off air. Preferences →
+  Chips, the **On air** column.
 - **A chip you just added isn't found** — nothing watches the folders. Press OK
   in Preferences; an open Find chip looks again by itself.
 - **Open datasheet is off** — on the inventory row: the chip lists no datasheet,

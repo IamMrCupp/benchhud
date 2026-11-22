@@ -30,7 +30,8 @@ ticket system is a protocol with a fake, not a dependency.
   Preferences changes either; `browser` is the one door an address leaves
   by), and the panels: `scope`, `thermal`, `power` (the styled meter),
   `controls`, `launcher`, `jobs`, `inventory` (with a chip source configured,
-  the selected part's MPN is looked up on a worker and the row shows the
+  the selected part's MPN is looked up on a worker — in the on-air chip
+  sources only, like the chip card — and the row shows the
   chip's reference details and **Open datasheet**; the main window builds
   the datasheet library from `[chips] datasheet_dir` and lists it off the
   GUI thread), `terminal` (hosts the xterm.js
@@ -145,9 +146,10 @@ ticket system is a protocol with a fake, not a dependency.
   lists are joined; `merged()` gives a `MergedChip` saying which source each
   part came from, while `get` / `by_marking` still return plain chips),
   `builder` (`build_chip_sources` — the `[chips]` config's ordered
-  `[[chips.sources]]` to two views of the same sources: `everything` for the
-  operator's screens, and `on_air`, a second composite over the entries not
-  marked `on_air = false`, which is all the Chip panel is handed; the null
+  `[[chips.sources]]` to two views of the same sources: `everything` for
+  Find chip, and `on_air`, a second composite over the entries not marked
+  `on_air = false`, which is all the HUD window — the Chip panel and the
+  inventory row — is handed; the null
   source when there are none; `warm` hands the first read to a worker
   thread). The
   main window builds it at start and after Preferences; Preferences → Chips
