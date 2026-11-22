@@ -50,9 +50,9 @@ and the camera entitlement, and writes `dist/benchhud-<version>.app.zip`.
 ### A notarized `.dmg`, for other Macs
 
 Every release carries one, built by CI: `benchhud-<version>.dmg`, signed with
-the Developer ID, notarized and stapled, then checked with `spctl` the way
-Gatekeeper will on someone else's Mac. The rest of this section is how to make
-one by hand.
+the Developer ID, notarized and stapled — the image and the app inside it —
+then checked with `spctl` and `stapler` the way Gatekeeper will on someone
+else's Mac. The rest of this section is how to make one by hand.
 
 CI signs with five repository secrets: `APPLE_CERTIFICATE` (the Developer ID
 Application certificate and key as a base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`,
@@ -64,13 +64,25 @@ The zip above only works on the Mac that built it. On any other Mac, Gatekeeper
 blocks an app that Apple hasn't notarized. To hand benchhud to someone:
 
 ```sh
-uvx briefcase package macOS app -p dmg \
-  --identity "Developer ID Application: AARON MICHAEL CUPP (C4MTP3Z42F)"
+uvx --from briefcase python packaging/macos/package_dmg.py \
+  "Developer ID Application: AARON MICHAEL CUPP (C4MTP3Z42F)"
 ```
 
-Briefcase signs the app, builds `dist/benchhud-<version>.dmg`, uploads it to
-Apple, waits for the verdict and staples the ticket to the `.dmg`. The first one
-took about ten minutes, most of it the upload and Apple's queue.
+**Not `briefcase package -p dmg`.** That one staples the ticket to the disk
+image and stops. The app inside was sealed in before Apple had seen it, so the
+copy that lands in Applications has no ticket, and Gatekeeper has to reach
+Apple on first launch — which a Mac that's offline at that moment can't do
+(#426). The script does it in the order that staples both:
+
+1. `briefcase package -p zip` signs the app, has Apple notarize it, and staples
+   the ticket to the app in `build/`.
+2. The script builds `dist/benchhud-<version>.dmg` around that stapled app,
+   laid out as Briefcase lays its own. Nothing signs the app again: a new
+   signature is a new app as far as the ticket goes.
+3. The image is signed, notarized and stapled.
+
+That's two trips to Apple, not one. The single trip took about ten minutes the
+first time, most of it the upload and Apple's queue.
 
 It needs a notarization credential in the keychain, saved once per Mac. Briefcase
 looks for a profile named `briefcase-macOS-<team id>`:
@@ -95,10 +107,13 @@ Check the result:
 ```sh
 xcrun stapler validate dist/benchhud-<version>.dmg
 spctl -a -vv -t open --context context:primary-signature dist/benchhud-<version>.dmg
+xcrun stapler validate /Volumes/benchhud*/benchhud.app   # with the image mounted
 ```
 
 `spctl` should say `accepted` and `source=Notarized Developer ID`. Before
 notarization the same check says `rejected`, `source=Unnotarized Developer ID`.
+The last line is the one `spctl` can't stand in for: with no ticket on the app,
+`spctl` asks Apple and still says `accepted`, as long as the Mac is online.
 
 ### The JIT entitlement (terminal panel)
 
@@ -354,4 +369,4 @@ sources.
   built, checked to start, and uploaded as **benchhud-macos**. That one is
   ad-hoc signed, so it isn't the build to install: the camera grant follows the
   signature. Sign locally with the Developer ID for that (above).
-- **Not done yet:** signing and notarizing in CI, so a release carries the `.dmg`. Today it's a local step (above, #173).
+- **Signed in CI too:** a release or a manual run signs and notarizes the macOS app and attaches the `.dmg` (#173), with the ticket stapled to the image and to the app inside it (#426).

@@ -464,9 +464,13 @@ jobs:
           rm -f "$key"
           echo "notary profile briefcase-macOS-$TEAM_ID stored"
 
+      # Not `briefcase package -p dmg`: that staples the ticket to the disk
+      # image only, and the app copied out of it into Applications has none
+      # (#426). The script notarizes and staples the app first, then builds,
+      # notarizes and staples the image around it.
       - name: Package, sign and notarize the .dmg
         if: env.SIGN == 'true'
-        run: briefcase package macOS app -p dmg --identity "$IDENTITY" --no-input
+        run: python packaging/macos/package_dmg.py "$IDENTITY"
 
       # What a stranger's Mac will decide: stapled ticket, accepted by Gatekeeper.
       - name: Gatekeeper accepts the .dmg
@@ -484,6 +488,15 @@ jobs:
           codesign --verify --deep --strict "$mount/benchhud.app"
           spctl -a -vv -t exec "$mount/benchhud.app" 2>&1 | tee "$RUNNER_TEMP/spctl-app.txt"
           grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/spctl-app.txt"
+          # The app carries its own ticket (#426), so a Mac that's offline at
+          # first launch can still check it. spctl above can't tell: it asks
+          # Apple when there's no ticket, and the runner is online.
+          xcrun stapler validate "$mount/benchhud.app"
+          # And it's still stapled once copied out, the way it lands in Applications.
+          copy=$(mktemp -d)
+          ditto "$mount/benchhud.app" "$copy/benchhud.app"
+          xcrun stapler validate "$copy/benchhud.app"
+          codesign --verify --deep --strict "$copy/benchhud.app"
           for f in LICENSE NOTICES; do test -s "$mount/benchhud.app/Contents/Resources/app/$f"; done
           hdiutil detach "$mount" >/dev/null
 
