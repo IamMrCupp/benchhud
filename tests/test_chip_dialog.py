@@ -21,9 +21,12 @@ from PySide6.QtGui import Qt as QtGuiNamespace
 from PySide6.QtWidgets import QPushButton
 
 from benchhud.chips import find as chips_find
+from benchhud.chips import linkout as chips_linkout
+from benchhud.chips.linkout import MARKING_SITES
 from benchhud.chips.marking import MarkingMatch
 from benchhud.chips.model import Chip, Document, Marking, Substitute, UsedIn
 from benchhud.chips.source import InMemoryChipSource, NullChipSource
+from benchhud.shell import browser as shell_browser
 from benchhud.shell import chip_dialog
 from benchhud.shell.chip_dialog import (
     NO_DATA,
@@ -77,6 +80,20 @@ _SWITCH = Chip(
     markings=(Marking("X1=6AZ9"), Marking("NW4")),
 )
 _CHIPS = [_BUCK, _LDO, _SUB, _SWITCH]
+
+
+@pytest.fixture(autouse=True)
+def no_real_browser(monkeypatch):
+    """No test in this file may reach the operator's real browser.
+
+    A dialog built without ``open_url`` falls back to the real opener, and
+    only the lock stands in front of it. This takes the real one away, and
+    fails the test that got as far as calling it.
+    """
+    reached: list[str] = []
+    monkeypatch.setattr(chip_dialog, "open_in_browser", lambda url: reached.append(url) or False)
+    yield
+    assert reached == [], "a test handed an address to the real browser opener"
 
 
 def _inline(job) -> None:
@@ -1077,16 +1094,497 @@ def test_an_answer_that_arrives_after_the_dialog_is_gone_is_dropped(qtbot) -> No
     assert opener.calls == [(_BUCK, None)]
 
 
+# --- linking out --------------------------------------------------------------
+
+_LISTED = Document(
+    "datasheet", "EX5000.pdf", 12, url="https://www.example.com/parts/ex5000/datasheet"
+)
+_APP_NOTE = Document("app-note", "EX5000-an.pdf", 4, url="https://docs.example.com/an/ex5000")
+_UNLISTED = Document("example-circuit", "EX5000-ref.pdf", 1)
+_IN_THE_CLEAR = Document("datasheet", "EX5001.pdf", 9, url="http://www.example.com/ex5001")
+# A chip whose documents say where their maker publishes them.
+_WEB = Chip(
+    mpn="EX5000DFN",
+    manufacturer="Example Semi",
+    markings=(Marking("W5"),),
+    documents=(_UNLISTED, _LISTED, _APP_NOTE),
+)
+_WEB_BAD = Chip(
+    mpn="EX5001DFN",
+    manufacturer="Example Semi",
+    markings=(Marking("W6"),),
+    documents=(_IN_THE_CLEAR,),
+)
+_WEB_CHIPS = [*_CHIPS, _WEB, _WEB_BAD]
+
+
+class _Browser:
+    """Stands in for the operator's browser: records what it was handed."""
+
+    def __init__(self, answer: object = True) -> None:
+        self.answer = answer
+        self.urls: list[str] = []
+
+    def __call__(self, url: str):
+        self.urls.append(url)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+class _Gate:
+    """Stands in for the main window: "may this link out right now?"."""
+
+    def __init__(self, allowed: bool = True) -> None:
+        self.allowed = allowed
+        self.asked = 0
+
+    def __call__(self) -> bool:
+        self.asked += 1
+        return self.allowed
+
+
+def _web_dialog(qtbot, gate=None, browser=None, **kwargs):
+    browser = _Browser() if browser is None else browser
+    gate = _Gate() if gate is None else gate
+    kwargs.setdefault("link_out_allowed", gate)
+    dialog = _dialog(qtbot, InMemoryChipSource(list(_WEB_CHIPS)), open_url=browser, **kwargs)
+    return dialog, gate, browser
+
+
+def _site_button(dialog: FindChipDialog, host: str):
+    (button,) = [b for b in dialog.site_buttons if b.text() == host]
+    return button
+
+
+def _web_buttons(dialog: FindChipDialog):
+    return [*dialog.site_buttons, dialog.maker_button]
+
+
+def test_each_site_button_is_named_for_the_host_it_opens(qtbot) -> None:
+    dialog, _, _ = _web_dialog(qtbot)
+    assert [button.text() for button in dialog.site_buttons] == [
+        "smd.yooneed.one",
+        "www.s-manuals.com",
+        "www.ti.com",
+    ]
+    _type(dialog, "X1=6A")
+    for button in dialog.site_buttons:
+        assert button.isEnabled()
+        assert button.text() in button.toolTip()  # and the tooltip says it again,
+        assert "told" in button.toolTip()  # with what that site learns
+    assert dialog.web_label.text() == "Look “X1=6A” up on the web:"
+
+
+@pytest.mark.parametrize(
+    ("host", "url"),
+    [
+        ("smd.yooneed.one", "https://smd.yooneed.one/search?code=X1%3D6A"),
+        ("www.s-manuals.com", "https://www.s-manuals.com/smd/x1"),
+        (
+            "www.ti.com",
+            "https://www.ti.com/packaging/en/docs/partlookup.tsp?partmarking=X1%3D6A",
+        ),
+    ],
+)
+def test_a_click_hands_that_sites_address_for_the_mark_to_the_browser(qtbot, host, url) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, " X1=6A ")
+    _site_button(dialog, host).click()
+    assert browser.urls == [url]
+    assert dialog.web_label.text() == f"Handed {host} to your browser."
+    assert dialog.web_label.property("tone") == "ok"
+
+
+def test_nothing_goes_out_as_you_type(qtbot) -> None:
+    opener = _Opener()
+    dialog, gate, browser = _web_dialog(qtbot, open_document=opener)
+    dialog.show()
+    qtbot.keyClicks(dialog.query_edit, "W5")
+    dialog.lookup_now()
+    qtbot.keyClick(dialog.query_edit, Qt.Key.Key_Down)
+    qtbot.keyClick(dialog.query_edit, Qt.Key.Key_Return)  # opens the local datasheet
+    qtbot.keyClick(dialog.tree, Qt.Key.Key_Return)
+    dialog.details.setCurrentItem(_detail_row(dialog, "Documents", 1))
+    qtbot.keyClick(dialog.details, Qt.Key.Key_Return)
+    qtbot.keyClick(dialog, Qt.Key.Key_Return)
+    assert len(opener.calls) == 3
+    assert gate.asked > 0  # the buttons were drawn, and that's all
+    assert browser.urls == []
+    assert all(button.isEnabled() for button in _web_buttons(dialog))
+
+
+def test_only_what_is_typed_is_sent_never_the_chip_that_is_picked(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    assert dialog.selected().chip is _WEB  # a chip is picked, with a part number
+    for button in dialog.site_buttons:
+        button.click()
+    assert browser.urls == [
+        "https://smd.yooneed.one/search?code=W5",
+        "https://www.s-manuals.com/smd/w5",
+        "https://www.ti.com/packaging/en/docs/partlookup.tsp?partmarking=W5",
+    ]
+    assert not any("EX5000" in url or "Example" in url for url in browser.urls)
+
+
+def test_the_text_in_the_box_now_is_what_goes_not_what_the_list_answers(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    dialog.query_edit.setText("Q7K4")  # typed on; the list is still the answer to W5
+    _site_button(dialog, "smd.yooneed.one").click()
+    assert browser.urls == ["https://smd.yooneed.one/search?code=Q7K4"]
+
+
+def test_with_nothing_typed_there_is_nothing_to_look_up(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    assert dialog.web_label.text() == chip_dialog.WEB_PROMPT
+    for button in dialog.site_buttons:
+        assert not button.isEnabled()
+        assert button.toolTip() == "Type a mark first."
+    assert dialog.search_on(MARKING_SITES[0]) is False
+    assert browser.urls == []
+
+
+def test_a_site_with_no_page_for_this_mark_is_off_and_says_why(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, "7")  # one character: TI wants two
+    assert _site_button(dialog, "smd.yooneed.one").isEnabled()
+    assert _site_button(dialog, "www.s-manuals.com").isEnabled()
+    assert not _site_button(dialog, "www.ti.com").isEnabled()
+    assert "two characters" in _site_button(dialog, "www.ti.com").toolTip()
+
+    _type(dialog, "X=6A")  # s-manuals has no page name for "="
+    assert not _site_button(dialog, "www.s-manuals.com").isEnabled()
+    assert "no page" in _site_button(dialog, "www.s-manuals.com").toolTip()
+    assert dialog.search_on(MARKING_SITES[1]) is False
+    assert dialog.web_label.text() == MARKING_SITES[1].cant
+    assert browser.urls == []
+
+
+@pytest.mark.parametrize("typed", ["Ω1", "é2", "X" * 41])
+def test_what_is_not_a_plain_mark_is_not_sent_anywhere(qtbot, typed) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, typed)
+    assert not any(button.isEnabled() for button in dialog.site_buttons)
+    assert dialog.web_label.text() == chip_dialog.NOT_SENDABLE
+    assert {button.toolTip() for button in dialog.site_buttons} == {chip_dialog.NOT_SENDABLE}
+    assert dialog.search_on(MARKING_SITES[0]) is False
+    assert browser.urls == []
+
+
+def test_what_was_said_about_a_link_out_goes_when_the_text_moves_on(qtbot) -> None:
+    dialog, _, _ = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    _site_button(dialog, "www.ti.com").click()
+    assert dialog.web_label.text() == "Handed www.ti.com to your browser."
+    _type(dialog, "W6")
+    assert dialog.web_label.text() == "Look “W6” up on the web:"
+    assert dialog.web_label.property("tone") is None
+
+
+@pytest.mark.parametrize("answer", [False, None, OSError("no browser")])
+def test_a_browser_that_does_not_take_the_address_is_a_message(qtbot, answer) -> None:
+    dialog, _, browser = _web_dialog(qtbot, browser=_Browser(answer))
+    _type(dialog, "W5")
+    assert dialog.search_on(MARKING_SITES[0]) is False  # and nothing raised
+    assert browser.urls == ["https://smd.yooneed.one/search?code=W5"]
+    assert dialog.web_label.text() == "Couldn't hand smd.yooneed.one to a browser."
+    assert dialog.web_label.property("tone") == "error"
+
+
+# --- linking out: the maker's page ----------------------------------------------
+
+
+def test_a_document_row_says_where_its_maker_has_it(qtbot) -> None:
+    dialog, _, _ = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    assert _details(dialog)["Documents"] == [
+        ("example-circuit", "EX5000-ref.pdf", "1 page"),
+        ("datasheet", "EX5000.pdf", "12 pages — at www.example.com"),
+        ("app-note", "EX5000-an.pdf", "4 pages — at docs.example.com"),
+    ]
+    _type(dialog, "W6")  # an address that won't be opened isn't advertised
+    assert _details(dialog)["Documents"] == [("datasheet", "EX5001.pdf", "9 pages")]
+
+
+def test_makers_page_opens_the_first_document_that_lists_one(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    assert not dialog.maker_button.isEnabled()
+    assert dialog.maker_button.toolTip() == "Pick a candidate first."
+
+    _type(dialog, "W5")
+    assert dialog.maker_button.isEnabled()
+    assert dialog.maker_button.toolTip() == (
+        "Opens www.example.com in your browser — where this document's maker publishes it."
+    )
+    dialog.maker_button.click()
+    assert browser.urls == ["https://www.example.com/parts/ex5000/datasheet"]
+    assert dialog.web_label.text() == "Handed www.example.com to your browser."
+
+
+def test_makers_page_follows_the_document_picked_in_the_detail_list(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    dialog.details.setCurrentItem(_detail_row(dialog, "Documents", 2))
+    assert "docs.example.com" in dialog.maker_button.toolTip()
+    dialog.maker_button.click()
+    assert browser.urls == ["https://docs.example.com/an/ex5000"]
+
+    dialog.details.setCurrentItem(_detail_row(dialog, "Documents", 0))  # lists no address
+    assert not dialog.maker_button.isEnabled()
+    assert dialog.maker_button.toolTip() == chip_dialog.NO_MAKERS_PAGE
+    assert dialog.open_makers_page() is False
+    assert len(browser.urls) == 1
+
+    dialog.details.setCurrentItem(_detail_row(dialog, "Markings", 0))  # not a document at all
+    assert "www.example.com" in dialog.maker_button.toolTip()  # back to the chip's first
+
+
+def test_an_address_that_is_not_plain_https_is_never_opened(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    _type(dialog, "W6")
+    assert dialog.selected().chip is _WEB_BAD
+    assert not dialog.maker_button.isEnabled()
+    assert dialog.maker_button.toolTip() == chip_dialog.REFUSED_ADDRESS
+    assert dialog.open_makers_page() is False
+    assert dialog.web_label.text() == chip_dialog.REFUSED_ADDRESS
+    assert browser.urls == []
+
+    _type(dialog, "EX1235QFN")  # a chip whose documents list no address at all
+    assert dialog.maker_button.toolTip() == chip_dialog.NO_MAKERS_PAGE
+
+
+# --- linking out: the lock ------------------------------------------------------
+
+
+def test_with_nothing_to_ask_link_outs_are_off(qtbot) -> None:
+    browser = _Browser()
+    dialog = _dialog(qtbot, InMemoryChipSource(list(_WEB_CHIPS)), open_url=browser)
+    _type(dialog, "W5")
+    assert dialog.selected().chip is _WEB
+    assert not any(button.isEnabled() for button in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_UNWIRED  # the reason is on the dialog
+    assert {button.toolTip() for button in _web_buttons(dialog)} == {chip_dialog.LINK_OUT_UNWIRED}
+
+    # And a call that gets past the buttons still opens nothing.
+    assert [dialog.search_on(site) for site in MARKING_SITES] == [False, False, False]
+    assert dialog.open_makers_page() is False
+    assert browser.urls == []
+
+
+def test_while_a_recon_engagement_is_active_link_outs_are_off(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot, gate=_Gate(False))
+    _type(dialog, "W5")
+    assert dialog.selected().chip is _WEB
+    assert not any(button.isEnabled() for button in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+    assert "recon engagement" in dialog.web_label.text()
+    assert dialog.web_label.property("tone") == "warning"
+    assert not dialog.web_label.isHidden()
+    assert {button.toolTip() for button in _web_buttons(dialog)} == {chip_dialog.LINK_OUT_LOCKED}
+
+    assert [dialog.search_on(site) for site in MARKING_SITES] == [False, False, False]
+    assert dialog.open_makers_page() is False
+    assert browser.urls == []
+    # The rest of the dialog is untouched: it reads local data only.
+    assert _part_numbers(dialog) == ["EX5000DFN"]
+
+
+def test_the_caller_can_word_the_lock(qtbot) -> None:
+    dialog, _, _ = _web_dialog(qtbot, gate=_Gate(False), link_out_locked="Not during a job.")
+    assert dialog.web_label.text() == "Not during a job."
+    # But can't word it away: a lock with no reason shown isn't allowed.
+    dialog, _, _ = _web_dialog(qtbot, gate=_Gate(False), link_out_locked="")
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+
+
+def test_the_reason_keeps_its_width_however_narrow_the_dialog(qtbot) -> None:
+    dialog, _, _ = _web_dialog(qtbot, gate=_Gate(False))
+    dialog.show()
+    dialog.resize(dialog.minimumSizeHint())
+    qtbot.wait(10)
+    assert dialog.web_label.width() > 200
+    assert dialog.web_label.height() < 120
+
+
+@pytest.mark.parametrize("which", range(len(MARKING_SITES) + 1))
+def test_an_engagement_that_starts_after_the_buttons_were_drawn_still_locks_the_click(
+    qtbot, which
+) -> None:
+    # One dialog per button: each is clicked while it's still drawn as on.
+    dialog, gate, browser = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    button = _web_buttons(dialog)[which]
+    assert button.isEnabled()
+
+    gate.allowed = False  # "Import from engagement…" in the main window, just now
+    button.click()  # the question is asked again, and the answer has changed
+    assert browser.urls == []
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+    assert dialog.web_label.property("tone") == "warning"
+    assert not any(b.isEnabled() for b in _web_buttons(dialog))
+
+    gate.allowed = True  # the engagement is over; the next redraw turns them back on
+    _type(dialog, "W6")
+    assert all(b.isEnabled() for b in dialog.site_buttons)
+    assert dialog.web_label.text() == "Look “W6” up on the web:"
+
+
+def test_the_lock_is_said_over_whatever_the_line_said_before(qtbot) -> None:
+    dialog, gate, browser = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    _site_button(dialog, "www.ti.com").click()
+    assert dialog.web_label.text() == "Handed www.ti.com to your browser."
+
+    gate.allowed = False
+    dialog.hide()
+    dialog.show()  # nothing typed, nothing picked: only the lock changed
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+    assert dialog.web_label.property("tone") == "warning"
+
+    assert dialog.search_on(MARKING_SITES[0]) is False  # a refused click…
+    gate.allowed = True
+    dialog.hide()
+    dialog.show()  # …leaves nothing behind once the lock is gone
+    assert dialog.web_label.text() == "Look “W5” up on the web:"
+    assert all(b.isEnabled() for b in _web_buttons(dialog))
+    assert len(browser.urls) == 1
+
+
+def test_the_lock_is_looked_at_again_when_the_window_comes_back_to_the_front(
+    qtbot, monkeypatch
+) -> None:
+    dialog, gate, _ = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    assert all(b.isEnabled() for b in _web_buttons(dialog))
+
+    gate.allowed = False  # an engagement was imported in the main window
+    monkeypatch.setattr(dialog, "isActiveWindow", lambda: True)
+    QCoreApplication.sendEvent(dialog, QEvent(QEvent.Type.ActivationChange))
+    assert not any(b.isEnabled() for b in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+
+
+@pytest.mark.parametrize("answer", ["yes", "ENG-0001", 1, [True], object(), None, 0, False])
+def test_only_a_plain_true_unlocks(qtbot, answer) -> None:
+    # The wiring slip this is for: handing back the engagement's ref — truthy
+    # exactly while an engagement is active — instead of "is there none?".
+    browser = _Browser()
+    dialog = _dialog(
+        qtbot,
+        InMemoryChipSource(list(_WEB_CHIPS)),
+        open_url=browser,
+        link_out_allowed=lambda: answer,
+    )
+    _type(dialog, "W5")
+    assert not any(b.isEnabled() for b in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+    assert dialog.search_on(MARKING_SITES[0]) is False
+    assert dialog.open_makers_page() is False
+    assert browser.urls == []
+
+
+def test_no_key_can_reach_a_link_out_button(qtbot) -> None:
+    dialog, _, browser = _web_dialog(qtbot)
+    dialog.show()
+    _type(dialog, "W5")
+    for button in _web_buttons(dialog):
+        assert button.isEnabled()
+        assert button.focusPolicy() == Qt.FocusPolicy.NoFocus
+        assert not button.isDefault()
+        assert not button.autoDefault()
+
+    # Tab from the box goes round the dialog without ever landing on one.
+    dialog.query_edit.setFocus()
+    seen = []
+    for _ in range(12):
+        dialog.focusNextChild()
+        seen.append(dialog.focusWidget())
+    assert not any(widget in _web_buttons(dialog) for widget in seen)
+
+    # A click leaves the focus in the box, so the next mark is typed there —
+    # and Space afterwards goes to the box, not back to the button.
+    qtbot.mouseClick(_site_button(dialog, "smd.yooneed.one"), Qt.MouseButton.LeftButton)
+    assert browser.urls == ["https://smd.yooneed.one/search?code=W5"]
+    assert dialog.focusWidget() is dialog.query_edit
+    qtbot.keyClick(dialog.focusWidget(), Qt.Key.Key_Space)
+    qtbot.keyClick(dialog.focusWidget(), Qt.Key.Key_Return)
+    assert len(browser.urls) == 1
+
+
+def test_the_lock_is_looked_at_again_when_the_window_is_shown(qtbot) -> None:
+    dialog, gate, _ = _web_dialog(qtbot)
+    _type(dialog, "W5")
+    dialog.show()
+    assert all(button.isEnabled() for button in _web_buttons(dialog))
+    dialog.hide()
+    gate.allowed = False
+    dialog.show()
+    assert not any(button.isEnabled() for button in _web_buttons(dialog))
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_LOCKED
+
+
+def test_a_question_that_cannot_be_answered_is_a_no(qtbot, caplog) -> None:
+    def broken() -> bool:
+        raise RuntimeError("the main window is gone")
+
+    browser = _Browser()
+    dialog = _dialog(
+        qtbot, InMemoryChipSource(list(_WEB_CHIPS)), open_url=browser, link_out_allowed=broken
+    )
+    _type(dialog, "W5")
+    assert not any(button.isEnabled() for button in _web_buttons(dialog))
+    assert dialog.search_on(MARKING_SITES[0]) is False
+    assert dialog.open_makers_page() is False
+    assert browser.urls == []
+    # It says what it knows — not that an engagement is active — and it's
+    # logged once, not at every keystroke.
+    assert dialog.web_label.text() == chip_dialog.LINK_OUT_UNKNOWN
+    _type(dialog, "W6")
+    assert caplog.text.count("asking whether to link out failed") == 1
+
+
+def test_the_link_out_words_are_text_too(qtbot) -> None:
+    markup = "<b>W7</b>"
+    sly = Chip(
+        mpn="<i>EX7</i>",
+        manufacturer="Example Semi",
+        markings=(Marking("W7"),),
+        documents=(
+            Document("datasheet", "a.pdf", url="https://www.example.com/<b>x</b>"),
+            Document("app-note", "b.pdf", url='https://www.example.com/"><img src=x>'),
+        ),
+    )
+    browser = _Browser()
+    dialog = _dialog(
+        qtbot, InMemoryChipSource([sly]), open_url=browser, link_out_allowed=lambda: True
+    )
+    for typed in (markup, "W7"):
+        _type(dialog, typed)
+        assert dialog.web_label.textFormat() == Qt.TextFormat.PlainText
+        tips = [button.toolTip() for button in _web_buttons(dialog)]
+        assert not any(mightBeRichText(tip) for tip in tips), tips
+        assert not any(markup in tip or "EX7" in tip for tip in tips)
+    assert dialog.selected().chip is sly
+    assert dialog.open_makers_page() is False  # neither address is fit to open
+    assert browser.urls == []
+
+
 # --- what the dialog is allowed to know about --------------------------------
 
 
 def test_the_dialog_reads_chip_reference_and_nothing_else() -> None:
     """An operator dialog: no job, customer, config or output code comes near it.
 
-    Every import of both modules is on this list. So it doesn't import the
-    datasheet library — opening a document is handed in by whoever builds the
-    dialog — nor anything that reaches the network or starts a process, and
-    the only Qt modules are the three the rest of the app already uses.
+    Every import of the dialog and the modules written for it is on this
+    list. So it doesn't import the datasheet library — opening a document is
+    handed in by whoever builds the dialog — nor anything that reaches the
+    network or starts a process, and the only Qt modules are the three the
+    rest of the app already uses. ``urllib.parse`` and ``re`` only build and
+    check the text of an address; ``urllib.request`` is not here, and
+    the one thing that leaves the app is a URL handed to Qt's desktop
+    services, in ``shell/browser.py``.
     """
     allowed = {
         "__future__",
@@ -1094,17 +1592,21 @@ def test_the_dialog_reads_chip_reference_and_nothing_else() -> None:
         "contextlib",
         "dataclasses",
         "logging",
+        "re",
         "threading",
+        "urllib.parse",
         "PySide6.QtCore",
         "PySide6.QtGui",
         "PySide6.QtWidgets",
         "benchhud.chips.find",
+        "benchhud.chips.linkout",
         "benchhud.chips.marking",
         "benchhud.chips.model",
         "benchhud.chips.source",
+        "benchhud.shell.browser",
         "benchhud.shell.qt_util",
     }
-    for module in (chip_dialog, chips_find):
+    for module in (chip_dialog, chips_find, chips_linkout, shell_browser):
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
         imported: set[str] = set()
         for node in ast.walk(tree):
