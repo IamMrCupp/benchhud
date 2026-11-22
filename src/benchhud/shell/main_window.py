@@ -996,13 +996,16 @@ class MainWindow(QMainWindow):
         OK doubles as "pick up what changed on disk". A new source has no copy
         yet, so it's only built when the list really changed.
         """
-        if self._chip_entries == self._config.chips.sources:
+        same_list = self._chip_entries == self._config.chips.sources
+        if same_list:
             warm_chip_source(self._chip_source)
         else:
             self._chip_source = self._make_chip_source()
-            if self._chip_dialog is not None:
-                # Find chip may be open: it looks in the new source from here on.
-                self._chip_dialog.set_source(self._chip_source)
+        if self._chip_dialog is not None:
+            # Find chip may be open. A new list: it looks in the new source
+            # from here on. The same list: the folders may have changed, so it
+            # has them read again before it looks — like the chip panel below.
+            self._chip_dialog.set_source(self._chip_source, reread=same_list)
         self.chip_panel.refresh()
 
     def _make_datasheet_library(self) -> DatasheetLibrary:

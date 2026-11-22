@@ -34,9 +34,9 @@ is read from the index while the index is current. If anything under `chips/` or
 `vocab/` is newer than the index, the chip files are read instead, so a pull
 without a rebuild can't leave you on last week's data.
 
-There's no public data set to point this at yet. Until there is, a source is
-whatever you write down yourself, and that's the part that's worth having: the
-marks you've actually read off parts.
+benchhud doesn't come with chip data, and there's no public set to point it at.
+A source is whatever you write down yourself — and that's the part worth having:
+the marks you've actually read off parts.
 
 A chip file is TOML. This is a whole one — "Example Semi" is made up:
 
@@ -124,8 +124,9 @@ When you open a chip's datasheet, benchhud looks for it two ways:
 - **By name**, failing that. A file with the same name is offered — and marked as
   a name match, because it might be another revision.
 
-You can tell which you got before it opens and after: an exact copy says so; a
-name match says `matched by name only; it may be another revision`.
+You're told which you got. The inventory row says it before you open anything —
+`held, an exact copy`, or `held, matched by name only; it may be another
+revision`. Find chip says it as the file opens.
 
 benchhud shows the chip's name for a document, never the name or folder of the
 file on your disk. A file found by its hash can be called anything, and some of
@@ -258,10 +259,15 @@ says exactly that. Looking chips up in your own data is unaffected.
 - **`— 1 note` after a count** — hover it. A file was skipped, or an index was
   passed over for being older than the chip files.
 - **A chip you just added isn't found** — nothing watches the folders. Press OK
-  in Preferences.
-- **Open datasheet is off** — the chip lists no datasheet, the file isn't in the
-  folder, or no datasheet folder is set. The line by it says which.
-- **The web buttons are off** — a recon engagement was imported this run.
+  in Preferences; an open Find chip looks again by itself.
+- **Open datasheet is off** — on the inventory row: the chip lists no datasheet,
+  the file isn't in the folder, or no datasheet folder is set, and the line above
+  the button says which. In Find chip it's off only when no datasheet folder is
+  set or the chip lists no documents; a file that isn't held is said when you ask
+  for it.
+- **The web buttons are off** — nothing is typed, what's typed isn't a plain mark
+  a site can be asked about, or a recon engagement was imported this run. The
+  line above them says which.
 
 The log has a line for everything skipped: `chips:` for sources, `datasheets:`
 for the folder.

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QHeaderView, QMenu
 
 import benchhud.chips as chips_package
 from benchhud.chips import (
@@ -46,7 +46,13 @@ from benchhud.config import ChipSourceConfig, Config
 from benchhud.inventory import InMemoryInventorySource, Part
 from benchhud.recon import Engagement, InMemoryReconSource
 from benchhud.shell import chip_dialog
-from benchhud.shell.chip_dialog import NO_DATA, FindChipDialog, OpenOutcome, provenance_line
+from benchhud.shell.chip_dialog import (
+    MAX_SHOWN,
+    NO_DATA,
+    FindChipDialog,
+    OpenOutcome,
+    provenance_line,
+)
 from benchhud.shell.main_window import (
     LINK_OUT_LOCKED_BY_ENGAGEMENT,
     NO_DATASHEET_FOLDER,
@@ -83,6 +89,15 @@ _BUCK_LOCAL = Chip(
     used_in=(UsedIn("EXAMPLE-BOARD-9", "U1"),),
 )
 _LDO = Chip(mpn="EX9000SOT", manufacturer="Example Semi", package="SOT-23-5", functions=("ldo",))
+# The same chip with the mark _BUCK has too: two candidates for "X1=".
+_LDO_X1 = Chip(
+    mpn="EX9000SOT",
+    manufacturer="Example Semi",
+    package="SOT-23-5",
+    functions=("ldo",),
+    markings=(Marking("X1=", ("X1=2B",)),),
+)
+_SWITCHLIKE = Chip(mpn="EX4410DFN", manufacturer="Example Semi", markings=(Marking("X4"),))
 
 
 class _FakeScanner:
@@ -401,6 +416,82 @@ def test_with_one_source_the_detail_pane_is_as_it_was(qtbot, source) -> None:
     assert all(row[3] == "" for rows in details.values() for row in rows)
 
 
+def test_with_one_source_the_detail_list_is_laid_out_as_it_was(qtbot) -> None:
+    # Before there was a fourth column the third was the last, and took the
+    # spare width. A long note mustn't now need a scrollbar it never needed.
+    wordy = Chip(
+        mpn="EX1234QFN",
+        manufacturer="Example Semi",
+        markings=(Marking("X1=", ("X1=6A",), "a note " * 20),),
+    )
+    dialog = _dialog(qtbot, InMemoryChipSource([wordy], "plain"))
+    dialog.show()
+    _type(dialog, "EX1234QFN")
+    header = dialog.details.header()
+    assert dialog.details.isColumnHidden(3)
+    assert header.stretchLastSection()
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.ResizeToContents
+    assert not dialog.details.horizontalScrollBar().isVisible()
+
+
+def test_with_several_sources_the_fourth_column_appears_beside_a_stretching_third(qtbot) -> None:
+    dialog = _dialog(qtbot, _two_sources())
+    _type(dialog, "X1=")
+    header = dialog.details.header()
+    assert not dialog.details.isColumnHidden(3)
+    assert header.sectionResizeMode(2) == QHeaderView.ResizeMode.Stretch
+    # And it goes away again when a chip from one source — or none — is shown.
+    dialog.set_source(InMemoryChipSource([_BUCK], "plain"))
+    assert dialog.details.isColumnHidden(3)
+    _type(dialog, "")
+    assert dialog.details.isColumnHidden(3)
+
+
+def test_where_values_came_from_is_fetched_with_the_lookup_not_on_a_pick(qtbot) -> None:
+    asked: list[str] = []
+
+    class Counting(CompositeChipSource):
+        def merged(self, mpn: str):
+            asked.append(mpn)
+            return super().merged(mpn)
+
+    jobs: list = []
+    source = Counting(
+        [InMemoryChipSource([_BUCK_LOCAL], "local"), InMemoryChipSource([_BUCK, _LDO], "community")]
+    )
+    dialog = _dialog(qtbot, source, executor=jobs.append)
+    dialog.query_edit.setText("X1=")
+    dialog.lookup_now()
+    assert asked == []  # nothing on this thread
+    jobs.pop(0)()
+    fetched = len(asked)
+    assert fetched > 0
+    for row in range(dialog.tree.topLevelItemCount()):
+        dialog.tree.setCurrentItem(dialog.tree.topLevelItem(row))
+    assert len(asked) == fetched  # picking a row asks the source nothing
+    assert dialog.sources_label.text() != ""
+
+
+def test_only_the_candidates_that_will_be_listed_have_it_fetched(qtbot) -> None:
+    asked: list[str] = []
+
+    class Counting(CompositeChipSource):
+        def merged(self, mpn: str):
+            asked.append(mpn)
+            return super().merged(mpn)
+
+    chips = [
+        Chip(mpn=f"EX{n:04}", manufacturer="Example Semi", markings=(Marking("X"),))
+        for n in range(MAX_SHOWN + 50)
+    ]
+    source = Counting([InMemoryChipSource(chips, "a"), InMemoryChipSource(chips, "b")])
+    dialog = _dialog(qtbot, source)
+    _type(dialog, "X")
+    # One ask is the lookup's own (is "X" a part number?); the rest are provenance.
+    assert len(asked) == MAX_SHOWN + 1
+    assert dialog.tree.topLevelItemCount() == MAX_SHOWN
+
+
 def test_source_names_and_disputed_values_stay_out_of_tooltips(qtbot) -> None:
     dialog = _dialog(qtbot, _two_sources())
     _type(dialog, "X1=")
@@ -443,6 +534,128 @@ def test_an_answer_from_the_old_source_is_not_shown(qtbot) -> None:
     dialog.lookup_now()
     jobs.pop(0)()
     assert _part_numbers(dialog) == ["EX9000SOT"]
+
+
+class _Failing(InMemoryChipSource):
+    def by_marking(self, text: str):
+        raise RuntimeError("the old source fell over")
+
+
+def test_a_failure_from_the_old_source_is_not_pinned_on_the_new(qtbot) -> None:
+    jobs: list = []
+    dialog = _dialog(qtbot, _Failing([_BUCK], "old"), executor=jobs.append)
+    dialog.query_edit.setText("X1=")
+    dialog.lookup_now()
+    dialog.set_source(InMemoryChipSource([_BUCK], "new"))
+    jobs.pop(0)()  # the old source's lookup fails now
+    assert "failed" not in dialog.status_label.text()
+    assert len(jobs) == 1  # and the new source is asked
+    jobs.pop(0)()
+    assert _part_numbers(dialog) == ["EX1234QFN"]
+    assert dialog.status_label.text() == "1 candidate."
+
+
+def test_a_failure_from_a_source_that_was_taken_away_says_nothing(qtbot) -> None:
+    jobs: list = []
+    dialog = _dialog(qtbot, _Failing([_BUCK], "old"), executor=jobs.append)
+    dialog.query_edit.setText("X1=")
+    dialog.lookup_now()
+    dialog.set_source(NullChipSource())
+    dialog._on_slow()  # the "still looking" timer firing late
+    assert dialog.status_label.text() == ""
+    jobs.pop(0)()
+    assert dialog.status_label.text() == ""  # the notice is the whole story
+    assert dialog.notice_label.isVisibleTo(dialog)
+    assert jobs == []
+
+
+def test_a_failure_from_the_source_in_use_is_still_a_failure(qtbot) -> None:
+    dialog = _dialog(qtbot, _Failing([_BUCK], "only"))
+    _type(dialog, "X1=")
+    assert dialog.status_label.text().startswith("The lookup failed")
+
+
+def test_the_old_source_s_rows_go_the_moment_it_is_swapped(qtbot) -> None:
+    jobs: list = []
+    opened: list[str] = []
+    dialog = _dialog(
+        qtbot,
+        InMemoryChipSource([_BUCK, _LDO_X1], "old"),
+        lambda chip, document: opened.append(chip.mpn) or True,
+        executor=jobs.append,
+    )
+    dialog.query_edit.setText("X1=")
+    dialog.lookup_now()
+    jobs.pop(0)()
+    dialog.tree.setCurrentItem(dialog.tree.topLevelItem(1))  # the operator picks EX9000SOT
+    assert dialog.selected().chip.mpn == "EX9000SOT"
+
+    dialog.set_source(InMemoryChipSource([_LDO_X1, _BUCK], "new"))
+    # Before the new source has answered: nothing of the old one's is left to act on.
+    assert _part_numbers(dialog) == []
+    assert dialog.selected() is None
+    assert not dialog.open_selected()
+    assert opened == []
+    assert dialog.status_label.text() == "Looking up “X1=”…"
+    assert not dialog.sources_label.isVisibleTo(dialog)
+
+    jobs.pop(0)()
+    assert sorted(_part_numbers(dialog)) == ["EX1234QFN", "EX9000SOT"]
+    assert dialog.selected().chip.mpn == "EX9000SOT"  # the pick is made again
+
+
+def test_a_pick_the_new_source_does_not_have_is_not_made_again_later(qtbot) -> None:
+    dialog = _dialog(qtbot, InMemoryChipSource([_BUCK, _LDO_X1], "old"))
+    _type(dialog, "X1=")
+    dialog.tree.setCurrentItem(dialog.tree.topLevelItem(1))
+    assert dialog.selected().chip.mpn == "EX9000SOT"
+    dialog.set_source(InMemoryChipSource([_BUCK], "new"))  # no EX9000SOT here
+    assert _part_numbers(dialog) == ["EX1234QFN"]
+    # Back on a source that has it: the old pick isn't sprung on a later list.
+    dialog.set_source(InMemoryChipSource([_BUCK, _LDO_X1, _SWITCHLIKE], "newer"))
+    _type(dialog, "X")
+    assert len(_part_numbers(dialog)) == 3
+    assert dialog.selected() is None
+
+
+def test_an_arrow_pressed_before_the_swap_lands_on_the_new_list(qtbot) -> None:
+    jobs: list = []
+    dialog = _dialog(qtbot, InMemoryChipSource([_BUCK, _LDO_X1], "old"), executor=jobs.append)
+    dialog.query_edit.setText("X1=")
+    dialog._move(1)  # ↓ while the list is still behind the box
+    dialog.set_source(InMemoryChipSource([_BUCK, _LDO_X1], "new"))
+    while jobs:
+        jobs.pop(0)()
+    assert dialog.selected() is not None
+    assert dialog.selected().chip.mpn == _part_numbers(dialog)[0]
+
+
+def test_the_same_source_can_be_told_to_read_its_folders_again(qtbot) -> None:
+    reloads: list[str] = []
+
+    class Reloading(InMemoryChipSource):
+        def reload(self) -> None:
+            reloads.append("reload")
+            self.chips.append(_LDO_X1)  # what a pull would have brought
+
+    jobs: list = []
+    source = Reloading([_BUCK], "same")
+    dialog = _dialog(qtbot, source, executor=jobs.append)
+    dialog.query_edit.setText("X1=")
+    dialog.lookup_now()
+    jobs.pop(0)()
+    assert _part_numbers(dialog) == ["EX1234QFN"]
+
+    dialog.set_source(source, reread=True)
+    assert reloads == []  # not on this thread
+    jobs.pop(0)()
+    assert reloads == ["reload"]
+    assert sorted(_part_numbers(dialog)) == ["EX1234QFN", "EX9000SOT"]
+    # Once, not before every lookup from now on.
+    dialog.query_edit.setText("X1")
+    dialog.lookup_now()
+    jobs.pop(0)()
+    assert reloads == ["reload"]
 
 
 def test_a_source_taken_away_says_there_is_no_chip_data(qtbot) -> None:
@@ -496,6 +709,64 @@ def test_an_opener_taken_away_turns_it_off_and_says_why(qtbot) -> None:
     assert dialog.open_label.objectName() == "hint"
     assert dialog.open_button.toolTip() == "The folder was cleared."
     assert not dialog.open_selected()
+
+
+def test_opening_turned_off_mid_open_says_why_and_not_looking_for_ever(qtbot) -> None:
+    jobs: list = []
+    dialog = _dialog(
+        qtbot,
+        InMemoryChipSource([_BUCK], "s"),
+        lambda chip, document: OpenOutcome(True, "Opened by the one that's gone."),
+        executor=jobs.append,
+    )
+    dialog.query_edit.setText("EX1234QFN")
+    dialog.lookup_now()
+    jobs.pop(0)()
+    assert dialog.open_selected()
+    assert dialog.open_label.text().startswith("Looking for")
+    dialog.set_open_document(None, "The folder was cleared.")
+    jobs.pop(0)()  # the opener that was running finishes
+    assert dialog.open_label.text() == "The folder was cleared."
+    assert not dialog.open_button.isEnabled()
+
+
+def test_changing_the_opener_leaves_a_message_and_a_picked_row_alone(qtbot) -> None:
+    dialog = _dialog(
+        qtbot,
+        InMemoryChipSource([_BUCK], "s"),
+        lambda chip, document: OpenOutcome(True, "Opened EX1234.pdf."),
+    )
+    _type(dialog, "EX1234QFN")
+    assert dialog.open_selected()
+    assert dialog.open_label.text() == "Opened EX1234.pdf."
+    documents = next(
+        dialog.details.topLevelItem(i)
+        for i in range(dialog.details.topLevelItemCount())
+        if dialog.details.topLevelItem(i).text(0) == "Documents"
+    )
+    dialog.details.setCurrentItem(documents.child(1))
+    dialog.set_open_document(lambda chip, document: True)  # another folder, still able to open
+    assert dialog.open_label.text() == "Opened EX1234.pdf."
+    assert dialog.details.currentItem() is documents.child(1)
+
+
+def test_the_document_rows_say_what_enter_does_now(qtbot) -> None:
+    dialog = _dialog(qtbot, InMemoryChipSource([_BUCK], "s"), open_unavailable="No folder yet.")
+    _type(dialog, "EX1234QFN")
+
+    def tips() -> set[str]:
+        out: set[str] = set()
+        for i in range(dialog.details.topLevelItemCount()):
+            head = dialog.details.topLevelItem(i)
+            if head.text(0) == "Documents":
+                out |= {head.child(j).toolTip(0) for j in range(head.childCount())}
+        return out
+
+    assert tips() == {"No folder yet."}
+    dialog.set_open_document(lambda chip, document: True)
+    assert tips() == {"Enter opens this document."}
+    dialog.set_open_document(None, "The folder was cleared.")
+    assert tips() == {"The folder was cleared."}
 
 
 def test_an_opener_swapped_mid_open_lets_the_running_one_finish(qtbot) -> None:
@@ -647,6 +918,24 @@ def test_the_window_s_opener_says_an_exact_copy_is_one(qtbot, tmp_path, opened_f
     assert opened_files == [library.root / "renamed.pdf"]
 
 
+def test_the_window_s_opener_searches_whichever_folder_is_current(
+    qtbot, tmp_path, opened_files
+) -> None:
+    first = _library(tmp_path / "a", **{"EX1234.pdf": _REV_A})
+    second = _library(tmp_path / "b", **{"somewhere-else.pdf": _REV_A})
+    config = Config()
+    config.chips.datasheet_dir = str(first.root)
+    window = _window(qtbot, config, on_persist=lambda c: None)
+    opener = window._chip_opener()
+    assert opener(_BUCK, None).opened
+    # Preferences moves the folder; the opener the dialog already holds follows.
+    prefs = window.open_preferences()
+    prefs.chips_datasheet_dir.setText(str(second.root))
+    prefs.accept()
+    assert opener(_BUCK, None).opened
+    assert opened_files == [first.root / "EX1234.pdf", second.root / "somewhere-else.pdf"]
+
+
 def test_the_inventory_row_and_find_chip_say_the_same_thing(
     qtbot, tmp_path, worker_jobs, opened_files
 ) -> None:
@@ -720,6 +1009,43 @@ def test_ok_in_preferences_turns_open_datasheet_on_and_off_in_the_open_dialog(
     prefs.accept()
     assert not dialog.open_button.isEnabled()
     assert dialog.open_label.text() == NO_DATASHEET_FOLDER
+
+
+def test_ok_with_the_sources_unchanged_still_shows_what_changed_on_disk(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    folder = tmp_path / "chips-private" / "chips" / "example-semi"
+    folder.mkdir(parents=True)
+
+    def write(mpn: str, package: str) -> None:
+        (folder / f"{mpn}.toml").write_text(
+            f'schema = 1\nmpn = "{mpn}"\nmanufacturer = "Example Semi"\n'
+            f'package = "{package}"\n[[markings]]\ncode = "X1="\n'
+        )
+
+    write("EX1234QFN", "QFN-20 (3x3)")
+    config = Config()
+    config.chips.sources = [ChipSourceConfig("local", path=str(tmp_path / "chips-private"))]
+    window = _window(qtbot, config, on_persist=lambda c: None)
+    _settle(worker_jobs)
+    dialog = window.open_chip_search()
+    dialog._executor = _inline
+    _type(dialog, "X1=")
+    assert [dialog.tree.topLevelItem(0).text(2)] == ["QFN-20 (3x3)"]
+
+    write("EX1234QFN", "QFN-24 (4x4)")  # edited on disk
+    write("EX5555QFN", "QFN-16")  # and one added
+    window.open_preferences().accept()  # nothing changed in Preferences
+    _settle(worker_jobs)
+
+    assert window.open_chip_search() is dialog
+    assert dialog.query_edit.text() == "X1="
+    assert sorted(_part_numbers(dialog)) == ["EX1234QFN", "EX5555QFN"]
+    packages = {
+        dialog.tree.topLevelItem(i).text(0): dialog.tree.topLevelItem(i).text(2)
+        for i in range(dialog.tree.topLevelItemCount())
+    }
+    assert packages["EX1234QFN"] == "QFN-24 (4x4)"
 
 
 def test_a_dialog_never_opened_is_not_made_by_a_preferences_ok(qtbot) -> None:

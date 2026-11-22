@@ -243,10 +243,12 @@ class _Answer(list):
 
     The tag is :attr:`FindChipDialog._round` when the lookup started. If the
     source was swapped while it ran, the tag no longer matches and the answer
-    is dropped.
+    is dropped. A lookup that failed is an empty one with ``failed`` set — it
+    carries its tag too, so an old source's failure isn't pinned on the new.
     """
 
     round = 0
+    failed = False
 
 
 def provenance_line(merged: MergedChip) -> str:
@@ -327,6 +329,8 @@ class FindChipDialog(QDialog):
         # Goes up when the source is swapped, so an answer from the old one
         # isn't taken for an answer from the new.
         self._round = 0
+        self._reread = False  # the next lookup has the source read its folders first
+        self._restore_key: str | None = None  # the pick to make again after a swap
         self._open_document = open_document
         self._open_unavailable = open_unavailable
         self._link_out_allowed = link_out_allowed
@@ -502,27 +506,49 @@ class FindChipDialog(QDialog):
 
     # --- following a change in Preferences ------------------------------------
 
-    def set_source(self, source: ChipSource, *, configured: bool | None = None) -> None:
+    def set_source(
+        self, source: ChipSource, *, configured: bool | None = None, reread: bool = False
+    ) -> None:
         """Look things up in ``source`` from now on.
 
-        What's listed came from the old source, so what's typed is looked up
-        again; an answer the old source is still working on is dropped when
-        it arrives. ``configured`` means what it does in the constructor.
+        What's listed came from the old source, so the list is emptied at once
+        — nothing from a source that's gone stays there to be opened — and
+        what's typed is looked up again. The row the operator had picked is
+        picked again if the new answer has it. An answer the old source is
+        still working on is dropped when it arrives, whether it found
+        something or failed.
+
+        ``reread`` is for the same source whose folders may have changed (a
+        Preferences OK with the list untouched): the next lookup has it read
+        them again first, on the worker, so the list can't come back with
+        what the source held before.
+
+        ``configured`` means what it does in the constructor.
         """
         if configured is None:
             configured = not isinstance(source, NullChipSource)
+        kept = self.selected()
+        if kept is not None and not self._auto_picked:
+            self._restore_key = kept.chip.key
         self._source = source
         self._configured = configured
         self._round += 1
+        self._reread = reread
         self.notice_label.setVisible(not configured)
         self._debounce.stop()
-        self._pending_move = 0
-        if not configured or not self._wanted:
-            self._show("", [])
-            if not configured:
-                self._say("")  # the notice says why there's nothing to look up
+        self._slow.stop()  # "Looking up…" was about the old source
+        pending, self._pending_move = self._pending_move, 0
+        self._show("", [])  # the old source's rows go now
+        if not configured:
+            self._restore_key = None
+            self._say("")  # the notice says why there's nothing to look up
             return
-        self._shown = None  # the list answers the old source, not this one
+        if not self._wanted:
+            self._restore_key = None
+            return
+        self._pending_move = pending  # an arrow already pressed lands on the new list
+        self._shown = None  # nothing listed answers this source yet
+        self._say(f"Looking up “{self._wanted}”…")
         self._dispatch()
 
     def set_open_document(
@@ -530,13 +556,29 @@ class FindChipDialog(QDialog):
     ) -> None:
         """Open documents with ``open_document`` from now on; ``None`` turns it off.
 
-        An opener that's already running finishes, and says what it did.
+        An opener that's already running finishes. What it says is shown —
+        unless opening has been turned off meanwhile, in which case the line
+        holds why, since that's what's true from then on. A message already
+        showing ("Opened …") and the picked row are left alone.
         """
+        was_off = self._open_document is None
         self._open_document = open_document
         self._open_unavailable = open_unavailable
-        if not self._opening:
-            self._show_open_state()
-        self._on_selection()  # the detail rows say whether Enter opens them
+        if not self._opening and (open_document is None or was_off):
+            self._show_open_state()  # on→off: the reason; off→on: the reason goes
+        self._retip_documents()
+        self._refresh_open_button()
+
+    def _retip_documents(self) -> None:
+        """Have the document rows say what Enter does now, without redrawing them."""
+        tip = "Enter opens this document." if self._open_document else self._open_unavailable
+        for i in range(self.details.topLevelItemCount()):
+            head = self.details.topLevelItem(i)
+            for j in range(head.childCount()):
+                row = head.child(j)
+                if isinstance(row.data(0, Qt.ItemDataRole.UserRole), Document):
+                    for column in range(_DETAIL_COLUMNS):
+                        row.setToolTip(column, tip)
 
     def refresh_link_outs(self) -> None:
         """Ask again whether link-outs are allowed, and redraw them to match.
@@ -678,9 +720,10 @@ class FindChipDialog(QDialog):
             return  # one at a time: _on_looked_up starts the next
         text = self._wanted
         source, asked_in = self._source, self._round
+        reread, self._reread = self._reread, False
         self._looking = True
         self._slow.start()
-        if not self._run(lambda: self._look_up(text, source, asked_in)):
+        if not self._run(lambda: self._look_up(text, source, asked_in, reread)):
             self._looking = False
             self._slow.stop()
             self._show(text, None)
@@ -694,7 +737,11 @@ class FindChipDialog(QDialog):
         return True
 
     def _look_up(
-        self, text: str, source: ChipSource | None = None, asked_in: int | None = None
+        self,
+        text: str,
+        source: ChipSource | None = None,
+        asked_in: int | None = None,
+        reread: bool = False,
     ) -> None:
         """The lookup itself. Runs off the GUI thread.
 
@@ -704,16 +751,23 @@ class FindChipDialog(QDialog):
         so picking one never sends the GUI thread back to the source.
         """
         source = self._source if source is None else source
-        found: _Answer | None = None
+        found = _Answer()
         try:
+            if reread:
+                again = getattr(source, "reload", None)
+                if callable(again):
+                    again()
             found = _Answer(with_provenance(source, find_chips(source, text), MAX_SHOWN))
-            found.round = self._round if asked_in is None else asked_in
         except BaseException:
             log.exception("chip finder: looking up %r failed", text)
+            found.failed = True
+        found.round = self._round if asked_in is None else asked_in
         with contextlib.suppress(RuntimeError):  # the dialog went while it ran
             self._looked_up.emit(text, found)
 
     def _on_slow(self) -> None:
+        if not self._configured:
+            return
         if self._looking and self._wanted and self._wanted != self._shown:
             self._say(f"Looking up “{self._wanted}”…")
 
@@ -721,15 +775,19 @@ class FindChipDialog(QDialog):
         self._looking = False
         self._slow.stop()
         if getattr(found, "round", self._round) != self._round:
-            # Found in a source that's since been swapped: not an answer any more.
+            # From a source that's since been swapped — found or failed, it's
+            # not an answer any more.
             self._dispatch()
             return
+        if getattr(found, "failed", False):
+            found = None
         if text == self._wanted:
             try:
                 self._show(text, found)
             except Exception:  # a record the list can't draw: not the HUD's problem
                 log.exception("chip finder: could not show the answer for %r", text)
                 self._show(text, None)
+            self._restore_key = None  # used or not, it was for this answer only
             return
         # Typed on while it ran: that answer is dropped and the newest text is next.
         if not self._debounce.isActive():
@@ -747,6 +805,9 @@ class FindChipDialog(QDialog):
         # Only a row the operator picked follows them into the next list. One
         # the dialog showed for being the only candidate is let go.
         keep_key = kept.chip.key if kept is not None and not self._auto_picked else None
+        if found and self._restore_key is not None:
+            # The pick from before the source was swapped, if it's still listed.
+            keep_key, self._restore_key = self._restore_key, None
 
         pick: QTreeWidgetItem | None = None
         self.tree.blockSignals(True)
@@ -827,6 +888,7 @@ class FindChipDialog(QDialog):
         self._detail_key = key
 
         self.details.clear()
+        self._show_source_column(False)
         for label in (
             self.title_label,
             self.facts_label,
@@ -864,6 +926,7 @@ class FindChipDialog(QDialog):
         # Several sources put together: say which one each part came from.
         merged = candidate.merged
         self._set_line(self.sources_label, provenance_line(merged) if merged else "")
+        self._show_source_column(merged is not None)
 
         def behind(name: str, count: int) -> list[str]:
             """Per row of a list, the sources that have it — blank with one source."""
@@ -928,6 +991,20 @@ class FindChipDialog(QDialog):
                 ((u.board, u.designator or "", u.role or "", source), None, "")
                 for u, source in zip(chip.used_in, seen, strict=True)
             ],
+        )
+
+    def _show_source_column(self, shown: bool) -> None:
+        """The fourth detail column, or — with one source — the list as it always was.
+
+        Without it the third column is the last and takes the spare width,
+        exactly as before there was a fourth. With it, the third still takes
+        the spare width and the sources sit at their own width beside it.
+        """
+        header = self.details.header()
+        self.details.setColumnHidden(_SOURCE_COLUMN, not shown)
+        header.setStretchLastSection(not shown)
+        header.setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch if shown else QHeaderView.ResizeMode.ResizeToContents
         )
 
     @staticmethod
@@ -1060,6 +1137,11 @@ class FindChipDialog(QDialog):
     def _on_opened(self, chip: Chip, document: Document | None, outcome: object) -> None:
         self._opening = False
         self._refresh_open_button()
+        if self._open_document is None:
+            # Opening was turned off while this ran: the line says why it's
+            # off, not "Looking for…" for ever.
+            self._show_open_state()
+            return
         what = _what(chip, document)
         if isinstance(outcome, BaseException):
             self._say_open(f"Couldn't open {what} — the log has the reason.", "error")
