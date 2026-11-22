@@ -12,10 +12,15 @@
   <div class="title" id="title"></div>
   <div class="detail" id="detail"></div>
   <div class="status" id="status"></div>
+  <!-- What's drawing all this (#494). ?credit=0 on the page's address hides it. -->
+  <div class="credit" id="credit">benchhud</div>
 </div>
 <script>
 "use strict";
 const card = document.getElementById("card");
+if (new URLSearchParams(location.search).get("credit") === "0") {
+  document.getElementById("credit").classList.add("hidden");
+}
 
 subscribe("job", (data) => {
   const job = data ? data.job : null;

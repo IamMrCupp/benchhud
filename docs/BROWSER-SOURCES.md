@@ -64,6 +64,12 @@ Settings under `[now_playing]`: `enabled`, `hide_when_paused`, and `label`
 
 Linux only. macOS has no public API for what's playing.
 
+## The credit on the job card
+
+The job card carries a small "benchhud" in its corner, so the stream says what
+the HUD is without another logo to place. To leave it off, add `?credit=0` to
+the job card's address in OBS.
+
 ## What goes on air
 
 **The job card never carries the customer.** It sends a fixed list of fields
