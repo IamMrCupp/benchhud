@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.0](https://github.com/IamMrCupp/benchhud/compare/v0.29.1...v0.30.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** put a chip on the stream card from Find chip or an inventory row ([c50ba86](https://github.com/IamMrCupp/benchhud/commit/c50ba86622fbaf3aa18b744f25652f598bce8f37))
+* **recon:** end the active engagement from the Engagement panel ([5e8f71a](https://github.com/IamMrCupp/benchhud/commit/5e8f71a77e005249c5b7fad68212186bac90cbac))
+
+
+### Bug Fixes
+
+* **chips:** the inventory row's stream-card button takes the mouse only, and sending never takes the keyboard ([0658474](https://github.com/IamMrCupp/benchhud/commit/0658474de4b3bf2b814b2019993e5f28eecf35a1))
+* **jobs:** restore the selected job after a restart ([52f8ae4](https://github.com/IamMrCupp/benchhud/commit/52f8ae487780e5de2ba9bab7c1c7abad20dd6f6a))
+
 ## [0.29.1](https://github.com/IamMrCupp/benchhud/compare/v0.29.0...v0.29.1) (2026-11-22)
 
 
