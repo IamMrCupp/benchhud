@@ -1081,13 +1081,21 @@ class MainWindow(QMainWindow):
 
         The Chip tab is raised, and shown if it had been closed: the operator
         asked for the chip to be shown, and a card behind another tab — or
-        not there at all — shows nothing.
+        not there at all — shows nothing. It's shown without taking the
+        keyboard: a floating dock coming back mustn't pull the focus out of
+        Find chip's box, where the next mark is about to be typed.
         """
         self.chip_panel.set_chip(mpn)
         dock = self.panels.dock(self.chip_panel.panel_id)
         if dock is not None:
-            dock.show()
-            dock.raise_()
+            quietly = Qt.WidgetAttribute.WA_ShowWithoutActivating
+            was = dock.testAttribute(quietly)
+            dock.setAttribute(quietly, True)
+            try:
+                dock.show()
+                dock.raise_()
+            finally:
+                dock.setAttribute(quietly, was)
 
     def _chip_opener(self) -> OpenDocument | None:
         """What Find chip opens documents with — ``None`` with no datasheet folder."""

@@ -174,8 +174,9 @@ an MPN shows what the chip reference knows about it under the Use on job row —
 maker, package, functions, description, marks — with **Open datasheet**.
 
 When the reference knows the part, **Show on stream card** is there too, and
-puts that chip on the Chip panel. Same rules as in Find chip: a click, and only
-the part number goes — nothing about the part, the shelf or the job.
+puts that chip on the Chip panel. Same rules as in Find chip: a mouse click — no
+key reaches it — and only the part number goes. Nothing about the part, the shelf
+or the job.
 
 A part with no MPN shows nothing. An MPN the reference doesn't know gets one line
 saying so. With no chip sources, the panel is exactly what it was.

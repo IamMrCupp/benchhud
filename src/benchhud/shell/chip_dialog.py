@@ -564,7 +564,6 @@ class FindChipDialog(QDialog):
         self._round += 1
         self._reread = reread
         self.notice_label.setVisible(not configured)
-        self._refresh_card_button()
         self._debounce.stop()
         self._slow.stop()  # "Looking up…" was about the old source
         pending, self._pending_move = self._pending_move, 0

@@ -43,10 +43,11 @@ machine: that's somebody's disk, this panel can be on stream, and a file found
 by its hash can be called anything. The file is opened, not named.
 
 **Show on stream card** sends the row's chip to the Chip panel, which is
-stream output. It's there only when the chip reference knows the part, it's a
-button and never a side effect of selecting a row, and all it hands over is
-the chip's part number — the one the lookup for the selected row came back
-with, so a row passed over on the way never gets sent.
+stream output. It's there only when the chip reference knows the part. It
+takes a mouse click: the button never holds the keyboard focus, so no key
+reaches it, and nothing sends as a side effect of selecting a row. All it
+hands over is the chip's part number — the one the lookup for the selected
+row came back with, so a row passed over on the way never gets sent.
 
 The lookup can be slow the first time and hashing a folder of PDFs can be slow
 any time, so neither runs here: a worker does both and signals back. Every
@@ -271,22 +272,37 @@ class InventoryPanel(Panel):
         self.datasheet_label.setSizePolicy(no_say_in_width)
         # The line gets a row to itself, above the button: beside it, a line
         # that wraps to three in a narrow dock had only the button's height.
-        # The chip is what goes; the datasheet has nothing to do with it. It's
-        # here because this row exists exactly when the chip is known.
-        self.card_button = QPushButton(SHOW_ON_CARD)
-        self.card_button.setToolTip(SHOW_ON_CARD_TIP)
-        self.card_button.clicked.connect(self.show_selected_on_card)
-        self.card_button.setVisible(self._show_on_card is not None)
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.addWidget(self.datasheet_button)
-        button_row.addWidget(self.card_button)
         button_row.addStretch(1)
+        # The chip is what goes; the datasheet has nothing to do with it. It's
+        # in this block because the block exists exactly when the chip is
+        # known — and on a row of its own, because two buttons side by side
+        # are wider than the dock's default column.
+        self.card_button = QPushButton(SHOW_ON_CARD)
+        self.card_button.setToolTip(SHOW_ON_CARD_TIP)
+        self.card_button.clicked.connect(self.show_selected_on_card)
+        # This puts something on air: it takes the mouse. It never holds the
+        # focus, so Space can't press it — nor press it again after a click —
+        # and it's nobody's default button.
+        self.card_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.card_button.setAutoDefault(False)
+        self.card_button.setDefault(False)
+        if self._show_on_card is None:
+            # Hidden, never shown-then-hidden: showing a button that has no
+            # parent yet would flash a window of its own on the bench screen.
+            self.card_button.setVisible(False)
+        card_row = QHBoxLayout()
+        card_row.setContentsMargins(0, 0, 0, 0)
+        card_row.addWidget(self.card_button)
+        card_row.addStretch(1)
         self.datasheet_row = QWidget()
         rows = QVBoxLayout(self.datasheet_row)
         rows.setContentsMargins(0, 0, 0, 0)
         rows.addWidget(self.datasheet_label)
         rows.addLayout(button_row)
+        rows.addLayout(card_row)
 
         self.chip_block = QWidget()
         block = QVBoxLayout(self.chip_block)
@@ -407,8 +423,8 @@ class InventoryPanel(Panel):
         its part number is handed over.
         """
         chip, send = self._chip, self._show_on_card
-        if chip is None or send is None:
-            return False
+        if chip is None or send is None or self._chip_source() is None:
+            return False  # nothing known for this row, or chips were switched off since
         try:
             send(chip.mpn)
         except Exception:
