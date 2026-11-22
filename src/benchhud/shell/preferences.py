@@ -865,7 +865,9 @@ class PreferencesDialog(QDialog):
                 # Selectable but not editable, so a selected row is lit all the
                 # way across.
                 look = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-                for column, ticked in ((_CHIP_ON, on), (_CHIP_ON_AIR, on_air)):
+                # On air is ticked for a plain True and nothing else — the
+                # same rule the builder uses, so the box never claims more.
+                for column, ticked in ((_CHIP_ON, on), (_CHIP_ON_AIR, on_air is True)):
                     check = QTableWidgetItem()
                     check.setFlags(look | Qt.ItemFlag.ItemIsUserCheckable)
                     check.setCheckState(

@@ -215,6 +215,89 @@ def test_a_key_that_is_not_a_plain_switch_keeps_the_source_off_air(written, capl
     assert any("on_air" in record.getMessage() for record in caplog.records)
 
 
+@pytest.mark.parametrize("key", ["on-air", "onair", "On_Air", "ON_AIR", "on air", "off_air"])
+@pytest.mark.parametrize("value", [False, True, "no"])
+def test_the_switch_misspelt_keeps_the_source_off_air(key, value, caplog) -> None:
+    """TOML takes ``on-air = false`` without complaint and it would be ignored —
+    an overlay on stream with nothing said. Whatever it's set to, it fails off air."""
+    with caplog.at_level(logging.WARNING, logger=config_module.__name__):
+        config = Config.from_dict(
+            {"chips": {"sources": [{"name": "local", "path": "~/p", key: value}]}}
+        )
+    assert config.chips.sources[0].on_air is False
+    assert any(key in record.getMessage() for record in caplog.records)
+
+
+def test_a_misspelt_switch_beside_the_real_one_still_fails_off_air() -> None:
+    entry = {"name": "local", "path": "~/p", "on_air": True, "on-air": False}
+    assert Config.from_dict({"chips": {"sources": [entry]}}).chips.sources[0].on_air is False
+
+
+@pytest.mark.parametrize("key", ["repair_note", "pair", "airflow", "base_url", "fair"])
+def test_a_key_that_only_has_air_in_it_is_not_the_switch(key, caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger=config_module.__name__):
+        config = Config.from_dict(
+            {"chips": {"sources": [{"name": "local", "path": "~/p", key: "x"}]}}
+        )
+    assert config.chips.sources[0].on_air is True
+    assert caplog.records == []
+
+
+def test_a_misspelt_switch_is_saved_as_the_real_one(tmp_path) -> None:
+    """The stray key is gone after a save — so what it was for has to be kept."""
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[[chips.sources]]\nname = "local"\npath = "~/chips-private"\non-air = false\n',
+        encoding="utf-8",
+    )
+    config = config_module.load(path)
+    assert config.chips.sources[0].on_air is False
+    config_module.save(config, path)
+    assert "on_air = false" in path.read_text(encoding="utf-8")
+    assert config_module.load(path).chips.sources[0].on_air is False
+
+
+@pytest.mark.parametrize(
+    ("key", "value"), [("on_air", False), ("on_air", "no"), ("on-air", False), ("off_air", True)]
+)
+def test_the_switch_written_on_the_chips_table_keeps_every_source_off_air(
+    key, value, caplog
+) -> None:
+    """It isn't a key there. But it was written to hold something back."""
+    with caplog.at_level(logging.WARNING, logger=config_module.__name__):
+        config = Config.from_dict(
+            {
+                "chips": {
+                    key: value,
+                    "sources": [
+                        {"name": "local", "path": "~/p"},
+                        {"name": "community", "path": "~/c", "on_air": True},
+                    ],
+                }
+            }
+        )
+    assert [source.on_air for source in config.chips.sources] == [False, False]
+    assert any("[chips]" in record.getMessage() for record in caplog.records)
+
+
+def test_the_switch_on_the_chips_table_saying_on_air_changes_nothing(caplog) -> None:
+    with caplog.at_level(logging.WARNING, logger=config_module.__name__):
+        config = Config.from_dict(
+            {
+                "chips": {
+                    "on_air": True,
+                    "sources": [
+                        {"name": "local", "path": "~/p", "on_air": False},
+                        {"name": "community", "path": "~/c"},
+                    ],
+                }
+            }
+        )
+    # Each source is as it says for itself; the stray key puts nothing on air.
+    assert [source.on_air for source in config.chips.sources] == [False, True]
+    assert any("[chips]" in record.getMessage() for record in caplog.records)
+
+
 def test_the_switch_survives_a_save_and_a_load(tmp_path) -> None:
     path = tmp_path / "config.toml"
     config = Config()
@@ -617,6 +700,48 @@ def test_an_answer_from_before_the_switch_never_lands(qtbot, tmp_path, worker_jo
     _nothing_private(panel)
 
 
+def test_find_chip_keeps_every_source_when_the_switch_is_flipped(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    dialog = window.open_chip_search()
+    dialog._executor = _inline
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    assert dialog._source is window.chip_source
+    assert dialog._source is not window.on_air_chip_source
+    dialog.query_edit.setText("PRIV77SOT")
+    dialog.lookup_now()
+    assert dialog.tree.topLevelItemCount() == 1  # an operator screen: it still has it
+    assert window.on_air_chip_source.get("PRIV77SOT") is None
+
+
+def test_the_card_is_refreshed_before_anything_else_can_go_wrong(
+    qtbot, tmp_path, worker_jobs, monkeypatch
+) -> None:
+    """A source just taken off air has to come off the card even if the rest
+    of what follows a Preferences OK falls over."""
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = window.chip_panel
+    panel.set_chip("EX1234QFN")
+    assert panel.description_label.text() == "From the grey donor board, runs hot"
+    dialog = window.open_chip_search()
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("Find chip fell over")
+
+    monkeypatch.setattr(dialog, "set_source", broken)
+    window._config.chips.sources[0].on_air = False
+    with pytest.raises(RuntimeError):
+        window.reconfigure_chip_source()
+
+    assert panel.description_label.text() == _PUBLIC_DESCRIPTION
+    _nothing_private(panel)
+
+
 def test_ok_with_nothing_changed_keeps_both_views(qtbot, tmp_path, worker_jobs) -> None:
     window = _window(qtbot, tmp_path, worker_jobs)
     everything, on_air = window.chip_source, window.on_air_chip_source
@@ -694,11 +819,31 @@ def test_ok_without_touching_the_column_saves_what_was_loaded(qtbot) -> None:
     before = [
         ChipSourceConfig("local", path="/private", on_air=False),
         ChipSourceConfig("community", path="/data", enabled=False),
+        ChipSourceConfig("parked", path="/parked", enabled=False, on_air=False),
         ChipSourceConfig("example-api", kind="http", on_air=False),
     ]
     dialog, config = _prefs(qtbot, *before)
     dialog.accept()
     assert config.chips.sources == before
+
+
+@pytest.mark.parametrize("value", ["false", "true", 1, None])
+def test_the_box_is_ticked_for_a_plain_true_and_nothing_else(qtbot, value) -> None:
+    """The builder only takes a plain True as on air. The box mustn't claim
+    more — or OK would turn something that wasn't on air into something that is."""
+    entry = ChipSourceConfig("local", path="/private")
+    entry.on_air = value
+    dialog, config = _prefs(qtbot, entry)
+    assert _on_air_ticks(dialog) == [False]
+    dialog.accept()
+    assert config.chips.sources[0].on_air is False
+
+
+def test_a_row_with_no_on_air_box_is_off_air(qtbot) -> None:
+    dialog, config = _prefs(qtbot, ChipSourceConfig("local", path="/private"))
+    dialog.chips_table.takeItem(0, ON_AIR)
+    dialog.accept()
+    assert config.chips.sources == [ChipSourceConfig("local", path="/private", on_air=False)]
 
 
 def test_the_switch_travels_with_its_row(qtbot, monkeypatch) -> None:
@@ -784,3 +929,7 @@ def test_the_guide_says_how_to_keep_a_source_off_the_stream() -> None:
     assert "issues/482" not in doc
     lowered = " ".join(doc.lower().split())
     assert "find chip and the inventory row still use" in lowered
+    # It owns up to what the switch doesn't cover, and to how it fails.
+    assert "issues/508" in doc and "inventory dock" in lowered
+    assert "on-air" in doc and "under `[chips]`" in doc
+    assert "before this switch" in lowered  # an older benchhud ignores and drops the key

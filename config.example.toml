@@ -216,7 +216,8 @@ datasheet_dir = ""        # e.g. "~/datasheets"
 #
 # A source is on air unless it says otherwise. `on_air = false` keeps it off the
 # Chip panel — stream output — while Find chip and the inventory row still use
-# it. Anything but true or false there keeps it off air, too.
+# it. The switch fails off air: a value that isn't a yes or a no, or the key
+# misspelt (on-air, onair), keeps the source off air and says so in the log.
 #
 # [[chips.sources]]
 # name = "local"          # shown beside every value it supplies

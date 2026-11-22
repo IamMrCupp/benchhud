@@ -112,11 +112,11 @@ they're put together:
 
 ### Keeping a source off the stream
 
-The Chip panel is stream output. Find chip and the inventory row are yours. A
-source can be in the second and not the first: put `on_air = false` on it, or
-untick **On air** for it in Preferences → Chips. That's what a private overlay
-is for — your own words about a part, there when you look it up, and not read
-out to the room.
+The Chip panel is stream output. Find chip and the inventory row are where you
+look things up. A source can be in the second and not the first: put
+`on_air = false` on it, or untick **On air** for it in Preferences → Chips.
+That's what a private overlay is for — your own words about a part, there when
+you look it up, and not on the card.
 
 Off air, a source is left out of the card completely. Nothing is merged and
 then trimmed: the card looks the chip up in the on-air sources and nowhere
@@ -133,9 +133,28 @@ else. So:
 Find chip and the inventory row still use every source, off air or not. So
 they can show more than the card will — that's the point.
 
-A source is on air unless you say otherwise. Write `on_air` as anything but
-`true` or `false` and the source is kept off air, with a line in the log: a
-typo shouldn't be what puts an overlay on stream.
+**The switch covers the card, and only the card.** Find chip is its own window.
+The inventory row isn't: it's a dock in the HUD window, beside the Chip panel,
+and it shows an off-air source's maker, package, description and marks for
+the part you select. If your stream captures the HUD window, keep the
+Inventory dock out of the picture while a source is off air — or don't select
+that part on air. Whether the row should follow the switch too is
+[an open issue](https://github.com/IamMrCupp/benchhud/issues/508).
+
+A source is on air unless you say otherwise, and the switch fails off air:
+
+- `on_air` set to something that isn't a yes or a no — `"false"` in quotes,
+  say — keeps the source off air. (`1` and `0` count as yes and no.)
+- So does the key misspelt: `on-air`, `onair`, `off_air`.
+- `on_air` written under `[chips]` instead of on a source keeps *every* source
+  off air, unless it plainly says `true`.
+
+Each of those writes a line in the log. A typo shouldn't be what puts an
+overlay on stream.
+
+A benchhud from before this switch doesn't know the key. It treats every
+source as on air, and drops the key if it saves the config — worth knowing
+before you step back a version to test something.
 
 With every source off air the card finds no chip at all. Preferences → Chips
 says so under the table. The card doesn't.
@@ -218,6 +237,10 @@ puts that chip on the Chip panel. Same rules as in Find chip: a mouse click — 
 key reaches it — and only the part number goes. Nothing about the part, the shelf
 or the job. And the same limit: the card shows what the on-air sources say,
 which can be less than the row does.
+
+The row itself reads every source, one you keep off air included — see
+[Keeping a source off the stream](#keeping-a-source-off-the-stream) before you
+put this dock in a captured window.
 
 A part with no MPN shows nothing. An MPN the reference doesn't know gets one line
 saying so. With no chip sources, the panel is exactly what it was.

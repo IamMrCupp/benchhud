@@ -1014,11 +1014,13 @@ class MainWindow(QMainWindow):
         on air, and only those. The two share their sources, so reading
         "every source" has read the on-air ones.
         """
-        # A copy of what it was built from, to tell later whether that changed
-        # — a source going on or off air included.
-        self._chip_entries = [replace(entry) for entry in self._config.chips.sources]
-        sources = build_chip_sources(self._chip_entries)
+        entries = [replace(entry) for entry in self._config.chips.sources]
+        sources = build_chip_sources(entries)
         self._on_air_chip_source: ChipSource = sources.on_air
+        # A copy of what it was built from, to tell later whether that changed
+        # — a source going on or off air included. Kept once it's built, so a
+        # build that failed isn't taken for "nothing changed" next time.
+        self._chip_entries = entries
         warm_chip_source(sources.everything)
         return sources.everything
 
@@ -1049,12 +1051,14 @@ class MainWindow(QMainWindow):
             warm_chip_source(self._chip_source)
         else:
             self._chip_source = self._make_chip_source()
+        # The stream card first, before anything else gets a chance to go
+        # wrong: a source just taken off air has to come off the card.
+        self.chip_panel.refresh()
         if self._chip_dialog is not None:
             # Find chip may be open. A new list: it looks in the new source
             # from here on. The same list: the folders may have changed, so it
-            # has them read again before it looks — like the chip panel below.
+            # has them read again before it looks — like the chip panel above.
             self._chip_dialog.set_source(self._chip_source, reread=same_list)
-        self.chip_panel.refresh()
 
     def _make_datasheet_library(self) -> DatasheetLibrary:
         """Build the datasheet library from config and list it, off this thread.
