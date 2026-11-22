@@ -72,8 +72,9 @@ from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
-from benchhud.chips.builder import build_chip_source
+from benchhud.chips.builder import build_chip_source, build_datasheet_library, warm_library
 from benchhud.chips.builder import warm as warm_chip_source
+from benchhud.chips.datasheets import DatasheetLibrary
 from benchhud.chips.source import ChipSource
 from benchhud.config import Config, OutputConfig, PersistCallback
 from benchhud.demo import DemoSignal
@@ -423,6 +424,7 @@ class MainWindow(QMainWindow):
         self._active_engagement: str | None = None
         self._board_library = self._make_board_library()
         self._chip_source: ChipSource = self._make_chip_source()
+        self._datasheet_library: DatasheetLibrary = self._make_datasheet_library()
 
         self._stabilise_camera_paths()
         self.setObjectName("BenchhudMainWindow")
@@ -502,6 +504,8 @@ class MainWindow(QMainWindow):
             lambda: self._inventory_source,
             job_ref=self.selected_job_ref,
             on_consumed=self._note_parts_used,
+            chips=lambda: self._chip_source,
+            datasheets=lambda: self._datasheet_library,
         )
         self.panels.add_panel(self.inventory_panel, None)
         self.terminal_panel = TerminalPanel(terminal_view_factory)
@@ -964,6 +968,39 @@ class MainWindow(QMainWindow):
         else:
             self._chip_source = self._make_chip_source()
 
+    def _make_datasheet_library(self) -> DatasheetLibrary:
+        """Build the datasheet library from config and list it, off this thread.
+
+        No folder configured is a library that finds nothing: nothing is
+        listed and no thread is started. A file is only hashed when a lookup
+        asks for it, and lookups run on a worker too.
+        """
+        self._datasheet_dir = self._config.chips.datasheet_dir
+        library = build_datasheet_library(self._datasheet_dir)
+        warm_library(library)
+        return library
+
+    @property
+    def datasheet_library(self) -> DatasheetLibrary:
+        """Where held documents are found — one that finds nothing when no folder is set."""
+        return self._datasheet_library
+
+    def reconfigure_datasheet_library(self) -> None:
+        """After a Preferences OK: a new library for a new folder, else list it again.
+
+        Listing the same folder again keeps the hashes already worked out for
+        files that haven't changed, so OK doubles as "see what I just saved
+        there" without paying for the whole folder twice.
+        """
+        if self._datasheet_dir == self._config.chips.datasheet_dir:
+            warm_library(self._datasheet_library)
+        else:
+            self._datasheet_library = self._make_datasheet_library()
+
+    def refresh_chip_details(self) -> None:
+        """Have the inventory row look its part up again, after either changed."""
+        self.inventory_panel.sync_chip_details()
+
     def open_board_file(self, path) -> bool:
         """Open a board file in the configured viewer (or the OS handler)."""
         return open_board(path, self._config.tools, prefer=self._config.boards.viewer)
@@ -1012,6 +1049,8 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.reconfigure_inventory_source)
         dialog.accepted.connect(self.reconfigure_boards)
         dialog.accepted.connect(self.reconfigure_chip_source)
+        dialog.accepted.connect(self.reconfigure_datasheet_library)
+        dialog.accepted.connect(self.refresh_chip_details)
         dialog.accepted.connect(self.reconfigure_tools)
         dialog.accepted.connect(self.reconfigure_instrument_session)
         dialog.accepted.connect(self.restart_browser_sources)

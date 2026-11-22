@@ -755,11 +755,28 @@ class PreferencesDialog(QDialog):
         buttons.addWidget(self.browse_chip_folder_button)
         buttons.addWidget(self.check_chip_sources_button)
 
+        # Where the documents themselves are kept. A chip source lists a
+        # document by fingerprint and never holds the file.
+        self.chips_datasheet_dir = QLineEdit(self._config.chips.datasheet_dir)
+        self.chips_datasheet_dir.setPlaceholderText("~/datasheets")
+        self.chips_datasheet_dir.setToolTip(
+            "Where you keep datasheets. A chip's documents are looked for here:"
+            " by hash, then by name"
+        )
+        self.browse_datasheet_dir_button = QPushButton("Browse…")
+        self.browse_datasheet_dir_button.setToolTip("Pick the datasheet folder")
+        self.browse_datasheet_dir_button.clicked.connect(self.browse_for_datasheet_dir)
+        datasheets = QHBoxLayout()
+        datasheets.addWidget(QLabel("Datasheets"))
+        datasheets.addWidget(self.chips_datasheet_dir, stretch=1)
+        datasheets.addWidget(self.browse_datasheet_dir_button)
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.addWidget(self.chips_order_note)
         layout.addWidget(self.chips_table)
         layout.addLayout(buttons)
+        layout.addLayout(datasheets)
 
         self._set_chip_rows(
             [(c.name, c.path, c.enabled, c.kind) for c in self._config.chips.sources]
@@ -922,6 +939,12 @@ class PreferencesDialog(QDialog):
         rows[row] = (name or Path(path).name, path, on, kind)
         self._set_chip_rows(rows, select=row)
 
+    def browse_for_datasheet_dir(self) -> None:
+        """Pick the folder datasheets are kept in."""
+        path = QFileDialog.getExistingDirectory(self, "Select the datasheet folder")
+        if path:
+            self.chips_datasheet_dir.setText(path)
+
     def check_chip_sources(self) -> None:
         """Forget what every folder came to and read them all again.
 
@@ -1022,8 +1045,8 @@ class PreferencesDialog(QDialog):
         ) or ["pdf"]
         self._config.boards.viewer = self.boards_viewer.currentData() or "auto"
 
-        # Only the list is edited here; the datasheet folder is left as it is.
         self._config.chips.sources = self._collect_chip_sources()
+        self._config.chips.datasheet_dir = self.chips_datasheet_dir.text().strip()
 
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()

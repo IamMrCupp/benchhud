@@ -21,7 +21,11 @@ ticket system is a protocol with a fake, not a dependency.
   `qt_image` (BGR→QImage), `theme` / `fonts` / `icon` / `about`, the dialogs
   `ticket_picker`, `engagement_picker` and `board_dialogs` (Find board / Boards
   to source), and the panels: `scope`, `thermal`, `power` (the styled meter),
-  `controls`, `launcher`, `jobs`, `inventory`, `terminal` (hosts the xterm.js
+  `controls`, `launcher`, `jobs`, `inventory` (with a chip source configured,
+  the selected part's MPN is looked up on a worker and the row shows the
+  chip's reference details and **Open datasheet**; the main window builds
+  the datasheet library from `[chips] datasheet_dir` and lists it off the
+  GUI thread), `terminal` (hosts the xterm.js
   page in QtWebEngine, created only when the terminal is on), `engagement` (the
   active bench-recon engagement, off air), `interfaces` (connected probes/
   adapters cross-mapped to assigned assets, with a manual port→asset bind),

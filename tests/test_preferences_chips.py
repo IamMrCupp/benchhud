@@ -511,7 +511,7 @@ def test_ok_writes_the_sources_back_in_the_order_shown(qtbot) -> None:
         ChipSourceConfig(name="community", kind="dir", path="~/src/chip-data", enabled=True),
         ChipSourceConfig(name="local", kind="dir", path="/private", enabled=False),
     ]
-    assert config.chips.datasheet_dir == "~/datasheets"  # not this tab's to change
+    assert config.chips.datasheet_dir == "~/datasheets"  # shown, and saved back as it was
 
 
 def test_a_kind_this_version_does_not_read_is_saved_back_as_it_was(qtbot) -> None:
