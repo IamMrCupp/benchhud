@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/IamMrCupp/benchhud/compare/v0.29.0...v0.29.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **macos:** staple the notarization ticket to the app inside the .dmg ([1658069](https://github.com/IamMrCupp/benchhud/commit/1658069c6082ec8ac545b9d86ccfe5d8534098a7))
+
 ## [0.29.0](https://github.com/IamMrCupp/benchhud/compare/v0.28.0...v0.29.0) (2026-11-22)
 
 
