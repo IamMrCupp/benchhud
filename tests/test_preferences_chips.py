@@ -26,7 +26,7 @@ from benchhud.shell.preferences import PreferencesDialog, describe_load
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chip-data" / "index.json"
 
-NAME, FOLDER, ON, LOADED = range(4)
+NAME, FOLDER, ON, ON_AIR, LOADED = range(5)
 
 
 class _FakeScanner:
@@ -131,8 +131,8 @@ def test_the_table_lists_the_sources_in_order(qtbot) -> None:
     assert _column(dialog, NAME) == ["local", "community"]
     assert _column(dialog, FOLDER) == ["/private", "/data"]
     assert _ticked(dialog) == [True, False]
-    headers = [dialog.chips_table.horizontalHeaderItem(c).text() for c in range(4)]
-    assert headers == ["Name", "Folder", "On", "Loaded"]
+    headers = [dialog.chips_table.horizontalHeaderItem(c).text() for c in range(5)]
+    assert headers == ["Name", "Folder", "On", "On air", "Loaded"]
 
 
 def test_the_tab_says_the_order_is_precedence(qtbot) -> None:

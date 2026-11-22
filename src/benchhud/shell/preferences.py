@@ -16,6 +16,7 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -43,7 +44,7 @@ from benchhud.boards.library import DEFAULT_EXTENSIONS
 from benchhud.capture.modes import camera_modes, describe
 from benchhud.chips.builder import KIND_DIR, left_out, name_key, probe_folder
 from benchhud.chips.dir_source import FROM_FILES, FROM_INDEX, LoadReport
-from benchhud.config import ChipSourceConfig, Config, ToolConfig
+from benchhud.config import CHIP_SOURCE_ON_AIR, ChipSourceConfig, Config, ToolConfig
 from benchhud.devices.discovery import (
     BY_ID_DIR,
     CameraDevice,
@@ -67,7 +68,35 @@ ChipProbe = Callable[[str], LoadReport]
 #: Runs a job off the GUI thread.
 Executor = Callable[[Callable[[], None]], None]
 # The Chips table's columns.
-_CHIP_NAME, _CHIP_FOLDER, _CHIP_ON, _CHIP_LOADED = range(4)
+_CHIP_NAME, _CHIP_FOLDER, _CHIP_ON, _CHIP_ON_AIR, _CHIP_LOADED = range(5)
+#: Said under the Chips table when there are sources and none is on air. It's
+#: here, on the operator's screen, because the card itself gives no hint.
+NO_SOURCE_ON_AIR = (
+    "No source is on air, so the Chip panel won't find any chip."
+    " Find chip and the inventory row still use every source."
+)
+
+
+class _ChipRow(NamedTuple):
+    """One row of the Chips table."""
+
+    name: str = ""
+    folder: str = ""
+    on: bool = True
+    on_air: bool = CHIP_SOURCE_ON_AIR
+    kind: str = KIND_DIR
+
+    def entry(self) -> ChipSourceConfig:
+        """The config entry this row is saved as."""
+        return ChipSourceConfig(
+            name=_chip_source_name(self.name, self.folder),
+            kind=self.kind,
+            path=self.folder,
+            enabled=self.on,
+            on_air=self.on_air,
+        )
+
+
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 _OVERLAY_CORNERS = (
     ("Bottom left", "bottom-left"),
@@ -699,8 +728,8 @@ class PreferencesDialog(QDialog):
         self._chips_filling = False
         self._chip_folder_checked.connect(self._on_chip_folder_checked)
 
-        self.chips_table = QTableWidget(0, 4)
-        self.chips_table.setHorizontalHeaderLabels(["Name", "Folder", "On", "Loaded"])
+        self.chips_table = QTableWidget(0, 5)
+        self.chips_table.setHorizontalHeaderLabels(["Name", "Folder", "On", "On air", "Loaded"])
         self.chips_table.horizontalHeaderItem(_CHIP_NAME).setToolTip(
             "Shown beside every value this source supplies"
         )
@@ -710,6 +739,10 @@ class PreferencesDialog(QDialog):
         self.chips_table.horizontalHeaderItem(_CHIP_ON).setToolTip(
             "Untick to leave a source out without deleting it"
         )
+        self.chips_table.horizontalHeaderItem(_CHIP_ON_AIR).setToolTip(
+            "Untick to keep a source off the Chip panel, which is stream output."
+            " Find chip and the inventory row still use it"
+        )
         self.chips_table.horizontalHeaderItem(_CHIP_LOADED).setToolTip(
             "What reading the folder comes to now. The HUD reads it again when you press OK"
         )
@@ -717,6 +750,7 @@ class PreferencesDialog(QDialog):
         header.setSectionResizeMode(_CHIP_NAME, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(_CHIP_FOLDER, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(_CHIP_ON, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_CHIP_ON_AIR, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(_CHIP_LOADED, QHeaderView.ResizeMode.Stretch)
         self.chips_table.verticalHeader().setVisible(False)
         self.chips_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -725,9 +759,13 @@ class PreferencesDialog(QDialog):
         self.chips_order_note = QLabel(
             "Read in this order. Where two sources disagree about a chip, the one higher"
             " up wins and the other is kept as a conflict — so a private overlay goes"
-            " above the community data."
+            " above the community data. Untick On air to keep a source off the Chip"
+            " panel, which is stream output; Find chip and the inventory row still use it."
         )
         self.chips_order_note.setWordWrap(True)
+        self.chips_on_air_note = QLabel(NO_SOURCE_ON_AIR)
+        self.chips_on_air_note.setWordWrap(True)
+        self.chips_on_air_note.setVisible(False)
 
         self.add_chip_source_button = QPushButton("Add")
         self.add_chip_source_button.clicked.connect(self.add_chip_source)
@@ -775,38 +813,47 @@ class PreferencesDialog(QDialog):
         layout = QVBoxLayout(widget)
         layout.addWidget(self.chips_order_note)
         layout.addWidget(self.chips_table)
+        layout.addWidget(self.chips_on_air_note)
         layout.addLayout(buttons)
         layout.addLayout(datasheets)
 
         self._set_chip_rows(
-            [(c.name, c.path, c.enabled, c.kind) for c in self._config.chips.sources]
+            [
+                _ChipRow(c.name, c.path, c.enabled, c.on_air, c.kind)
+                for c in self._config.chips.sources
+            ]
         )
         self.chips_table.itemChanged.connect(self._on_chip_cell_changed)
         return widget
 
-    def _chip_rows(self) -> list[tuple[str, str, bool, str]]:
-        """Every row as ``(name, folder, on, kind)``, top to bottom."""
+    def _chip_ticked(self, row: int, column: int) -> bool:
+        """Whether a row's tick box is ticked. A box that isn't there isn't."""
+        check = self.chips_table.item(row, column)
+        return check is not None and check.checkState() == Qt.CheckState.Checked
+
+    def _chip_rows(self) -> list[_ChipRow]:
+        """Every row, top to bottom."""
         rows = []
         for row in range(self.chips_table.rowCount()):
             name_item = self.chips_table.item(row, _CHIP_NAME)
-            check = self.chips_table.item(row, _CHIP_ON)
             kind = name_item.data(Qt.ItemDataRole.UserRole) if name_item is not None else None
             rows.append(
-                (
+                _ChipRow(
                     _cell(self.chips_table, row, _CHIP_NAME),
                     _cell(self.chips_table, row, _CHIP_FOLDER),
-                    check is not None and check.checkState() == Qt.CheckState.Checked,
+                    self._chip_ticked(row, _CHIP_ON),
+                    self._chip_ticked(row, _CHIP_ON_AIR),
                     kind or KIND_DIR,
                 )
             )
         return rows
 
-    def _set_chip_rows(self, rows: list[tuple[str, str, bool, str]], select: int = -1) -> None:
+    def _set_chip_rows(self, rows: list[_ChipRow], select: int = -1) -> None:
         """Fill the table from ``rows``, then say what each one loaded."""
         self._chips_filling = True
         try:
             self.chips_table.setRowCount(0)
-            for name, folder, on, kind in rows:
+            for name, folder, on, on_air, kind in rows:
                 row = self.chips_table.rowCount()
                 self.chips_table.insertRow(row)
                 name_item = QTableWidgetItem(name)
@@ -818,10 +865,13 @@ class PreferencesDialog(QDialog):
                 # Selectable but not editable, so a selected row is lit all the
                 # way across.
                 look = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-                check = QTableWidgetItem()
-                check.setFlags(look | Qt.ItemFlag.ItemIsUserCheckable)
-                check.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
-                self.chips_table.setItem(row, _CHIP_ON, check)
+                for column, ticked in ((_CHIP_ON, on), (_CHIP_ON_AIR, on_air)):
+                    check = QTableWidgetItem()
+                    check.setFlags(look | Qt.ItemFlag.ItemIsUserCheckable)
+                    check.setCheckState(
+                        Qt.CheckState.Checked if ticked else Qt.CheckState.Unchecked
+                    )
+                    self.chips_table.setItem(row, column, check)
                 loaded = QTableWidgetItem()
                 loaded.setFlags(look)
                 self.chips_table.setItem(row, _CHIP_LOADED, loaded)
@@ -834,20 +884,23 @@ class PreferencesDialog(QDialog):
     def _show_chip_status(self) -> None:
         """Write the Loaded column, starting a read for any folder not yet read."""
         unread: list[str] = []
+        used = on_air = 0
         self._chips_filling = True
         try:
             taken: set[str] = set()
-            for row, (name, folder, on, kind) in enumerate(self._chip_rows()):
+            for row, chip_row in enumerate(self._chip_rows()):
                 item = self.chips_table.item(row, _CHIP_LOADED)
                 # Under the name it will be saved with, so the column agrees
                 # with what OK does.
-                name = _chip_source_name(name, folder)
-                entry = ChipSourceConfig(name=name, kind=kind, path=folder, enabled=on)
+                entry = chip_row.entry()
+                folder = chip_row.folder
                 reason = left_out(entry, taken)
                 if reason is not None:
                     text, tip = f"Left out: {reason}", ""
                 else:
-                    taken.add(name_key(name))
+                    taken.add(name_key(entry.name))
+                    used += 1
+                    on_air += entry.on_air
                     report = self._chip_reports.get(folder)
                     if report is None:
                         text, tip = "Checking…", ""
@@ -858,6 +911,7 @@ class PreferencesDialog(QDialog):
                 item.setToolTip(tip)
         finally:
             self._chips_filling = False
+        self.chips_on_air_note.setVisible(used > 0 and on_air == 0)
         # Only once the column is written: an answer can come straight back,
         # and it rewrites the column itself.
         for folder in unread:
@@ -906,7 +960,7 @@ class PreferencesDialog(QDialog):
     def add_chip_source(self) -> None:
         """Add an empty source at the bottom — the lowest precedence."""
         rows = self._chip_rows()
-        rows.append(("", "", True, KIND_DIR))
+        rows.append(_ChipRow())
         self._set_chip_rows(rows, select=len(rows) - 1)
 
     def remove_chip_source(self) -> None:
@@ -933,10 +987,10 @@ class PreferencesDialog(QDialog):
         rows = self._chip_rows()
         row = self.chips_table.currentRow()
         if not 0 <= row < len(rows):
-            rows.append(("", "", True, KIND_DIR))
+            rows.append(_ChipRow())
             row = len(rows) - 1
-        name, _folder, on, kind = rows[row]
-        rows[row] = (name or Path(path).name, path, on, kind)
+        picked = rows[row]
+        rows[row] = picked._replace(name=picked.name or Path(path).name, folder=path)
         self._set_chip_rows(rows, select=row)
 
     def browse_for_datasheet_dir(self) -> None:
@@ -957,16 +1011,8 @@ class PreferencesDialog(QDialog):
         self._show_chip_status()
 
     def _collect_chip_sources(self) -> list[ChipSourceConfig]:
-        sources = []
-        for name, folder, on, kind in self._chip_rows():
-            if not name and not folder:
-                continue  # a row added and left empty
-            sources.append(
-                ChipSourceConfig(
-                    name=_chip_source_name(name, folder), kind=kind, path=folder, enabled=on
-                )
-            )
-        return sources
+        # A row added and left empty isn't a source.
+        return [row.entry() for row in self._chip_rows() if row.name or row.folder]
 
     def _build_logging_tab(self) -> QWidget:
         self.logging_combo = QComboBox()

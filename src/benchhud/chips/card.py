@@ -13,8 +13,9 @@ No Qt, and nothing here comes from a chip record except the part number in
 :func:`sent_line`, which the caller draws as plain text.
 
 :func:`sent_line` says what was *done*, not what the card shows now. The
-sender can't see the card: it may not have that part, and someone may have
-put another chip there since.
+sender can't see the card: it may not have that part — the card reads the
+on-air sources only, so a chip that's only in a source kept off air isn't
+there for it — and someone may have put another chip there since.
 """
 
 from __future__ import annotations
@@ -26,9 +27,9 @@ SHOW_ON_CARD = "Show on stream card"
 #: The action's tooltip — this module's own words, so it's safe as a tooltip.
 SHOW_ON_CARD_TIP = (
     "Puts this chip on the Chip panel, which is stream output: viewers see its part"
-    " number, maker and family, package, functions, marking codes and description,"
-    " and a flag if sources disagree about any of those. It replaces the chip that's"
-    " there."
+    " number, maker and family, package, functions, marking codes and description"
+    " — as the sources that are on air have them — and a flag if those sources"
+    " disagree. It replaces the chip that's there."
 )
 
 #: Why the action is off when there's no chip to send.

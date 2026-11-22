@@ -65,9 +65,10 @@ sense of is skipped with a line in the log, and the rest still load.
 
 ## Setting it up
 
-**Preferences → Chips** is the list of sources, in order: name, folder, and a
-tick to switch one off without deleting it. Add, Remove, Move up, Move down, and
-a folder picker. The last column says what each folder actually came to —
+**Preferences → Chips** is the list of sources, in order: name, folder, a tick
+to switch one off without deleting it, and an **On air** tick that decides
+whether the stream card may use it. Add, Remove, Move up, Move down, and a
+folder picker. The last column says what each folder actually came to —
 `412 chips, from the built index`, `12 chips, from the chip files — 1 note`,
 `Nothing loaded: …` with the reason — read by the same code the app uses, so
 it's what OK will give you.
@@ -82,6 +83,7 @@ datasheet_dir = "~/datasheets"
 name = "local"
 kind = "dir"               # the only kind there is
 path = "~/chips-private"
+on_air = false             # yours to look up; never on the stream card
 
 [[chips.sources]]
 name = "community"
@@ -107,6 +109,39 @@ they're put together:
   is marked as having a conflict, and Find chip shows every source's value.
   Different case or stray spaces don't count as different.
 - **Lists** — marks, documents, substitutes, boards — are joined, repeats dropped.
+
+### Keeping a source off the stream
+
+The Chip panel is stream output. Find chip and the inventory row are yours. A
+source can be in the second and not the first: put `on_air = false` on it, or
+untick **On air** for it in Preferences → Chips. That's what a private overlay
+is for — your own words about a part, there when you look it up, and not read
+out to the room.
+
+Off air, a source is left out of the card completely. Nothing is merged and
+then trimmed: the card looks the chip up in the on-air sources and nowhere
+else. So:
+
+- **A chip only an off-air source has isn't on the card.** It reads "No chip
+  with that part number", the same as a typo.
+- **A chip both have shows what the on-air sources say.** The overlay's
+  description, package and marks stay in Find chip.
+- **A disagreement with an off-air source isn't mentioned.** The card only
+  flags sources it can see.
+- **The card never says anything is being held back.**
+
+Find chip and the inventory row still use every source, off air or not. So
+they can show more than the card will — that's the point.
+
+A source is on air unless you say otherwise. Write `on_air` as anything but
+`true` or `false` and the source is kept off air, with a line in the log: a
+typo shouldn't be what puts an overlay on stream.
+
+With every source off air the card finds no chip at all. Preferences → Chips
+says so under the table. The card doesn't.
+
+The switch takes hold on OK, a chip already on the card included — it's looked
+up again in what's on air now.
 
 ---
 
@@ -165,6 +200,11 @@ see it. It's a mouse click — not Enter, and never something that happens becau
 you picked a row. Only the part number goes: the card looks the chip up for
 itself, so nothing else in this window goes with it.
 
+It looks in the on-air sources only. So the card can show less than this window
+does — and for a chip that's only in a source you keep off air, it shows "No
+chip with that part number". This window says the part number was sent; it
+doesn't know what the card made of it.
+
 ---
 
 ## On an inventory row
@@ -176,7 +216,8 @@ maker, package, functions, description, marks — with **Open datasheet**.
 When the reference knows the part, **Show on stream card** is there too, and
 puts that chip on the Chip panel. Same rules as in Find chip: a mouse click — no
 key reaches it — and only the part number goes. Nothing about the part, the shelf
-or the job.
+or the job. And the same limit: the card shows what the on-air sources say,
+which can be less than the row does.
 
 A part with no MPN shows nothing. An MPN the reference doesn't know gets one line
 saying so. With no chip sources, the panel is exactly what it was.
@@ -202,14 +243,16 @@ documents, substitutes, whole-mark examples, credits, and which source said what
 When sources disagree about something it shows, it says which thing — "Sources
 disagree on package" — without naming the sources or the other values.
 
-**One thing to know if you keep a private overlay.** The card shows the merged
-chip, and your overlay is first in line. So your overlay's description,
-functions and marking codes for a chip are what go on air. Notes never do — but
-a description is a description. If there's something in an overlay you wouldn't
-say on stream, don't put that chip on the card — and know that **Show on stream
-card** is one click. It shows the merged chip, your overlay's wording included.
-A per-source switch to keep a source off the card is
-[an open issue](https://github.com/IamMrCupp/benchhud/issues/482).
+**If you keep a private overlay, decide whether it's on air.** The card reads
+the on-air sources, merged, and an overlay is usually first in line. Left on
+air, its description, functions and marking codes for a chip are what viewers
+read. Notes never are — but a description is a description, and **Show on
+stream card** is one click.
+
+Take it off air and none of it reaches the card: see
+[Keeping a source off the stream](#keeping-a-source-off-the-stream). A source
+you add starts **on air**, so that's a tick to remove, not one to remember to
+add.
 
 Find chip and the inventory row's datasheet line are for you; the card is for
 the room.
@@ -275,6 +318,9 @@ either way.
   format newer than this benchhud reads.
 - **`— 1 note` after a count** — hover it. A file was skipped, or an index was
   passed over for being older than the chip files.
+- **The Chip panel says there's no chip with that part number, and Find chip
+  finds it** — the chip is only in a source that's off air. Preferences → Chips,
+  the **On air** column.
 - **A chip you just added isn't found** — nothing watches the folders. Press OK
   in Preferences; an open Find chip looks again by itself.
 - **Open datasheet is off** — on the inventory row: the chip lists no datasheet,

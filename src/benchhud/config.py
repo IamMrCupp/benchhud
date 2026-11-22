@@ -324,6 +324,12 @@ class BoardsConfig:
     viewer: str = "auto"
 
 
+#: Whether a chip source is on air when its entry doesn't say. The one place
+#: that default lives: the config loader, a new row in Preferences and the
+#: dataclass below all read it from here.
+CHIP_SOURCE_ON_AIR = True
+
+
 @dataclass
 class ChipSourceConfig:
     """One place chip data is read from (a ``[[chips.sources]]`` entry)."""
@@ -334,6 +340,9 @@ class ChipSourceConfig:
     kind: str = "dir"
     path: str = ""
     enabled: bool = True
+    # Whether the Chip panel — stream output — may show what this source says.
+    # Off air, Find chip and the inventory row still use it; the card doesn't.
+    on_air: bool = CHIP_SOURCE_ON_AIR
 
 
 @dataclass
@@ -440,7 +449,29 @@ def _chip_source_from_dict(data: Any) -> ChipSourceConfig | None:
         kind=kind.strip().lower() if isinstance(kind, str) and kind.strip() else "dir",
         path=path.strip() if isinstance(path, str) else "",
         enabled=data.get("enabled", True) is not False,
+        on_air=_chip_source_on_air(name.strip(), data),
     )
+
+
+def _chip_source_on_air(name: str, data: Mapping[str, Any]) -> bool:
+    """Whether a ``[[chips.sources]]`` entry is on air.
+
+    No ``on_air`` key is the default. A key that's there and isn't a plain
+    true or false keeps the source **off** air, and says so in the log:
+    somebody wrote the key to hold a source back, and a typo mustn't be what
+    puts it on the stream.
+    """
+    if "on_air" not in data:
+        return CHIP_SOURCE_ON_AIR
+    switch = _switch(data["on_air"])
+    if switch is None:
+        log.warning(
+            "config: chip source %r has an on_air that isn't true or false;"
+            " keeping it off the stream card",
+            name,
+        )
+        return False
+    return switch
 
 
 @dataclass

@@ -214,10 +214,15 @@ datasheet_dir = ""        # e.g. "~/datasheets"
 # about a chip, the first one listed wins and the other is kept as a conflict.
 # So a private overlay goes above the community data.
 #
+# A source is on air unless it says otherwise. `on_air = false` keeps it off the
+# Chip panel — stream output — while Find chip and the inventory row still use
+# it. Anything but true or false there keeps it off air, too.
+#
 # [[chips.sources]]
 # name = "local"          # shown beside every value it supplies
 # kind = "dir"            # the only kind there is
 # path = "~/chips-private"
+# on_air = false          # yours to look up; never on the stream card
 #
 # [[chips.sources]]
 # name = "community"

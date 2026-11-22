@@ -31,6 +31,14 @@ part of it (:data:`SHOWN_FIELDS`) and leaves the rest out
 - **Credits** (``sources``) and **which configured source said what.** A
   source's name is a label out of the operator's config.
 
+**On-air sources only.** A source can be kept off air in the config
+(``on_air = false``) — a private overlay, say. The window hands this panel a
+source built from the on-air ones alone, so an off-air source's values never
+reach the card: a chip that's only in one reads as "no such chip", a chip
+that's in both shows what the on-air sources say, and a disagreement with an
+off-air source isn't a disagreement the card knows about. The card gives no
+sign that anything is being held back.
+
 When configured sources disagree about a value the card shows, it says *which*
 — "Sources disagree on package" — so nobody reads a contested value out as
 fact. It doesn't name the sources or show the losing values, and a dispute
