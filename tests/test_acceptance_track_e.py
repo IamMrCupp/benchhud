@@ -113,6 +113,7 @@ def test_on_air_enforcement_drops_sensitive_keeps_safe():
     assert any("captures" in n for n in dropped)
     assert any("interfaces" in n for n in kept)
     assert any("pinout" in n for n in kept)
+    assert any("chip" in n for n in kept)
 
 
 # --- panel policy ----------------------------------------------------------
@@ -124,6 +125,7 @@ def test_panel_policy_matches_intended_tags():
     names = {c.name for c in checks}
     assert "EngagementPanel.sensitive is True" in names
     assert "InterfacePanel.sensitive is False" in names
+    assert "ChipPanel.sensitive is False" in names
 
 
 # --- projection boundary ---------------------------------------------------

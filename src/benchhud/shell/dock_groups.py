@@ -36,7 +36,7 @@ class DockGroup:
 
 DOCK_GROUPS: tuple[DockGroup, ...] = (
     DockGroup("Bench", Area.LEFT, ("controls", "cameras", "jobs", "readings", "inventory")),
-    DockGroup("Recon", Area.LEFT_LOWER, ("engagement", "interfaces", "pinout", "captures")),
+    DockGroup("Recon", Area.LEFT_LOWER, ("engagement", "interfaces", "pinout", "captures", "chip")),
     DockGroup("Tools", Area.BOTTOM, ("launcher", "terminal", "flash", "minipro")),
     DockGroup("Feeds", Area.RIGHT, ("scope", "thermal")),
     DockGroup("Meter", Area.RIGHT_LOWER, ("power",)),
