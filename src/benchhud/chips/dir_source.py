@@ -84,6 +84,7 @@ import os
 import threading
 import tomllib
 from collections.abc import Iterable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,48 @@ INDEX_NAME = "index.json"
 # family: "QFN-20", "QFN (3x3)", "QFN 20". The build's rule, kept in step by a
 # test against an index the build wrote.
 _AFTER_FAMILY = "- ("
+
+
+#: Where a load came from, for :class:`LoadReport`.
+FROM_INDEX = "index"
+FROM_FILES = "files"
+
+# How many problems one load remembers for its report. The log has them all.
+_MOST_PROBLEMS = 100
+
+# The problems the load running in this thread has hit so far.
+_problems: ContextVar[list[str] | None] = ContextVar("benchhud_chips_load_problems", default=None)
+
+
+def _warn(message: str, *args: object) -> None:
+    """Log a problem, and keep it for the report of the load that hit it.
+
+    The log line says which source; the report is already about one source,
+    so the kept line starts at what went wrong.
+    """
+    log.warning(message, *args)
+    held = _problems.get()
+    if held is not None:
+        text = (message % args).removeprefix("chips: ")
+        if text.startswith("source "):
+            text = text.partition(": ")[2]
+        held.append(text)
+
+
+@dataclass(frozen=True)
+class LoadReport:
+    """What one read of a directory came to — for a screen that says so.
+
+    ``read_from`` is :data:`FROM_INDEX`, :data:`FROM_FILES`, or ``""`` when
+    nothing was read; ``origin`` is the index file or the ``chips`` folder.
+    ``problems`` is every line the read logged, in order: why nothing loaded,
+    or what was skipped along the way. A long run of them is cut short.
+    """
+
+    chips: int = 0
+    read_from: str = ""
+    origin: Path | None = None
+    problems: tuple[str, ...] = ()
 
 
 class _Unusable(ValueError):
@@ -263,12 +306,12 @@ def _read_toml(path: Path, *, missing_ok: bool = False) -> dict[str, Any] | None
             return tomllib.load(handle)
     except FileNotFoundError as exc:
         if not missing_ok:
-            log.warning("chips: can't read %s: %s", path, exc)
+            _warn("chips: can't read %s: %s", path, exc)
         return None
     # TOMLDecodeError and bad UTF-8 are ValueErrors; nesting a few hundred
     # levels deep runs the parser out of stack.
     except (OSError, ValueError, RecursionError) as exc:
-        log.warning("chips: can't read %s: %s", path, exc)
+        _warn("chips: can't read %s: %s", path, exc)
         return None
 
 
@@ -300,7 +343,7 @@ def _walk(top: Path, *, say: bool) -> tuple[list[Path], list[Path]]:
 
     def cant_list(exc: OSError) -> None:
         if say:
-            log.warning("chips: can't list %s: %s", exc.filename or top, exc)
+            _warn("chips: can't list %s: %s", exc.filename or top, exc)
 
     folders, files = [top], []
     for here, folder_names, file_names in os.walk(top, onerror=cant_list):
@@ -323,17 +366,17 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
         with path.open("rb") as handle:
             index = json.load(handle)
     except (OSError, ValueError, RecursionError) as exc:
-        log.warning("chips: can't read %s: %s", path, exc)
+        _warn("chips: can't read %s: %s", path, exc)
         return None
     if not isinstance(index, Mapping):
-        log.warning("chips: %s is not an index (no top-level object)", path)
+        _warn("chips: %s is not an index (no top-level object)", path)
         return None
     version = index.get("format")
     if type(version) is not int or version < 1:
-        log.warning("chips: %s has no usable format number; not reading it", path)
+        _warn("chips: %s has no usable format number; not reading it", path)
         return None
     if version > INDEX_FORMAT:
-        log.warning(
+        _warn(
             "chips: %s is format %d and this benchhud reads format %d; not reading it",
             path,
             version,
@@ -342,7 +385,7 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
         return None
     records = index.get("chips")
     if not isinstance(records, list):
-        log.warning("chips: %s has no list of chips", path)
+        _warn("chips: %s has no list of chips", path)
         return None
     chips: list[Chip] = []
     for position, record in enumerate(records):
@@ -352,7 +395,7 @@ def _chips_from_index(path: Path) -> list[Chip] | None:
             chips.append(chip_from_mapping(record))
         except _Unusable as exc:
             shown = record.get("mpn") if isinstance(record, Mapping) else None
-            log.warning("chips: %s: skipping chip %d (%r): %s", path, position, shown, exc)
+            _warn("chips: %s: skipping chip %d (%r): %s", path, position, shown, exc)
     return chips
 
 
@@ -370,7 +413,7 @@ def _chips_from_files(root: Path) -> list[Chip]:
                 raise _Unusable(f"schema is {version!r}; this benchhud reads {CHIP_SCHEMA}")
             chip = chip_from_mapping(data)
         except _Unusable as exc:
-            log.warning("chips: skipping %s: %s", path, exc)
+            _warn("chips: skipping %s: %s", path, exc)
             continue
         # What the build works out, worked out the same way. A chip file has
         # no package_family key of its own, so nothing is taken from one.
@@ -416,15 +459,17 @@ class _Loaded:
     chips: tuple[Chip, ...] = ()
     by_key: Mapping[str, Chip] = field(default_factory=dict)
     origin: Path | None = None
+    read_from: str = ""
+    problems: tuple[str, ...] = ()
 
 
-def _first_of_each(chips: Iterable[Chip], origin: Path) -> _Loaded:
+def _first_of_each(chips: Iterable[Chip], origin: Path, read_from: str) -> _Loaded:
     by_key: dict[str, Chip] = {}
     for chip in chips:
         held = by_key.setdefault(chip.key, chip)
         if held is not chip:
-            log.warning("chips: %s: %r is there twice; keeping the first", origin, chip.mpn.strip())
-    return _Loaded(chips=tuple(by_key.values()), by_key=by_key, origin=origin)
+            _warn("chips: %s: %r is there twice; keeping the first", origin, chip.mpn.strip())
+    return _Loaded(chips=tuple(by_key.values()), by_key=by_key, origin=origin, read_from=read_from)
 
 
 def _load(root: Path | None, name: str) -> _Loaded:
@@ -432,9 +477,9 @@ def _load(root: Path | None, name: str) -> _Loaded:
         return _Loaded()
     if _is_file(root):
         chips = _chips_from_index(root)
-        return _first_of_each(chips, root) if chips is not None else _Loaded()
+        return _first_of_each(chips, root, FROM_INDEX) if chips is not None else _Loaded()
     if not _is_dir(root):
-        log.warning("chips: source %r: %s is not a directory this can read", name, root)
+        _warn("chips: source %r: %s is not a directory this can read", name, root)
         return _Loaded()
 
     has_chip_files = _is_dir(root / "chips")
@@ -444,7 +489,7 @@ def _load(root: Path | None, name: str) -> _Loaded:
             continue
         found_an_index = True
         if has_chip_files and not _index_is_current(index, root):
-            log.warning(
+            _warn(
                 "chips: %s may be out of date: something under chips/ or vocab/ changed after"
                 " it was written. Reading the chip files (run `chipdata build` to use the"
                 " index again)",
@@ -453,11 +498,11 @@ def _load(root: Path | None, name: str) -> _Loaded:
             continue
         chips = _chips_from_index(index)
         if chips is not None:
-            return _first_of_each(chips, index)
+            return _first_of_each(chips, index, FROM_INDEX)
     if has_chip_files:
-        return _first_of_each(_chips_from_files(root), root / "chips")
+        return _first_of_each(_chips_from_files(root), root / "chips", FROM_FILES)
     if not found_an_index:
-        log.warning("chips: source %r: no %s and no chips/ in %s", name, INDEX_NAME, root)
+        _warn("chips: source %r: no %s and no chips/ in %s", name, INDEX_NAME, root)
     return _Loaded()
 
 
@@ -501,19 +546,27 @@ class DirChipSource:
         return loaded
 
     def _read(self) -> _Loaded:
+        problems: list[str] = []
+        collecting = _problems.set(problems)
         try:
             loaded = _load(self.root, self.name)
-        except Exception:
+        except Exception as exc:
             # The seam's rule: a source that can't answer gives nothing. Every
             # failure this knows about is handled where it happens; this is for
             # the one it doesn't, so a lookup can't raise into the HUD.
             log.exception("chips: source %r: reading %s failed", self.name, self.root)
+            problems.append(f"reading {self.root} failed: {exc}")
             loaded = _Loaded()
+        finally:
+            _problems.reset(collecting)
         if loaded.origin is not None:
             log.info(
                 "chips: source %r: %d chips from %s", self.name, len(loaded.chips), loaded.origin
             )
-        return loaded
+        if len(problems) > _MOST_PROBLEMS:
+            more = len(problems) - _MOST_PROBLEMS
+            problems[_MOST_PROBLEMS:] = [f"… and {more} more; the log has them all"]
+        return replace(loaded, problems=tuple(problems))
 
     def reload(self) -> int:
         """Read the directory again now; returns how many chips it holds.
@@ -530,6 +583,19 @@ class DirChipSource:
         """What the chips were read from: an index file, a ``chips`` directory,
         or ``None`` when nothing was."""
         return self._current().origin
+
+    def report(self) -> LoadReport:
+        """What the read came to: how many chips, from what, and what went wrong.
+
+        Like a lookup, it reads the directory if nothing has yet.
+        """
+        loaded = self._current()
+        return LoadReport(
+            chips=len(loaded.chips),
+            read_from=loaded.read_from,
+            origin=loaded.origin,
+            problems=loaded.problems,
+        )
 
     def get(self, mpn: str) -> Chip | None:
         wanted = mpn_key(mpn)

@@ -9,13 +9,15 @@ so the whole dialog is testable offscreen with no hardware.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -39,7 +41,9 @@ from PySide6.QtWidgets import (
 
 from benchhud.boards.library import DEFAULT_EXTENSIONS
 from benchhud.capture.modes import camera_modes, describe
-from benchhud.config import Config, ToolConfig
+from benchhud.chips.builder import KIND_DIR, left_out, name_key, probe_folder
+from benchhud.chips.dir_source import FROM_FILES, FROM_INDEX, LoadReport
+from benchhud.config import ChipSourceConfig, Config, ToolConfig
 from benchhud.devices.discovery import (
     BY_ID_DIR,
     CameraDevice,
@@ -58,6 +62,12 @@ from benchhud.terminal import SUPPORTED as TERMINAL_SUPPORTED
 from benchhud.terminal import login_shell
 
 SaveCallback = Callable[[Config], None]
+#: (folder) -> what reading it as a chip source comes to. Reads the disk.
+ChipProbe = Callable[[str], LoadReport]
+#: Runs a job off the GUI thread.
+Executor = Callable[[Callable[[], None]], None]
+# The Chips table's columns.
+_CHIP_NAME, _CHIP_FOLDER, _CHIP_ON, _CHIP_LOADED = range(4)
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 _OVERLAY_CORNERS = (
     ("Bottom left", "bottom-left"),
@@ -72,7 +82,14 @@ _BOARD_VIEWERS = (
 )
 
 
+def _thread_executor(job: Callable[[], None]) -> None:
+    threading.Thread(target=job, name="chips-check", daemon=True).start()
+
+
 class PreferencesDialog(QDialog):
+    #: (folder, what reading it came to) — sent from the worker that read it.
+    _chip_folder_checked = Signal(str, object)
+
     def __init__(
         self,
         config: Config,
@@ -87,6 +104,8 @@ class PreferencesDialog(QDialog):
             [], softcam_register.SoftcamStatus
         ] = softcam_register.status,
         virtual_camera_register: Callable[[], Path] = softcam_register.register,
+        chip_probe: ChipProbe = probe_folder,
+        run_in_background: Executor = _thread_executor,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -100,6 +119,8 @@ class PreferencesDialog(QDialog):
         self._windows = platform.startswith("win")
         self._virtual_camera_status = virtual_camera_status
         self._virtual_camera_register = virtual_camera_register
+        self._chip_probe = chip_probe
+        self._run_in_background = run_in_background
         self.setWindowTitle("benchhud — Preferences")
 
         tabs = QTabWidget()
@@ -111,6 +132,7 @@ class PreferencesDialog(QDialog):
         tabs.addTab(self._build_tickets_tab(), "Tickets")
         tabs.addTab(self._build_inventory_tab(), "Inventory")
         tabs.addTab(self._build_boards_tab(), "Boards")
+        tabs.addTab(self._build_chips_tab(), "Chips")
         tabs.addTab(self._build_logging_tab(), "Logging")
 
         buttons = QDialogButtonBox(
@@ -664,6 +686,239 @@ class PreferencesDialog(QDialog):
         if path:
             self.boards_library_dir.setText(path)
 
+    # --- Chips -----------------------------------------------------------
+
+    def _build_chips_tab(self) -> QWidget:
+        # What reading each folder came to, by the folder as typed; and the
+        # folders a worker is reading right now.
+        self._chip_reports: dict[str, LoadReport] = {}
+        self._chip_checking: set[str] = set()
+        self._chips_filling = False
+        self._chip_folder_checked.connect(self._on_chip_folder_checked)
+
+        self.chips_table = QTableWidget(0, 4)
+        self.chips_table.setHorizontalHeaderLabels(["Name", "Folder", "On", "Loaded"])
+        self.chips_table.horizontalHeaderItem(_CHIP_NAME).setToolTip(
+            "Shown beside every value this source supplies"
+        )
+        self.chips_table.horizontalHeaderItem(_CHIP_FOLDER).setToolTip(
+            "A chip-data checkout, a build of one, or a private overlay"
+        )
+        self.chips_table.horizontalHeaderItem(_CHIP_ON).setToolTip(
+            "Untick to leave a source out without deleting it"
+        )
+        self.chips_table.horizontalHeaderItem(_CHIP_LOADED).setToolTip(
+            "What reading the folder came to"
+        )
+        header = self.chips_table.horizontalHeader()
+        header.setSectionResizeMode(_CHIP_NAME, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_CHIP_FOLDER, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(_CHIP_ON, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(_CHIP_LOADED, QHeaderView.ResizeMode.Stretch)
+        self.chips_table.verticalHeader().setVisible(False)
+        self.chips_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.chips_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+
+        self.chips_order_note = QLabel(
+            "Read in this order. Where two sources disagree about a chip, the one higher"
+            " up wins and the other is kept as a conflict — so a private overlay goes"
+            " above the community data."
+        )
+        self.chips_order_note.setWordWrap(True)
+
+        self.add_chip_source_button = QPushButton("Add")
+        self.add_chip_source_button.clicked.connect(self.add_chip_source)
+        self.remove_chip_source_button = QPushButton("Remove")
+        self.remove_chip_source_button.clicked.connect(self.remove_chip_source)
+        self.chip_source_up_button = QPushButton("Move up")
+        self.chip_source_up_button.clicked.connect(lambda: self.move_chip_source(-1))
+        self.chip_source_down_button = QPushButton("Move down")
+        self.chip_source_down_button.clicked.connect(lambda: self.move_chip_source(1))
+        self.browse_chip_folder_button = QPushButton("Browse…")
+        self.browse_chip_folder_button.setToolTip("Pick the folder for the selected source")
+        self.browse_chip_folder_button.clicked.connect(self.browse_for_chip_folder)
+        self.check_chip_sources_button = QPushButton("Check again")
+        self.check_chip_sources_button.setToolTip("Read every folder again")
+        self.check_chip_sources_button.clicked.connect(self.check_chip_sources)
+
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_chip_source_button)
+        buttons.addWidget(self.remove_chip_source_button)
+        buttons.addWidget(self.chip_source_up_button)
+        buttons.addWidget(self.chip_source_down_button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.browse_chip_folder_button)
+        buttons.addWidget(self.check_chip_sources_button)
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.addWidget(self.chips_order_note)
+        layout.addWidget(self.chips_table)
+        layout.addLayout(buttons)
+
+        self._set_chip_rows(
+            [(c.name, c.path, c.enabled, c.kind) for c in self._config.chips.sources]
+        )
+        self.chips_table.itemChanged.connect(self._on_chip_cell_changed)
+        return widget
+
+    def _chip_rows(self) -> list[tuple[str, str, bool, str]]:
+        """Every row as ``(name, folder, on, kind)``, top to bottom."""
+        rows = []
+        for row in range(self.chips_table.rowCount()):
+            name_item = self.chips_table.item(row, _CHIP_NAME)
+            check = self.chips_table.item(row, _CHIP_ON)
+            kind = name_item.data(Qt.ItemDataRole.UserRole) if name_item is not None else None
+            rows.append(
+                (
+                    _cell(self.chips_table, row, _CHIP_NAME),
+                    _cell(self.chips_table, row, _CHIP_FOLDER),
+                    check is not None and check.checkState() == Qt.CheckState.Checked,
+                    kind or KIND_DIR,
+                )
+            )
+        return rows
+
+    def _set_chip_rows(self, rows: list[tuple[str, str, bool, str]], select: int = -1) -> None:
+        """Fill the table from ``rows``, then say what each one loaded."""
+        self._chips_filling = True
+        try:
+            self.chips_table.setRowCount(0)
+            for name, folder, on, kind in rows:
+                row = self.chips_table.rowCount()
+                self.chips_table.insertRow(row)
+                name_item = QTableWidgetItem(name)
+                # The kind rides along unseen, so an entry of a kind this
+                # version doesn't read is saved back as it was.
+                name_item.setData(Qt.ItemDataRole.UserRole, kind)
+                self.chips_table.setItem(row, _CHIP_NAME, name_item)
+                self.chips_table.setItem(row, _CHIP_FOLDER, QTableWidgetItem(folder))
+                # Selectable but not editable, so a selected row is lit all the
+                # way across.
+                look = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+                check = QTableWidgetItem()
+                check.setFlags(look | Qt.ItemFlag.ItemIsUserCheckable)
+                check.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+                self.chips_table.setItem(row, _CHIP_ON, check)
+                loaded = QTableWidgetItem()
+                loaded.setFlags(look)
+                self.chips_table.setItem(row, _CHIP_LOADED, loaded)
+        finally:
+            self._chips_filling = False
+        if 0 <= select < self.chips_table.rowCount():
+            self.chips_table.setCurrentCell(select, _CHIP_NAME)
+        self._show_chip_status()
+
+    def _show_chip_status(self) -> None:
+        """Write the Loaded column, starting a read for any folder not yet read."""
+        unread: list[str] = []
+        self._chips_filling = True
+        try:
+            taken: set[str] = set()
+            for row, (name, folder, on, kind) in enumerate(self._chip_rows()):
+                item = self.chips_table.item(row, _CHIP_LOADED)
+                entry = ChipSourceConfig(name=name, kind=kind, path=folder, enabled=on)
+                reason = left_out(entry, taken)
+                if reason is not None:
+                    text, tip = f"Left out: {reason}", ""
+                else:
+                    taken.add(name_key(name))
+                    report = self._chip_reports.get(folder)
+                    if report is None:
+                        text, tip = "Checking…", ""
+                        unread.append(folder)
+                    else:
+                        text, tip = describe_load(report)
+                item.setText(text)
+                item.setToolTip(tip)
+        finally:
+            self._chips_filling = False
+        # Only once the column is written: an answer can come straight back,
+        # and it rewrites the column itself.
+        for folder in unread:
+            self._check_chip_folder(folder)
+
+    def _check_chip_folder(self, folder: str) -> None:
+        """Read ``folder`` on a worker; the answer comes back as a signal."""
+        if folder in self._chip_checking or folder in self._chip_reports:
+            return
+        self._chip_checking.add(folder)
+        probe, checked = self._chip_probe, self._chip_folder_checked
+
+        def job() -> None:
+            try:
+                report = probe(folder)
+            except Exception as exc:  # a probe is meant not to raise; say so if one does
+                report = LoadReport(problems=(f"reading {folder} failed: {exc}",))
+            # The dialog may have closed while the folder was being read.
+            with contextlib.suppress(RuntimeError):
+                checked.emit(folder, report)
+
+        self._run_in_background(job)
+
+    def _on_chip_folder_checked(self, folder: str, report: object) -> None:
+        self._chip_checking.discard(folder)
+        if isinstance(report, LoadReport):
+            self._chip_reports[folder] = report
+        self._show_chip_status()
+
+    def _on_chip_cell_changed(self, _item: QTableWidgetItem) -> None:
+        if not self._chips_filling:
+            self._show_chip_status()
+
+    def add_chip_source(self) -> None:
+        """Add an empty source at the bottom — the lowest precedence."""
+        rows = self._chip_rows()
+        rows.append(("", "", True, KIND_DIR))
+        self._set_chip_rows(rows, select=len(rows) - 1)
+
+    def remove_chip_source(self) -> None:
+        row = self.chips_table.currentRow()
+        rows = self._chip_rows()
+        if 0 <= row < len(rows):
+            del rows[row]
+            self._set_chip_rows(rows, select=min(row, len(rows) - 1))
+
+    def move_chip_source(self, by: int) -> None:
+        """Move the selected source up (``-1``) or down (``1``) the order."""
+        row = self.chips_table.currentRow()
+        rows = self._chip_rows()
+        target = row + by
+        if 0 <= row < len(rows) and 0 <= target < len(rows):
+            rows[row], rows[target] = rows[target], rows[row]
+            self._set_chip_rows(rows, select=target)
+
+    def browse_for_chip_folder(self) -> None:
+        """Pick a folder for the selected source, or for a new one if none is."""
+        path = QFileDialog.getExistingDirectory(self, "Select a chip data folder")
+        if not path:
+            return
+        rows = self._chip_rows()
+        row = self.chips_table.currentRow()
+        if not 0 <= row < len(rows):
+            rows.append(("", "", True, KIND_DIR))
+            row = len(rows) - 1
+        name, _folder, on, kind = rows[row]
+        rows[row] = (name or Path(path).name, path, on, kind)
+        self._set_chip_rows(rows, select=row)
+
+    def check_chip_sources(self) -> None:
+        """Forget what every folder came to and read them all again."""
+        self._chip_reports.clear()
+        self._show_chip_status()
+
+    def _collect_chip_sources(self) -> list[ChipSourceConfig]:
+        sources = []
+        for name, folder, on, kind in self._chip_rows():
+            if not name and not folder:
+                continue  # a row added and left empty
+            sources.append(
+                ChipSourceConfig(
+                    name=name or Path(folder).name or "chips", kind=kind, path=folder, enabled=on
+                )
+            )
+        return sources
+
     def _build_logging_tab(self) -> QWidget:
         self.logging_combo = QComboBox()
         self.logging_combo.addItems(_LOG_LEVELS)
@@ -741,6 +996,9 @@ class PreferencesDialog(QDialog):
         ) or ["pdf"]
         self._config.boards.viewer = self.boards_viewer.currentData() or "auto"
 
+        # Only the list is edited here; the datasheet folder is left as it is.
+        self._config.chips.sources = self._collect_chip_sources()
+
         self._config.shell.logging.level = self.logging_combo.currentText()
         self._config.tools = self._collect_tools()
         self._config.obs.enabled = self.obs_enabled.isChecked()
@@ -781,6 +1039,22 @@ def _fill_serial_combo(combo: QComboBox, ports: list[SerialDevice], current: str
     if selected >= 0:
         combo.setCurrentIndex(selected)
     fit_combo_popup(combo)
+
+
+def describe_load(report: LoadReport) -> tuple[str, str]:
+    """``(what to show, tooltip)`` for what reading a chip folder came to."""
+    chips = "1 chip" if report.chips == 1 else f"{report.chips} chips"
+    notes = len(report.problems)
+    if report.read_from == FROM_INDEX:
+        text = f"{chips}, from the built index"
+    elif report.read_from == FROM_FILES:
+        text = f"{chips}, from the chip files"
+    else:
+        why = report.problems[0] if report.problems else "nothing there to read"
+        return f"Nothing loaded: {why}", "\n".join(report.problems)
+    if notes:
+        text += " — 1 note" if notes == 1 else f" — {notes} notes"
+    return text, "\n".join([str(report.origin), *report.problems])
 
 
 def _parse_extensions(text: str) -> list[str]:

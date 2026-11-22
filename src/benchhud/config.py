@@ -295,6 +295,28 @@ class BoardsConfig:
 
 
 @dataclass
+class ChipSourceConfig:
+    """One place chip data is read from (a ``[[chips.sources]]`` entry)."""
+
+    name: str
+    # What kind of source it is. "dir" — a chip-data checkout, a build of one,
+    # or a private overlay on disk — is the only kind there is so far.
+    kind: str = "dir"
+    path: str = ""
+    enabled: bool = True
+
+
+@dataclass
+class ChipsConfig:
+    """The chip reference (no sources → no chip data, and nothing changes)."""
+
+    # Where datasheets are kept. Read and kept; nothing uses it yet.
+    datasheet_dir: str = ""
+    # In order of precedence: the first source wins where two disagree.
+    sources: list[ChipSourceConfig] = field(default_factory=list)
+
+
+@dataclass
 class MiniproConfig:
     """The T48 panel (#253): which minipro, and the last chip used."""
 
@@ -369,6 +391,28 @@ def _camera_from_dict(data: Any) -> CameraConfig | None:
     return CameraConfig(name=name, device=device, shots=shots)
 
 
+def _chip_source_from_dict(data: Any) -> ChipSourceConfig | None:
+    """One ``[[chips.sources]]`` entry, or ``None`` when it can't be one.
+
+    An entry needs a name — it's what a value's provenance is recorded under.
+    A ``kind`` this benchhud doesn't know is kept as written, so saving the
+    config doesn't throw away an entry a newer version would read.
+    """
+    if not isinstance(data, Mapping):
+        return None
+    name = data.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    kind = data.get("kind", "dir")
+    path = data.get("path", "")
+    return ChipSourceConfig(
+        name=name.strip(),
+        kind=kind.strip() if isinstance(kind, str) and kind.strip() else "dir",
+        path=path if isinstance(path, str) else "",
+        enabled=data.get("enabled", True) is not False,
+    )
+
+
 @dataclass
 class Config:
     shell: ShellConfig = field(default_factory=ShellConfig)
@@ -386,6 +430,7 @@ class Config:
     recon: ReconConfig = field(default_factory=ReconConfig)
     instruments: InstrumentsConfig = field(default_factory=InstrumentsConfig)
     boards: BoardsConfig = field(default_factory=BoardsConfig)
+    chips: ChipsConfig = field(default_factory=ChipsConfig)
     flash: FlashConfig = field(default_factory=FlashConfig)
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
@@ -504,6 +549,15 @@ class Config:
             data.get("boards", {}),
             ("library_dir", "extensions", "schematic_extensions", "viewer"),
         )
+        chips_d = data.get("chips", {})
+        if isinstance(chips_d, Mapping):
+            if isinstance(chips_d.get("datasheet_dir"), str):
+                cfg.chips.datasheet_dir = chips_d["datasheet_dir"]
+            raw_sources = chips_d.get("sources", [])
+            if isinstance(raw_sources, list):
+                cfg.chips.sources = [
+                    source for source in map(_chip_source_from_dict, raw_sources) if source
+                ]
         _apply(cfg.flash, data.get("flash", {}), ("command", "programmer"))
         _apply(cfg.minipro, data.get("minipro", {}), ("command", "last_chip"))
         _apply(

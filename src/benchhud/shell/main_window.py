@@ -72,6 +72,9 @@ from benchhud.capture.modes import auto_size, probed_modes
 from benchhud.capture.pipeline import FramePump
 from benchhud.capture.thermal import Y16Camera
 from benchhud.capture.uvc_driver import TORN_FRAMES_WARNING, passes_torn_frames
+from benchhud.chips.builder import build_chip_source
+from benchhud.chips.builder import warm as warm_chip_source
+from benchhud.chips.source import ChipSource
 from benchhud.config import Config, OutputConfig, PersistCallback
 from benchhud.demo import DemoSignal
 from benchhud.devices.discovery import (
@@ -419,6 +422,7 @@ class MainWindow(QMainWindow):
         #: engagement…"; the recon panels read the ref-safe projection live.
         self._active_engagement: str | None = None
         self._board_library = self._make_board_library()
+        self._chip_source: ChipSource = self._make_chip_source()
 
         self._stabilise_camera_paths()
         self.setObjectName("BenchhudMainWindow")
@@ -928,6 +932,27 @@ class MainWindow(QMainWindow):
         """Rebuild the board library after a Preferences change."""
         self._board_library = self._make_board_library()
 
+    # --- chip reference ---------------------------------------------------
+
+    def _make_chip_source(self) -> ChipSource:
+        """Build the chip source from config and start reading it, off this thread.
+
+        No sources configured is the null source: nothing is read and no
+        thread is started.
+        """
+        source = build_chip_source(self._config.chips.sources)
+        warm_chip_source(source)
+        return source
+
+    @property
+    def chip_source(self) -> ChipSource:
+        """Where chips are looked up — the null source when none is configured."""
+        return self._chip_source
+
+    def reconfigure_chip_source(self) -> None:
+        """Rebuild the chip source after a Preferences change."""
+        self._chip_source = self._make_chip_source()
+
     def open_board_file(self, path) -> bool:
         """Open a board file in the configured viewer (or the OS handler)."""
         return open_board(path, self._config.tools, prefer=self._config.boards.viewer)
@@ -975,6 +1000,7 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(self.reconfigure_ticket_source)
         dialog.accepted.connect(self.reconfigure_inventory_source)
         dialog.accepted.connect(self.reconfigure_boards)
+        dialog.accepted.connect(self.reconfigure_chip_source)
         dialog.accepted.connect(self.reconfigure_tools)
         dialog.accepted.connect(self.reconfigure_instrument_session)
         dialog.accepted.connect(self.restart_browser_sources)
