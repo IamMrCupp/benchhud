@@ -63,7 +63,8 @@ def find_board_viewer(tools: Sequence[ToolConfig], prefer: str = "auto") -> Tool
     return _first_matching(tools, BOARD_VIEWERS)
 
 
-def _default_os_open(path: Path) -> object:
+def default_os_open(path: Path) -> object:
+    """Hand ``path`` to whatever the OS opens that kind of file with."""
     if sys.platform == "darwin":
         return subprocess.Popen(["open", str(path)])
     if sys.platform.startswith("win"):
@@ -94,7 +95,7 @@ def open_board(
             (launcher or ToolLauncher()).launch(viewer, [str(path)])
         else:
             log.info("no board viewer configured; using the OS handler for %s", path)
-            (os_open or _default_os_open)(path)
+            (os_open or default_os_open)(path)
     except Exception:
         log.exception("could not open board file %s", path)
         return False
@@ -112,7 +113,7 @@ def open_schematic(path: Path, *, os_open: OsOpener | None = None) -> bool:
         log.warning("schematic file missing: %s", path)
         return False
     try:
-        (os_open or _default_os_open)(path)
+        (os_open or default_os_open)(path)
     except Exception:
         log.exception("could not open schematic %s", path)
         return False
