@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.32.3](https://github.com/IamMrCupp/benchhud/compare/v0.32.2...v0.32.3) (2026-11-22)
+
+
+### Bug Fixes
+
+* **browser-sources:** a stale page gives up its feed before it checks, so six open pages can all reload ([c9c1232](https://github.com/IamMrCupp/benchhud/commit/c9c123212b06428875411bb1c8a403a586f5ee8e))
+* **browser-sources:** pages left open in OBS reload themselves after an upgrade ([c9c1232](https://github.com/IamMrCupp/benchhud/commit/c9c123212b06428875411bb1c8a403a586f5ee8e))
+
+
+### Documentation
+
+* **readme:** add pictures of the stream view and Find chip ([ddf31e6](https://github.com/IamMrCupp/benchhud/commit/ddf31e61d6f3ea57505cb5690a31641d8a8fdf86))
+* **readme:** list Windows for the terminal, and add the OBS scenes and benchmark docs to the table ([ddf31e6](https://github.com/IamMrCupp/benchhud/commit/ddf31e61d6f3ea57505cb5690a31641d8a8fdf86))
+* **readme:** say what in the stream picture is OBS's, and show the job card's credit ([ddf31e6](https://github.com/IamMrCupp/benchhud/commit/ddf31e61d6f3ea57505cb5690a31641d8a8fdf86))
+
 ## [0.32.2](https://github.com/IamMrCupp/benchhud/compare/v0.32.1...v0.32.2) (2026-11-22)
 
 
