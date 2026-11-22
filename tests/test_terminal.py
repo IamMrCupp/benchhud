@@ -371,16 +371,21 @@ def test_events_stream_over_http(served) -> None:
 
 
 @pytest.mark.parametrize("token", ["write_token", "share_token"])
-def test_the_terminal_page_is_stamped_and_reloads_when_stale(served, token) -> None:
+def test_the_terminal_page_is_stamped_and_opens_its_feed_through_panel_js(served, token) -> None:
     """The stream view's link is kept across launches, so OBS holds that page
-    through an upgrade exactly as it holds a panel's (#501)."""
+    through an upgrade exactly as it holds a panel's (#501).
+
+    This checks the wiring only. What ``openFeed`` does is tested in
+    test_panel_js.py; the page itself was run in a real browser, not here.
+    """
     host, server = served
     status, body = _request(server, "GET", f"/terminal?token={getattr(host, token)}")
     assert status == 200
     page = body.decode()
     assert f'<meta name="benchhud-build" content="{server.build}">' in page
     assert '<script src="/static/panel.js"></script>' in page
-    assert "reloadWhenStale(events);" in page
+    assert "openFeed(\n  `/terminal/events${query}`," in page
+    assert "new EventSource" not in page  # no feed of its own that would skip the check
 
 
 # --- the panel and the window ---------------------------------------------------------------

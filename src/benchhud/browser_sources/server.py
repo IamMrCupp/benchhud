@@ -34,7 +34,8 @@ Browser source's page loaded across a benchhud restart; the page only reconnects
 to its feed. So every page is stamped with :func:`page_build`, a hash of the
 files the pages are made of, and every feed opens with a ``build`` event that
 carries the running server's. A page that hears a build other than its own
-reloads (``panel.js``).
+gives up its feed, checks its address is being served, and reloads
+(``panel.js``).
 
 **Loopback only, and the Host header must say so.** Binding to ``127.0.0.1``
 keeps other machines out; checking ``Host`` keeps out a web page in a local
@@ -110,7 +111,9 @@ def page_build() -> str:
 
     It changes when a release changes what a page looks like or does, and only
     then: an upgrade that leaves the pages alone doesn't blink them on stream.
-    Read once per run; the files of an installed benchhud don't change under it.
+    Read once per run. If the files are replaced while benchhud is running (an
+    upgrade in place), a page loaded before the restart gets the new files under
+    the old stamp, and reloads once more after the restart. Harmless.
     """
     digest = hashlib.sha256()
     for path in _page_files():
