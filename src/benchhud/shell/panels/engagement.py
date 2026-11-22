@@ -3,7 +3,9 @@
 Backed by the :class:`~benchhud.recon.source.ReconSource` seam: "Import from
 engagement…" sets the active ref (benchhud stores only the ref), and the panel
 shows that engagement's ref-safe projection — ref, operator-set title, target
-*class* and status — read live so it tracks bench-recon.
+*class* and status — read live so it tracks bench-recon. "End engagement…"
+clears the ref again, behind a confirm (#490): it's the only way one ends short
+of quitting, and what's locked while one is active stays locked until then.
 
 **Off air.** The panel is tagged ``sensitive`` (:mod:`benchhud.output.onair`):
 engagement identity never reaches the virtual camera, even though every field it
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -34,6 +37,17 @@ ReconSourceProvider = Callable[[], ReconSource]
 ActiveRefProvider = Callable[[], str | None]
 #: Make a ref the active engagement; returns the resolved projection or None.
 ActivateHook = Callable[[str], Engagement | None]
+#: End the active engagement: benchhud forgets the ref. bench-recon isn't told.
+EndHook = Callable[[], object]
+#: Ask "end engagement <ref>?"; True to go ahead. Replaced in tests.
+ConfirmEnd = Callable[[str], bool]
+
+#: What the confirm says. Ending is local: nothing is closed in bench-recon.
+END_QUESTION = (
+    "Stop working against {ref}?\n\n"
+    "The recon panels clear, and Find chip's web lookups come back on. "
+    "Nothing changes in bench-recon — import it again to pick it back up."
+)
 
 _PLACEHOLDER = "—"
 
@@ -49,12 +63,16 @@ class EngagementPanel(Panel):
         source: ReconSourceProvider,
         active_ref: ActiveRefProvider | None = None,
         on_activate: ActivateHook | None = None,
+        on_end: EndHook | None = None,
+        confirm_end: ConfirmEnd | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._source = source
         self._active_ref = active_ref
         self._on_activate = on_activate
+        self._on_end = on_end
+        self._confirm_end = confirm_end or self._ask_to_end
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(*PANEL_MARGINS)
@@ -92,10 +110,17 @@ class EngagementPanel(Panel):
         self.import_button = QPushButton("Import from engagement…")
         self.import_button.setToolTip("Pick a bench-recon engagement to work against")
         self.import_button.clicked.connect(self.import_from_engagement)
+        self.end_button = QPushButton("End engagement…")
+        self.end_button.setToolTip(
+            "Stop working against this engagement: the recon panels clear and "
+            "Find chip's web lookups come back on. Nothing changes in bench-recon."
+        )
+        self.end_button.clicked.connect(self.end_engagement)
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
         row = QHBoxLayout()
         row.addWidget(self.import_button)
+        row.addWidget(self.end_button)
         row.addStretch(1)
         row.addWidget(self.refresh_button)
         return row
@@ -116,12 +141,41 @@ class EngagementPanel(Panel):
             self._on_activate(engagement.ref)
         self.refresh()
 
+    def end_engagement(self) -> bool:
+        """End the active engagement, once the operator confirms. True if it ended.
+
+        Deliberate on purpose: ending turns Find chip's web lookups back on,
+        and a stray click mid-engagement mustn't do that. Works with the recon
+        backend unreachable too — ending is local, and an engagement that can't
+        be looked up still has to be endable.
+        """
+        ref = self._active_ref() if self._active_ref is not None else None
+        if not ref or self._on_end is None:
+            return False
+        if not self._confirm_end(ref):
+            return False
+        self._on_end()
+        self.refresh()
+        return True
+
+    def _ask_to_end(self, ref: str) -> bool:
+        answer = QMessageBox.question(
+            self,
+            "End engagement",
+            END_QUESTION.format(ref=ref),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,  # Enter doesn't end an engagement
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
     def refresh(self) -> None:
         """Reload the active engagement's ref-safe projection from the source."""
         source = self._source()
         ref = self._active_ref() if self._active_ref is not None else None
         engagement = source.get_engagement(ref) if ref else None
         self.import_button.setVisible(source.name != "none")
+        # Shown whenever there's a ref to end, whatever the backend says of it.
+        self.end_button.setVisible(bool(ref) and self._on_end is not None)
         self._show(engagement, source_name=source.name, ref=ref)
 
     def _show(self, engagement: Engagement | None, *, source_name: str, ref: str | None) -> None:

@@ -111,7 +111,9 @@ ticket system is a protocol with a fake, not a dependency.
   (`Engagement` / `Artifact` ref-safe projection types, `ReconSource`, null /
   in-memory), `http_source` (the bench-recon API over stdlib `urllib`, reads
   degrade), `importer` (`resolve_engagement` — "Import from engagement…" makes a
-  ref the active engagement; benchhud stores only the ref). Sensitive detail
+  ref the active engagement; benchhud stores only the ref, and "End
+  engagement…" forgets it again, which is what turns Find chip's web lookups
+  back on). Sensitive detail
   stays in bench-recon; the recon panels are off air by default (`output.onair`).
 - **`acceptance.py`** — the Track E live acceptance harness (`scripts/track_e_acceptance.py`
   is the CLI). Runs against the live bench-recon + bench-parts services and reports,
