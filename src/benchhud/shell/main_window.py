@@ -1019,11 +1019,12 @@ class MainWindow(QMainWindow):
         entries = [replace(entry) for entry in self._config.chips.sources]
         sources = build_chip_sources(entries)
         self._on_air_chip_source: ChipSource = sources.on_air
-        # A copy of what it was built from, to tell later whether that changed
-        # — a source going on or off air included. Kept once it's built, so a
-        # build that failed isn't taken for "nothing changed" next time.
-        self._chip_entries = entries
         warm_chip_source(sources.everything)
+        # A copy of what it was built from, to tell later whether that changed
+        # — a source going on or off air included. Kept only once all of the
+        # above worked, so a build that fell over isn't taken for "nothing
+        # changed" at the next OK.
+        self._chip_entries = entries
         return sources.everything
 
     @property
@@ -1054,22 +1055,25 @@ class MainWindow(QMainWindow):
         yet, so it's only built when the list really changed.
         """
         same_list = self._chip_entries == self._config.chips.sources
-        if same_list:
-            warm_chip_source(self._chip_source)
-        else:
-            self._chip_source = self._make_chip_source()
-        # The stream card and the inventory row first, before anything else
-        # gets a chance to go wrong: a source just taken off air has to come
-        # off both. The row looks its selected part up again; an answer still
-        # on its way from the source it had before is dropped.
         try:
-            self.chip_panel.refresh()
+            if same_list:
+                warm_chip_source(self._chip_source)
+            else:
+                self._chip_source = self._make_chip_source()
         finally:
-            self.inventory_panel.sync_chip_details()
+            # The stream card and the inventory row, whatever happened above
+            # and before anything else gets a chance to go wrong: a source
+            # just taken off air has to come off both. Each takes down what
+            # it shows at once and has the sources read again before it
+            # looks; an answer still on its way from before is dropped.
+            try:
+                self.chip_panel.refresh()
+            finally:
+                self.inventory_panel.chip_source_changed()
         if self._chip_dialog is not None:
             # Find chip may be open. A new list: it looks in the new source
             # from here on. The same list: the folders may have changed, so it
-            # has them read again before it looks — like the chip panel above.
+            # has them read again before it looks — like the two above.
             self._chip_dialog.set_source(self._chip_source, reread=same_list)
 
     def _make_datasheet_library(self) -> DatasheetLibrary:

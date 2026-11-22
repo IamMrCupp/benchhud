@@ -1,8 +1,9 @@
 """A chip source kept off air (#482).
 
 ``on_air = false`` on a ``[[chips.sources]]`` entry keeps that source out of
-what the Chip panel shows — the panel is stream output — while Find chip and
-the inventory row still use it. The things pinned here: the panel is handed
+what the HUD window shows — the Chip panel, which is stream output, and the
+inventory row beside it (#508) — while Find chip, its own window, still uses
+it. The things pinned here: the panel and the row are handed
 the on-air sources and nothing else; an off-air source's values never reach
 the card, whichever way a chip gets there; the card gives no sign anything is
 held back; and a switch flipped in Preferences takes hold on OK.
@@ -30,6 +31,7 @@ from benchhud.chips.dir_source import FROM_FILES, FROM_INDEX, LoadReport
 from benchhud.config import CHIP_SOURCE_ON_AIR, ChipSourceConfig, Config
 from benchhud.inventory import InMemoryInventorySource, Part
 from benchhud.shell import chip_dialog
+from benchhud.shell import main_window as main_window_module
 from benchhud.shell.main_window import MainWindow
 from benchhud.shell.panels import chip as chip_panel_module
 from benchhud.shell.panels.chip import State
@@ -835,6 +837,160 @@ def test_the_row_is_looked_up_again_even_if_the_card_s_refresh_falls_over(
         window.reconfigure_chip_source()
     _settle(worker_jobs)
     _no_private_words(panel)
+
+
+def _window_with_a_private_document(qtbot, tmp_path, worker_jobs) -> MainWindow:
+    """Both sources on air; the overlay lists a document of its own, and it's held."""
+    config = Config()
+    config.chips.sources = _sources(tmp_path, overlay_on_air=True)
+    config.chips.datasheet_dir = str(tmp_path / "datasheets")
+    (tmp_path / "datasheets").mkdir()
+    (tmp_path / "datasheets" / "donor-teardown-notes.pdf").write_bytes(b"%PDF-1.4 made up")
+    chip_file = tmp_path / "chips-private" / "chips" / "example-semi" / "PRIV77SOT.toml"
+    chip_file.write_text(
+        chip_file.read_text(encoding="utf-8")
+        + '[[documents]]\nkind = "datasheet"\nfilename = "donor-teardown-notes.pdf"\n',
+        encoding="utf-8",
+    )
+    window = MainWindow(config, scanner=_FakeScanner(), on_persist=lambda c: None)
+    qtbot.addWidget(window)
+    window.show()
+    _settle(worker_jobs)
+    window.chip_panel._executor = _inline
+    return window
+
+
+@pytest.mark.parametrize("through_preferences", [False, True])
+def test_a_flip_takes_down_the_datasheet_line_and_the_opened_message(
+    qtbot, tmp_path, worker_jobs, through_preferences
+) -> None:
+    """The row had named an overlay's document twice over — on the datasheet
+    line, and in "Opened …" after it was opened. Neither outlives the switch,
+    shown or hidden."""
+    window = _window_with_a_private_document(qtbot, tmp_path, worker_jobs)
+    panel = _row(window, "PRIV77SOT")
+    panel._open_datasheet = lambda path: True
+    assert "donor-teardown-notes.pdf" in panel.datasheet_label.text()
+    panel.open_selected_datasheet()
+    assert "donor-teardown-notes.pdf" in panel.message_label.text()
+    assert not panel.message_label.isHidden()
+
+    if through_preferences:
+        _untick_on_air(qtbot, window, 0, Qt.CheckState.Unchecked)
+    else:
+        window._config.chips.sources[0].on_air = False
+        window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    assert panel.message_label.isHidden() and panel.message_label.text() == ""
+    assert "donor-teardown" not in panel.datasheet_label.text()
+    assert "donor-teardown" not in _everything_drawn(panel)
+    _no_private_words(panel)
+    assert panel._datasheet is None
+
+
+def test_a_sent_message_comes_down_with_the_switch_too(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "PRIV77SOT")
+    panel.card_button.click()
+    assert panel.message_label.text() == sent_line("PRIV77SOT")
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    # Left up, it would sit beside a card that now says "no such chip".
+    assert panel.message_label.isHidden() and panel.message_label.text() == ""
+
+
+def test_a_message_that_is_not_about_a_chip_is_left_alone(qtbot, tmp_path, worker_jobs) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "EX1234QFN")
+    panel.consume_selected()  # the shelf has none to use, and says so
+    used = panel.message_label.text()
+    assert used.startswith("Not recorded") and not panel.message_label.isHidden()
+
+    window._config.chips.sources[0].on_air = False
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    assert panel.message_label.text() == used and not panel.message_label.isHidden()
+
+
+def test_the_row_does_not_answer_from_the_copy_a_source_held_before_ok(
+    qtbot, tmp_path, worker_jobs
+) -> None:
+    """The list of sources is unchanged, so OK keeps them and re-reads them on a
+    worker. Moving a chip out of an on-air folder and pressing OK is how it's
+    taken off air by hand — the row mustn't show it from the old copy while
+    that re-read is still on its way."""
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    panel = _row(window, "PRIV77SOT")
+    assert "Hush Devices" in _everything_drawn(panel)
+    everything = window.chip_source
+
+    (tmp_path / "chips-private" / "chips" / "example-semi" / "PRIV77SOT.toml").unlink()
+    panel.part_list.setCurrentRow(-1)  # as the shelf reload on OK leaves it
+    window.reconfigure_chip_source()
+    assert window.chip_source is everything  # same list: kept, not rebuilt
+    assert len(worker_jobs) == 1  # the window's own re-read hasn't run yet
+
+    panel = _row(window, "PRIV77SOT")
+    assert panel.chip_label.text() == "PRIV77SOT isn't in the chip reference."
+    assert not panel.card_button.isVisibleTo(panel)
+    _no_private_words(panel)
+
+
+def test_the_row_only_re_reads_for_the_first_lookup_after_a_change(
+    qtbot, tmp_path, worker_jobs, monkeypatch
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs)
+    panel = _row(window, "ZZ9999")
+    reads: list[str] = []
+    for source in window.on_air_chip_source.sources:
+        again = source.reload
+        monkeypatch.setattr(source, "reload", lambda again=again: reads.append("read") or again())
+
+    _row(window, "EX1234QFN")
+    assert reads == []  # an ordinary selection reads nothing
+
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    reads.clear()
+    _row(window, "ZZ9999")
+    _row(window, "EX1234QFN")
+    assert reads == []  # the re-read went with the lookup the change itself started
+    assert _PUBLIC_DESCRIPTION in _everything_drawn(panel)
+
+
+def test_the_card_and_the_row_are_cleared_even_if_building_the_sources_falls_over(
+    qtbot, tmp_path, worker_jobs, monkeypatch
+) -> None:
+    window = _window(qtbot, tmp_path, worker_jobs, overlay_on_air=True)
+    card = window.chip_panel
+    card.set_chip("EX1234QFN")
+    panel = _row(window, "EX1234QFN")
+    assert "runs hot" in _everything_drawn(panel) and "runs hot" in _everything_drawn(card)
+
+    def broken(source) -> None:
+        raise RuntimeError("no thread to be had")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(main_window_module, "warm_chip_source", broken)
+        window._config.chips.sources[0].on_air = False
+        with pytest.raises(RuntimeError):
+            window.reconfigure_chip_source()
+    _settle(worker_jobs)
+
+    assert [source.name for source in window.on_air_chip_source.sources] == ["community"]
+    _nothing_private(card)
+    _no_private_words(panel)
+
+    # And the next OK isn't fooled into "nothing changed": it builds again.
+    before = window.chip_source
+    window.reconfigure_chip_source()
+    _settle(worker_jobs)
+    assert window.chip_source is not before
+    assert [source.name for source in window.on_air_chip_source.sources] == ["community"]
 
 
 def test_find_chip_is_where_every_source_is_still_looked_up(qtbot, tmp_path, worker_jobs) -> None:

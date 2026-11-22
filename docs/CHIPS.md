@@ -156,9 +156,10 @@ before you step back a version to test something.
 With every source off air the card and the inventory row find no chip at all.
 Preferences → Chips says so under the table. They don't.
 
-The switch takes hold on OK, a chip already on the card and a part already
-selected in the inventory included — both are looked up again in what's on air
-now.
+The switch takes hold on OK. A chip already on the card is looked up again in
+what's on air now. The inventory list is reloaded, so nothing stays selected
+there, and its chip details and any line naming a chip or a datasheet are
+cleared; the next part you select is looked up in what's on air now.
 
 ---
 
@@ -275,8 +276,7 @@ Take it off air and none of it reaches the card: see
 you add starts **on air**, so that's a tick to remove, not one to remember to
 add.
 
-Find chip and the inventory row's datasheet line are for you; the card is for
-the room.
+Find chip is for you; the card is for the room.
 
 ---
 
