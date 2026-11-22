@@ -8,8 +8,10 @@ read along with.
 **Stream-safe (not sensitive).** Everything drawn here is either fixed wording
 or a value from a :class:`~benchhud.chips.model.Chip`, which has no job,
 customer or engagement field. The panel is handed a chip source and nothing
-else: it can't reach a job, a ticket or an engagement, and it never echoes the
-text it was asked to look up — only what the chip reference says back.
+else: it can't reach a job, a ticket or an engagement. The card and its
+messages never repeat the text they were asked to look up — only what the chip
+reference says back. The part-number box holds what the operator typed into
+it, and nothing a caller passed to :meth:`ChipPanel.set_chip`.
 
 A chip record still holds things that don't belong on air, so the card shows
 part of it (:data:`SHOWN_FIELDS`) and leaves the rest out
@@ -29,30 +31,48 @@ part of it (:data:`SHOWN_FIELDS`) and leaves the rest out
 - **Credits** (``sources``) and **which configured source said what.** A
   source's name is a label out of the operator's config.
 
-When configured sources disagree about a value, the card says *which values*
-are disputed — "Sources disagree on package" — so nobody reads a contested
-value out as fact. It doesn't name the sources or show the losing values.
+When configured sources disagree about a value the card shows, it says *which*
+— "Sources disagree on package" — so nobody reads a contested value out as
+fact. It doesn't name the sources or show the losing values, and a dispute
+over a value the card doesn't show isn't mentioned.
 
-Every value is drawn as plain text, shortened to fit: a record can't smuggle
-markup, an image path or a wall of text onto the card.
+Every value is drawn as plain text, its line breaks flattened, without control
+or invisible characters, and cut — with an ellipsis that shows it — to a
+length a card can hold: a record can't smuggle markup, an image path, a
+text-direction override or a wall of text onto the card. What's left wraps,
+mid-word if it must, so a long part number is never clipped at the dock's edge
+to look like a shorter one.
 
 The lookup runs on a worker thread, because a source's first read can take a
 moment. Each lookup carries a ticket, and an answer whose ticket is no longer
 the current one is dropped — so a slow answer for a chip the operator has
 moved on from never lands.
+
+:meth:`ChipPanel.refresh` is for when the sources themselves may have changed
+(a Preferences OK): it has them read again before it looks the chip up, so
+the card can't come back with what a source held before.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import threading
+import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import QPointF, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QFont,
+    QFontDatabase,
+    QPainter,
+    QPaintEvent,
+    QTextLayout,
+    QTextOption,
+)
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -76,7 +96,8 @@ ChipSourceProvider = Callable[[], ChipSource]
 Executor = Callable[[Callable[[], None]], None]
 
 #: The :class:`~benchhud.chips.model.Chip` fields the card draws. Of a
-#: marking, only its ``code``.
+#: marking, only its ``code``. A declaration, not a filter: :func:`card_for`
+#: is the code that picks, and the tests hold it to these two sets.
 SHOWN_FIELDS = frozenset(
     {"mpn", "manufacturer", "family", "package", "functions", "description", "markings"}
 )
@@ -94,8 +115,9 @@ MAX_MARKING = 16
 #: The most the part-number box takes.
 MAX_ASKED = 100
 
-#: How a disputed field is named on the card. A field that isn't here is
-#: never named — the card says "a value" rather than print what it was given.
+#: How a disputed field is named on the card. A field that isn't here isn't
+#: on the card, so a dispute over it isn't mentioned — and whatever name a
+#: source's answer gave it is never printed.
 _DISPUTED = {
     "manufacturer": "maker",
     "family": "family",
@@ -124,12 +146,18 @@ class State(Enum):
 def _short(text: object, limit: int) -> str:
     """``text`` on one line, cut to ``limit`` characters with an ellipsis.
 
+    Line breaks and runs of whitespace become one space. Control, format and
+    other invisible characters (Unicode's ``C`` categories) are dropped: a
+    text-direction override would reorder the card's own wording, and a
+    zero-width character is a way to draw something other than what's read.
     Anything that isn't a string is nothing: a mangled record draws a blank,
     not its ``repr``.
     """
     if not isinstance(text, str):
         return ""
-    line = " ".join(text.split())
+    spaced = " ".join(text.split())
+    seen = "".join(ch for ch in spaced if not unicodedata.category(ch).startswith("C"))
+    line = " ".join(seen.split())
     return line if len(line) <= limit else line[: limit - 1].rstrip() + "…"
 
 
@@ -181,8 +209,8 @@ def card_for(chip: Chip, disputed: Iterable[str] = ()) -> ChipCard:
 def _disputed_line(fields: Iterable[str]) -> str:
     names: list[str] = []
     for field in fields:
-        name = _DISPUTED.get(field, "a value") if isinstance(field, str) else "a value"
-        if name not in names:
+        name = _DISPUTED.get(field) if isinstance(field, str) else None
+        if name is not None and name not in names:
             names.append(name)
     return f"Sources disagree on {', '.join(names)}." if names else ""
 
@@ -195,12 +223,20 @@ class Found:
     disputed: tuple[str, ...] = ()
 
 
-def look_up(source: ChipSource, mpn: str) -> Found | None:
+def look_up(source: ChipSource, mpn: str, *, reread: bool = False) -> Found | None:
     """The chip with this part number — merged, when the source merges several.
 
     Runs on a worker. ``None`` is "no such chip". Raises if the source hands
     back something that isn't a chip; the caller reports that, never draws it.
+
+    ``reread`` has a source that reads from disk read it again first. A source
+    answers from the copy it holds while a re-read someone else started is
+    still running; waiting for one's own is the only way to be sure the
+    answer isn't that old copy.
     """
+    reload = getattr(source, "reload", None) if reread else None
+    if callable(reload):
+        reload()
     merged = getattr(source, "merged", None)
     if callable(merged):
         answer = merged(mpn)
@@ -221,18 +257,72 @@ def _thread_executor(job: Callable[[], None]) -> None:
     threading.Thread(target=job, name="chip-panel", daemon=True).start()
 
 
-def _plain(label: QLabel, *, wrap: bool = True) -> QLabel:
-    """A label for a value out of a record: plain text that never widens the dock.
+def _plain(label: QLabel) -> QLabel:
+    """Set ``label`` up for the panel: plain text that never widens the dock.
 
-    Plain, so a value holding ``<img src=…>`` is drawn as those characters and
-    not as the image. ``Ignored`` across, so a long value wraps or clips
-    rather than forcing the dock wide (#230).
+    Plain, so text holding ``<img src=…>`` is drawn as those characters and
+    not as the image. ``Ignored`` across, so long text wraps rather than
+    forcing the dock wide (#230).
     """
     label.setTextFormat(Qt.TextFormat.PlainText)
-    label.setWordWrap(wrap)
+    label.setWordWrap(True)
     label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     label.setMinimumWidth(1)
     return label
+
+
+class ValueLabel(QLabel):
+    """A label for a value out of a record: it wraps anywhere, so nothing is clipped.
+
+    A ``QLabel`` only breaks a line between words, and a part number is one
+    word: in a narrow dock it ran off the edge, and ``EX1234567890ABCDEFGQFN``
+    read as the shorter ``EX1234567890ABCDEF``. This one draws its text
+    itself — plain, by construction — breaking between words where it can and
+    inside one where it can't, and is as tall as that takes.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        _plain(self)
+        policy = self.sizePolicy()
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def _lines(self, width: int) -> tuple[QTextLayout, int]:
+        """The text laid out ``width`` across, and how tall that came to."""
+        layout = QTextLayout(self.text(), self.font())
+        option = QTextOption(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        layout.setTextOption(option)
+        height = 0.0
+        layout.beginLayout()
+        while (line := layout.createLine()).isValid():
+            line.setLineWidth(max(1, width))
+            line.setPosition(QPointF(0.0, height))
+            height += line.height()
+        layout.endLayout()
+        return layout, max(math.ceil(height), self.fontMetrics().lineSpacing())
+
+    def heightForWidth(self, width: int) -> int:
+        margins = self.contentsMargins()
+        _layout, height = self._lines(width - margins.left() - margins.right())
+        return height + margins.top() + margins.bottom()
+
+    def sizeHint(self) -> QSize:
+        return self.minimumSizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(1, self.heightForWidth(max(self.width(), 1)))
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        area = self.contentsRect()
+        layout, _height = self._lines(area.width())
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        layout.draw(painter, QPointF(area.topLeft()))
 
 
 def _scaled(base: QFont, scale: float, *, bold: bool = False) -> QFont:
@@ -246,7 +336,9 @@ def _scaled(base: QFont, scale: float, *, bold: bool = False) -> QFont:
 class ChipPanel(Panel):
     panel_id = "chip"
     panel_title = "Chip"
-    # Stream-safe: fixed wording and Chip fields only — no job or engagement context.
+    #: Stream-safe, decided rather than inherited: fixed wording and Chip
+    #: fields only — no job or engagement context.
+    sensitive = False
 
     #: (ticket, a :class:`Found`, ``None`` for no such chip, or ``False`` for a failed read)
     _answered = Signal(int, object)
@@ -261,7 +353,8 @@ class ChipPanel(Panel):
         super().__init__(parent)
         self._chip_source = chip_source
         self._executor = executor
-        #: The part number asked for, as asked. Never drawn.
+        #: The part number asked for, as asked. Never drawn by the card or its
+        #: messages.
         self._wanted: str | None = None
         #: The current lookup's ticket; an answer with any other is dropped.
         self._ticket = 0
@@ -274,6 +367,7 @@ class ChipPanel(Panel):
         layout.addLayout(self._build_ask_row())
         self.card = self._build_card()
         layout.addWidget(self.card)
+        # Fixed wording only, so an ordinary label will do.
         self.message_label = _plain(QLabel())
         self.message_label.setObjectName("ChipMessage")
         layout.addWidget(self.message_label)
@@ -300,14 +394,14 @@ class ChipPanel(Panel):
     def _build_card(self) -> QWidget:
         card = QWidget()
         base = card.font()
-        self.title_label = _plain(QLabel())
+        self.title_label = ValueLabel()
         self.title_label.setObjectName("ChipTitle")
         self.title_label.setFont(_scaled(base, 1.7, bold=True))
-        self.maker_label = hint(_plain(QLabel()))
+        self.maker_label = hint(ValueLabel())
 
-        self.package_label = _plain(QLabel())
-        self.functions_label = _plain(QLabel())
-        self.markings_label = _plain(QLabel())
+        self.package_label = ValueLabel()
+        self.functions_label = ValueLabel()
+        self.markings_label = ValueLabel()
         self.markings_label.setObjectName("ChipMarkings")
         mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         self.markings_label.setFont(_scaled(mono, 1.25, bold=True))
@@ -331,7 +425,8 @@ class ChipPanel(Panel):
             facts.addWidget(value, row, 1)
             self._fact_rows.append((caption, value))
 
-        self.description_label = _plain(QLabel())
+        self.description_label = ValueLabel()
+        # Fixed wording: the names come from _DISPUTED, never from a record.
         self.disputed_label = notice(_plain(QLabel()), "warning")
 
         column = QVBoxLayout(card)
@@ -349,8 +444,9 @@ class ChipPanel(Panel):
         """Show the chip with this full part number. Blank is :meth:`clear`.
 
         Returns at once: the lookup runs on a worker and the card follows. The
-        part number itself is never drawn — if the chip reference has no such
-        chip the panel says so without repeating it.
+        card and its messages never draw ``mpn`` itself — if the chip reference
+        has no such chip the panel says so without repeating it — and it isn't
+        put in the part-number box.
         """
         wanted = " ".join(mpn.split()) if isinstance(mpn, str) else ""
         if not wanted:
@@ -359,19 +455,27 @@ class ChipPanel(Panel):
         # What's in the box is the operator's own typing; a choice made
         # elsewhere would leave it naming a chip the card no longer shows.
         if " ".join(self.part_edit.text().split()) != wanted:
-            self.part_edit.clear()
+            self._empty_box()
         self._wanted = wanted
         self._look_up()
 
     def clear(self) -> None:
         """Take the chip off the panel. A lookup still running is dropped."""
         self._wanted = None
-        self.part_edit.clear()
+        self._empty_box()
         self._look_up()
 
     def refresh(self) -> None:
-        """Look the chosen chip up again — call after the chip sources change."""
-        self._look_up()
+        """Show the chosen chip as the sources have it now.
+
+        Call after the chip sources change — a Preferences OK, whether it
+        swapped the source or only asked it to read its folders again. The
+        card comes down at once, and the worker has the source re-read before
+        it looks the chip up: a source answers from the copy it holds while a
+        re-read is still running, and that copy is what just changed. With no
+        chip chosen nothing is read.
+        """
+        self._look_up(reread=True)
 
     @property
     def state(self) -> State:
@@ -388,11 +492,15 @@ class ChipPanel(Panel):
         self.set_chip(self.part_edit.text())
         self.part_edit.selectAll()
 
+    def _empty_box(self) -> None:
+        # setText, not clear(): clear() leaves the old text one undo away.
+        self.part_edit.setText("")
+
     @staticmethod
     def _no_data(source: ChipSource) -> bool:
         return isinstance(source, NullChipSource)
 
-    def _look_up(self) -> None:
+    def _look_up(self, *, reread: bool = False) -> None:
         wanted = self._wanted
         self._ticket += 1
         ticket = self._ticket
@@ -410,7 +518,7 @@ class ChipPanel(Panel):
         def run() -> None:
             found: object = False
             try:
-                found = look_up(source, wanted)
+                found = look_up(source, wanted, reread=reread)
             except Exception:  # said on the panel, never raised into Qt
                 log.exception("chips: the chip panel's lookup failed")
             finally:
@@ -418,7 +526,12 @@ class ChipPanel(Panel):
                 with contextlib.suppress(RuntimeError):
                     self._answered.emit(ticket, found)
 
-        self._executor(run)
+        try:
+            self._executor(run)
+        except Exception:  # a worker that can't start is said, not raised
+            log.exception("chips: the chip panel couldn't start a lookup")
+            if ticket == self._ticket:
+                self._show(State.FAILED)
 
     def _on_answer(self, ticket: int, found: object) -> None:
         if ticket != self._ticket:

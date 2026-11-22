@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractButton, QLabel, QLineEdit, QWidget
+from PySide6.QtWidgets import QAbstractButton, QLabel, QLineEdit, QPushButton, QWidget
 
 from benchhud.chips.composite import CompositeChipSource, Conflict, MergedChip
 from benchhud.chips.dir_source import DirChipSource
@@ -39,6 +39,7 @@ from benchhud.shell.panels.chip import (
     ChipPanel,
     Found,
     State,
+    ValueLabel,
     card_for,
     look_up,
 )
@@ -182,7 +183,35 @@ def test_a_dispute_names_the_value_and_nothing_else() -> None:
 
 def test_a_field_name_the_card_doesnt_know_is_never_printed() -> None:
     line = card_for(EX1234, ("customer: Acme", "package", "ticket 4471", None)).disputed  # type: ignore[arg-type]
-    assert line == "Sources disagree on a value, package."
+    assert line == "Sources disagree on package."
+
+
+def test_a_dispute_over_a_value_the_card_doesnt_show_isnt_mentioned() -> None:
+    """``package_family`` can be disputed on its own, and it isn't on the card."""
+    assert card_for(EX1234, ("package_family",)).disputed == ""
+    assert card_for(EX1234, ("sources", "customer")).disputed == ""
+
+
+def test_control_and_invisible_characters_are_dropped() -> None:
+    """A text-direction override would reorder the card's own wording."""
+    chip = Chip(
+        mpn="EX\u202e1234\u2066QFN\u2069",
+        manufacturer="Exa\u200bmple\x00 Se\x07mi\x1b",
+        family="\ufeffEX\u00ad1234",
+        package="QFN\u200d-20",
+        functions=("buck\u200e-controller",),
+        markings=(Marking("X\u202d1="),),
+        description="A\u2028B\u2029C \ue000 D",
+    )
+    card = card_for(chip)
+    assert card == ChipCard(
+        title="EX1234QFN",
+        maker="Example Semi · EX1234 family",
+        package="QFN-20",
+        functions="buck controller",
+        markings="X1=",
+        description="A B C D",
+    )
 
 
 # --- the lookup (no Qt) ----------------------------------------------------
@@ -206,6 +235,30 @@ def test_look_up_asks_a_plain_source_for_the_chip() -> None:
     assert look_up(CompositeChipSource([InMemoryChipSource([EX1234])]), "EX0000") is None
 
 
+class _Rereading(InMemoryChipSource):
+    """A source that reads from somewhere: ``reload`` swaps in what's there now."""
+
+    def __init__(self, chips: list[Chip], on_disk: list[Chip] | None = None) -> None:
+        super().__init__(list(chips))
+        self.on_disk = list(chips) if on_disk is None else on_disk
+        self.reloads = 0
+
+    def reload(self) -> None:
+        self.reloads += 1
+        self.chips = list(self.on_disk)
+
+
+def test_look_up_can_have_the_source_read_again_first() -> None:
+    newer = dataclasses.replace(EX1234, package="QFN-24 (4x4)")
+    source = _Rereading([EX1234], on_disk=[newer])
+    assert look_up(source, "EX1234QFN") == Found(EX1234, ())
+    assert source.reloads == 0
+    assert look_up(source, "EX1234QFN", reread=True) == Found(newer, ())
+    assert source.reloads == 1
+    # A source with nothing to re-read is just asked.
+    assert look_up(InMemoryChipSource([EX1234]), "EX1234QFN", reread=True) == Found(EX1234, ())
+
+
 def test_look_up_refuses_an_answer_that_isnt_a_chip() -> None:
     class _Wrong(InMemoryChipSource):
         def get(self, mpn: str):  # type: ignore[override]
@@ -220,6 +273,10 @@ def test_look_up_refuses_an_answer_that_isnt_a_chip() -> None:
 
 def test_chip_panel_is_stream_safe() -> None:
     assert ChipPanel.sensitive is False
+
+
+def test_the_tag_is_the_panels_own_decision_not_the_inherited_default() -> None:
+    assert vars(ChipPanel)["sensitive"] is False
 
 
 # --- stream safety: only Chip fields reach the card ------------------------
@@ -308,6 +365,56 @@ def test_the_tagged_chip_tags_every_text_value_there_is() -> None:
     assert {name.split(".")[0] for name in _ON_AIR} == SHOWN_FIELDS
 
 
+def test_every_field_inside_a_chip_is_accounted_for_too() -> None:
+    """A text field added to a marking, a document, a substitute or a sighting
+    fails here until it has a tag — and so a place in the proof below."""
+    _chip, tags = _tagged_chip()
+    not_text = {"documents.pages"}
+    inside = {
+        f"{name}.{f.name}"
+        for name, kind in (
+            ("markings", Marking),
+            ("documents", Document),
+            ("substitutes", Substitute),
+            ("used_in", UsedIn),
+        )
+        for f in dataclasses.fields(kind)
+    }
+    assert inside == {name for name in tags if "." in name} | not_text
+
+
+def _drawn_tags(qtbot, chip: Chip, tags: dict[str, str]) -> set[str]:
+    panel = _panel(qtbot, InMemoryChipSource([chip]))
+    panel.set_chip(chip.mpn)
+    assert panel.state is State.SHOWN
+    drawn = _everything_drawn(panel)
+    return {name for name, tag in tags.items() if tag in drawn}
+
+
+@pytest.mark.parametrize(
+    "emptied",
+    [
+        {"manufacturer": ""},
+        {"family": None},
+        {"package": None},
+        {"functions": ()},
+        {"description": None},
+        {"description": ""},
+        {"markings": None},  # each marking keeps its examples and note, loses its code
+        {"manufacturer": "", "family": None, "package": None, "functions": (), "description": None},
+    ],
+)
+def test_a_left_out_value_never_stands_in_for_an_empty_shown_one(qtbot, emptied) -> None:
+    """No fallbacks: an empty description isn't filled from a note, nor a code from an example."""
+    chip, tags = _tagged_chip()
+    changes = dict(emptied)
+    if "markings" in changes:
+        changes["markings"] = tuple(dataclasses.replace(m, code="") for m in chip.markings)
+    sparse = dataclasses.replace(chip, **changes)
+    gone = {"markings.code" if name == "markings" else name for name in emptied}
+    assert _drawn_tags(qtbot, sparse, tags) == _ON_AIR - gone
+
+
 def test_only_the_shown_fields_reach_the_card(qtbot) -> None:
     """Notes, documents, substitutes, sightings, examples and credits stay off."""
     chip, tags = _tagged_chip()
@@ -341,7 +448,7 @@ def test_source_names_and_losing_values_stay_off_the_card(qtbot) -> None:
     panel = _panel(qtbot, _Merging([chip]))
     panel.set_chip(chip.mpn)
     drawn = _everything_drawn(panel)
-    assert "Sources disagree on package, a value." in drawn
+    assert "Sources disagree on package." in drawn
     for off_air in ("TAGSOURCEA", "TAGSOURCEB", "TAGLOSER", "TAGLOSER2", "TAGFIELD"):
         assert off_air not in drawn
 
@@ -394,6 +501,27 @@ def test_the_module_imports_nothing_that_holds_job_or_engagement_data() -> None:
     }
 
 
+def test_the_panel_holds_only_widgets_the_proofs_can_read(qtbot) -> None:
+    """``_everything_drawn`` reads labels, buttons and the box. A widget of
+    another kind added later would draw where these tests can't see."""
+    panel = _panel(qtbot, InMemoryChipSource([EX1234]))
+    panel.set_chip("EX1234QFN")
+    known = (QLabel, QPushButton, QLineEdit)
+    for child in panel.findChildren(QWidget):
+        assert isinstance(child, known) or type(child) is QWidget, type(child).__name__
+
+
+def test_the_box_holds_the_operators_typing_and_nothing_a_caller_passed(qtbot) -> None:
+    panel = _panel(qtbot, InMemoryChipSource([EX1234]))
+    panel.set_chip("Acme Corp / ticket T-4471")
+    assert panel.part_edit.text() == ""
+    panel.part_edit.setText("EX0000")
+    panel.part_edit.returnPressed.emit()
+    assert panel.state is State.NOT_FOUND
+    assert panel.part_edit.text() == "EX0000"  # their own typing, there to correct
+    assert "EX0000" not in panel.message_label.text()
+
+
 def test_chip_text_is_drawn_as_plain_text(qtbot) -> None:
     """A record can't put markup — or a local image — on the card."""
     markup = '<img src="file:///etc/hosts"><b>bold</b>'
@@ -412,6 +540,8 @@ def test_chip_text_is_drawn_as_plain_text(qtbot) -> None:
     labels = panel.card.findChildren(QLabel)
     drawing_data = [label for label in labels if "<" in label.text()]
     assert len(drawing_data) == 6  # title, maker, package, functions, marks, description
+    # A value label draws its text itself, as characters; nothing parses it.
+    assert all(type(label) is ValueLabel for label in drawing_data)
     for label in [*drawing_data, panel.message_label, panel.disputed_label]:
         assert label.textFormat() == Qt.TextFormat.PlainText
 
@@ -523,6 +653,7 @@ def test_clear_takes_the_chip_off(qtbot) -> None:
     assert panel.state is State.NO_CHIP
     assert panel.chip is None and panel.card.isHidden()
     assert panel.part_edit.text() == ""
+    assert not panel.part_edit.isUndoAvailable()  # the old text isn't one undo away
     assert "EX1234QFN" not in _everything_drawn(panel)
 
 
@@ -646,7 +777,37 @@ def test_an_answer_from_a_source_since_replaced_is_dropped(qtbot) -> None:
     assert panel.package_label.text() == "QFN-24 (4x4)"
 
 
+def test_an_answer_that_lands_after_the_sources_are_switched_off_is_dropped(qtbot) -> None:
+    held = _Held()
+    current: list = [InMemoryChipSource([EX1234])]
+    panel = ChipPanel(lambda: current[0], executor=held)
+    qtbot.addWidget(panel)
+    panel.set_chip("EX1234QFN")
+    current[0] = NullChipSource()
+    panel.refresh()
+    held.jobs.pop()()
+    assert panel.state is State.NO_DATA
+    assert panel.card.isHidden() and panel.chip is None
+
+
 # --- nothing raises into the HUD -------------------------------------------
+
+
+def test_a_worker_that_cant_start_is_said_not_raised(qtbot, caplog) -> None:
+    def no_threads(job: Callable[[], None]) -> None:
+        raise RuntimeError("can't start new thread")
+
+    panel = _panel(qtbot, InMemoryChipSource([EX1234]), no_threads)
+    panel.set_chip("EX1234QFN")
+    assert panel.state is State.FAILED  # not left on "Looking up…"
+    panel.refresh()
+    assert panel.state is State.FAILED
+    panel.part_edit.setText("EX1234QFN")
+    panel.part_edit.returnPressed.emit()
+    assert panel.state is State.FAILED
+    assert "couldn't start a lookup" in caplog.text
+    panel.clear()
+    assert panel.state is State.NO_CHIP
 
 
 def test_a_source_that_raises_is_said_not_raised(qtbot, caplog) -> None:
@@ -736,6 +897,45 @@ def test_refresh_looks_the_chosen_chip_up_in_the_source_of_the_moment(qtbot) -> 
     assert panel.state is State.SHOWN
 
 
+def test_refresh_has_the_source_read_again_before_it_answers(qtbot) -> None:
+    """A source answers from the copy it holds while a re-read is running, so
+    the panel waits for a read of its own — else the card comes back as it was."""
+    newer = dataclasses.replace(EX1234, package="QFN-24 (4x4)")
+    source = _Rereading([EX1234], on_disk=[newer])
+    held = _Held()
+    panel = _panel(qtbot, source, held)
+
+    panel.set_chip("EX1234QFN")
+    held.jobs.pop()()
+    assert source.reloads == 0  # an ordinary pick reads nothing again
+    assert panel.package_label.text() == "QFN-20 (3x3)"
+
+    panel.refresh()
+    assert panel.card.isHidden()  # down at once, before anything is read
+    assert source.reloads == 0  # and the read is the worker's, not this thread's
+    held.jobs.pop()()
+    assert source.reloads == 1
+    assert panel.package_label.text() == "QFN-24 (4x4)"
+
+
+def test_refresh_drops_a_chip_the_source_no_longer_has(qtbot) -> None:
+    source = _Rereading([EX1234], on_disk=[])
+    panel = _panel(qtbot, source)
+    panel.set_chip("EX1234QFN")
+    assert panel.state is State.SHOWN
+    panel.refresh()
+    assert panel.state is State.NOT_FOUND and panel.card.isHidden()
+
+
+def test_refresh_with_no_chip_chosen_reads_nothing(qtbot) -> None:
+    source = _Rereading([EX1234])
+    held = _Held()
+    panel = _panel(qtbot, source, held)
+    panel.refresh()
+    assert held.jobs == [] and source.reloads == 0
+    assert panel.state is State.NO_CHIP
+
+
 def test_refresh_with_no_chip_chosen_tracks_whether_there_is_data(qtbot) -> None:
     current: list = [NullChipSource()]
     panel = ChipPanel(lambda: current[0], executor=_inline)
@@ -759,11 +959,51 @@ def test_a_long_record_never_forces_the_dock_wide(qtbot) -> None:
         description="unbroken" * 60,
     )
     panel = _panel(qtbot, InMemoryChipSource([chip]))
-    narrow = panel.minimumSizeHint().width()
+    narrow, wanted = panel.minimumSizeHint().width(), panel.sizeHint().width()
     panel.set_chip(chip.mpn)
     assert panel.state is State.SHOWN
     assert panel.minimumSizeHint().width() == narrow
+    assert panel.sizeHint().width() == wanted  # nor asks for more room than before
     assert narrow <= 260  # the dock width the panels are built for (#230)
+
+
+def test_a_long_part_number_wraps_inside_the_word_instead_of_clipping(qtbot) -> None:
+    """Clipped at the dock's edge, ``EX1234567890ABCDEFGQFN`` read as a shorter part."""
+    panel = _panel(qtbot, InMemoryChipSource([Chip("EX1234567890ABCDEFGQFN", "Example Semi")]))
+    panel.set_chip("EX1234567890ABCDEFGQFN")
+    title = panel.title_label
+    assert title.text() == "EX1234567890ABCDEFGQFN"  # whole, no ellipsis
+    one_line = title.heightForWidth(2000)
+    assert title.heightForWidth(120) >= 2 * one_line  # one word, and it still wraps
+    # Laid out in a narrow panel, the label is given the height that takes.
+    panel.resize(140, 400)
+    panel.show()
+    qtbot.waitExposed(panel)
+    assert title.height() >= title.heightForWidth(title.width()) >= 2 * one_line
+
+
+def _broken_into(label: ValueLabel, width: int) -> list[str]:
+    layout, _height = label._lines(width)
+    lines = [layout.lineAt(n) for n in range(layout.lineCount())]
+    return [label.text()[line.textStart() : line.textStart() + line.textLength()] for line in lines]
+
+
+def test_text_with_spaces_still_breaks_between_words(qtbot) -> None:
+    """Inside a word only when the word itself is too long for the line."""
+    label = ValueLabel()
+    qtbot.addWidget(label)
+    label.setText("standby rail")
+    metrics = label.fontMetrics()
+    # Room for "standby rai", not for the last letter.
+    width = (
+        metrics.horizontalAdvance("standby rai") + metrics.horizontalAdvance("standby rail")
+    ) // 2
+    assert [line.strip() for line in _broken_into(label, width)] == ["standby", "rail"]
+
+    label.setText("EX1234567890ABCDEFGQFN")
+    width = metrics.horizontalAdvance("EX1234567890") + 2
+    pieces = _broken_into(label, width)
+    assert len(pieces) == 2 and "".join(pieces) == "EX1234567890ABCDEFGQFN"
 
 
 # --- the window ------------------------------------------------------------
@@ -818,6 +1058,37 @@ def test_a_preferences_change_reaches_the_panel(qtbot) -> None:
     window.reconfigure_chip_source()
     assert panel.state is State.NO_DATA
     assert panel.card.isHidden() and "EX1234QFN" not in _everything_drawn(panel)
+
+
+def test_preferences_ok_with_the_same_sources_picks_up_an_edit_on_disk(qtbot, tmp_path) -> None:
+    """The list is unchanged, so the window keeps the source and re-reads it on a
+    worker. The card has to come back with what's on disk now — not with the
+    copy the source was still holding when the panel asked."""
+    body = 'schema = 1\nmpn = "EX1234QFN"\nmanufacturer = "Example Semi"\n'
+    chip_file = tmp_path / "chips" / "example-semi" / "EX1234QFN.toml"
+    chip_file.parent.mkdir(parents=True)
+    chip_file.write_text(body + 'description = "The first wording"\n', encoding="utf-8")
+    config = Config()
+    config.chips.sources = [ChipSourceConfig(name="overlay", path=str(tmp_path))]
+    window = MainWindow(config, job_store=JobStore(":memory:"))
+    qtbot.addWidget(window)
+    panel = window.chip_panel
+    source = window.chip_source
+    panel.set_chip("EX1234QFN")
+    qtbot.waitUntil(lambda: panel.state is State.SHOWN)
+    assert panel.description_label.text() == "The first wording"
+
+    chip_file.write_text(body + 'description = "Reworded"\n', encoding="utf-8")
+    window.reconfigure_chip_source()
+    assert window.chip_source is source  # same list, same source
+    assert panel.card.isHidden()  # the old wording is down at once
+    qtbot.waitUntil(lambda: panel.state is State.SHOWN)
+    assert panel.description_label.text() == "Reworded"
+
+    chip_file.unlink()  # and a chip that's gone from disk goes from the card
+    window.reconfigure_chip_source()
+    qtbot.waitUntil(lambda: panel.state is not State.LOOKING)
+    assert panel.state is State.NOT_FOUND and panel.card.isHidden()
 
 
 def test_no_job_ticket_or_engagement_value_reaches_the_panel(qtbot) -> None:
