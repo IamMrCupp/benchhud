@@ -87,6 +87,17 @@ layout sticks across restarts.
 raw thermal feed and the meter on the right, the rest of the panels tabbed along
 the bottom.*
 
+![OBS's program scene: the overhead bench camera, with the job card across the top and the meter and power graph in the top-right corner](docs/images/stream.jpg)
+
+*What the stream gets. The overhead camera is OBS's own source; the job card,
+the meter and the power graph are benchhud's browser sources, each placed on
+its own. Supply's off here, so the meter reads zero.*
+
+![The Find chip dialog with the mark X1=6A typed in and two candidate chips listed, beside the chip panel showing the picked part](docs/images/chips.png)
+
+*Find chip, and the stream-safe chip panel beside it. "Example Semi" is made
+up — benchhud doesn't ship chip data, so this is the sample set the tests use.*
+
 ## How it works
 
 One process owns the cameras and builds the composite; OBS gets the output, never
