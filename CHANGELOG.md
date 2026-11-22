@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.29.0](https://github.com/IamMrCupp/benchhud/compare/v0.28.0...v0.29.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** open Find chip from a Chips menu, with which source said what and a guide to all of it ([29aa966](https://github.com/IamMrCupp/benchhud/commit/29aa966e61d9e380fc52101b056120fc5f98f794))
+* **job-card:** a small benchhud credit in the card's corner ([#494](https://github.com/IamMrCupp/benchhud/issues/494)) ([3728080](https://github.com/IamMrCupp/benchhud/commit/3728080d63e69d3baac60e8eae15afa4f8c0955a))
+
+
+### Bug Fixes
+
+* **chips:** Find chip drops an old source's rows and failures at once, and re-reads after a Preferences OK ([53ec05b](https://github.com/IamMrCupp/benchhud/commit/53ec05b41b0693650587a1414f36ca6485bdcf67))
+
 ## [0.28.0](https://github.com/IamMrCupp/benchhud/compare/v0.27.0...v0.28.0) (2026-11-22)
 
 
