@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.1](https://github.com/IamMrCupp/benchhud/compare/v0.32.0...v0.32.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **chips:** the inventory row re-reads its sources after a Preferences OK and keeps no text once hidden ([2fc306b](https://github.com/IamMrCupp/benchhud/commit/2fc306ba21ced7b635eb5c93d87fcb2a348ad027))
+* **chips:** the inventory row reads the on-air chip sources only, like the stream card ([2fc306b](https://github.com/IamMrCupp/benchhud/commit/2fc306ba21ced7b635eb5c93d87fcb2a348ad027))
+
 ## [0.32.0](https://github.com/IamMrCupp/benchhud/compare/v0.31.0...v0.32.0) (2026-11-22)
 
 
