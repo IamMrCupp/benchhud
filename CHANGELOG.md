@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.26.0](https://github.com/IamMrCupp/benchhud/compare/v0.25.0...v0.26.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** look a chip up by its mark or part number in a Find chip dialog ([bead5aa](https://github.com/IamMrCupp/benchhud/commit/bead5aaa24127d4ab9a78bb3b90bc7a3e4081680))
+
+
+### Bug Fixes
+
+* **chips:** Find chip's keys never act on a list that's behind the box, and chip text stays out of tooltips ([bead5aa](https://github.com/IamMrCupp/benchhud/commit/bead5aaa24127d4ab9a78bb3b90bc7a3e4081680))
+
 ## [0.25.0](https://github.com/IamMrCupp/benchhud/compare/v0.24.0...v0.25.0) (2026-11-22)
 
 
