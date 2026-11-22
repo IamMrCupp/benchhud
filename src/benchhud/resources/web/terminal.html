@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="/static/xterm.css">
 <script src="/static/xterm.js"></script>
 <script src="/static/addon-fit.js"></script>
+<script src="/static/panel.js"></script>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
   #term { position: absolute; inset: 0; }
@@ -122,6 +123,8 @@ const handlers = {
 };
 
 const events = new EventSource(`/terminal/events${query}`);
+// The stream view stays loaded in OBS across an upgrade; see panel.js (#501).
+reloadWhenStale(events);
 events.onmessage = (message) => {
   const event = JSON.parse(message.data);
   const handler = handlers[event.t];

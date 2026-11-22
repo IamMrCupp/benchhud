@@ -85,6 +85,21 @@ The pages keep trying to reconnect and pick the feed back up on their own when
 benchhud starts. In between they dim and show "—" rather than the last reading,
 so a stale number can't pass for a live one on stream.
 
+## After an upgrade
+
+OBS keeps a Browser source's page loaded while benchhud restarts; the page only
+reconnects to its feed. So after an upgrade it used to go on drawing the old
+layout until someone pressed **Refresh cache of current page** on the source.
+
+Now each page reloads itself when the benchhud it reconnects to has different
+pages from the one it was loaded from. An upgrade that didn't change the pages
+leaves them alone, so nothing blinks on stream for no reason. The terminal's
+stream page does the same.
+
+One catch: a page loaded from a benchhud older than this has no way to notice.
+After the upgrade that brings this in, refresh each Browser source once, or
+restart OBS. From then on they look after themselves.
+
 ## Who can connect
 
 The server listens on `127.0.0.1` only, so nothing else on the network can reach
@@ -105,4 +120,5 @@ pages above stay read-only. See [JOBS.md](JOBS.md#from-a-terminal).
 | Status bar: *browser sources off — port 8780 is in use* | Something else has the port. Pick another in Preferences and update the OBS URLs. |
 | Page is blank in OBS | Check the URL starts `http://127.0.0.1:` and that the option is on. `http://127.0.0.1:8780/` in a normal browser should list the panels. |
 | Page shows "—" everywhere | benchhud isn't running, or has no readings yet. The meter reads "—" until the PSU answers. |
+| Page still has the old look after an upgrade | It was loaded from a benchhud too old to reload itself. In OBS, open the source's properties and press **Refresh cache of current page**. Once is enough. |
 | Job card is empty | No job is selected in the Jobs panel. Click one, or `benchhud job select <id>` from anywhere. |

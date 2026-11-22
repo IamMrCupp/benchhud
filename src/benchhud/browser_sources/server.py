@@ -29,6 +29,13 @@ never touches the GUI thread. Routes:
 The data panels (:data:`PANELS`) and the terminal are switched separately: the
 server can run for the terminal alone, and then the panels 404.
 
+**A page left open reloads itself after an upgrade (#501).** OBS keeps a
+Browser source's page loaded across a benchhud restart; the page only reconnects
+to its feed. So every page is stamped with :func:`page_build`, a hash of the
+files the pages are made of, and every feed opens with a ``build`` event that
+carries the running server's. A page that hears a build other than its own
+reloads (``panel.js``).
+
 **Loopback only, and the Host header must say so.** Binding to ``127.0.0.1``
 keeps other machines out; checking ``Host`` keeps out a web page in a local
 browser that uses DNS rebinding to reach the port under its own name.
@@ -36,10 +43,12 @@ browser that uses DNS rebinding to reach the port under its own name.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
 from collections.abc import Callable
+from functools import cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -80,9 +89,43 @@ _STATIC = {
 #: Largest keystroke batch or resize body accepted, in bytes. A paste is fine.
 MAX_POST_BYTES = 256 * 1024
 
+#: Where a served page carries its build. Every page has this tag; the stamp
+#: goes in right after it.
+_CHARSET = b'<meta charset="utf-8">'
+
 
 def _resource(path: str) -> bytes:
     return files("benchhud.resources").joinpath(*path.split("/")).read_bytes()
+
+
+def _page_files() -> list[str]:
+    """Every file a page is made of: the pages, then what they load."""
+    pages = [f"web/{name}.html" for name in PANELS] + ["web/terminal.html"]
+    return sorted({*pages, *(resource for resource, _ in _STATIC.values())})
+
+
+@cache
+def page_build() -> str:
+    """A short hash of the pages and everything they load (#501).
+
+    It changes when a release changes what a page looks like or does, and only
+    then: an upgrade that leaves the pages alone doesn't blink them on stream.
+    Read once per run; the files of an installed benchhud don't change under it.
+    """
+    digest = hashlib.sha256()
+    for path in _page_files():
+        body = _resource(path)
+        digest.update(f"{path}\0{len(body)}\0".encode())
+        digest.update(body)
+    return digest.hexdigest()[:16]
+
+
+def stamp(page: bytes, build: str) -> bytes:
+    """``page`` with the build it was served from written into its head."""
+    if _CHARSET not in page:
+        raise ValueError("the page has no charset tag to put the build after")
+    tag = f'\n<meta name="benchhud-build" content="{build}">'.encode()
+    return page.replace(_CHARSET, _CHARSET + tag, 1)
 
 
 class BrowserSourceServer:
@@ -110,6 +153,8 @@ class BrowserSourceServer:
         self.terminal = terminal
         #: The now-playing artwork as (bytes, content type), or None (#251).
         self.now_playing_art = now_playing_art
+        #: What the pages are stamped with and the feeds announce (#501).
+        self.build = page_build()
         self._requested_port = port
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -202,8 +247,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send(HTTPStatus.OK, art[1], art[0])
         elif path.startswith("/panel/") and path[7:] in PANELS and panels:
-            page = _resource(f"web/{path[7:]}.html")
-            self._send(HTTPStatus.OK, "text/html; charset=utf-8", page)
+            self._send_page(f"web/{path[7:]}.html")
         elif path.startswith("/events/") and path[8:] in PANELS and panels:
             self._stream(path[8:])
         elif path in ("/terminal", "/terminal/events"):
@@ -211,8 +255,7 @@ class _Handler(BaseHTTPRequestHandler):
             if mode is None:
                 self.send_error(HTTPStatus.FORBIDDEN, "bad or missing token")
             elif path == "/terminal":
-                page = _resource("web/terminal.html")
-                self._send(HTTPStatus.OK, "text/html; charset=utf-8", page)
+                self._send_page("web/terminal.html")
             else:
                 self._terminal_stream(mode)
         elif path.startswith("/static/") and path[8:] in _STATIC:
@@ -348,6 +391,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_page(self, resource: str) -> None:
+        """Send a page, stamped with the build it's being served from."""
+        page = stamp(_resource(resource), self.owner.build)
+        self._send(HTTPStatus.OK, "text/html; charset=utf-8", page)
+
     def _index(self) -> str:
         rows = "".join(
             f'<li>{title}: <a href="/panel/{name}">{self.owner.url(name)}</a></li>'
@@ -367,6 +415,15 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
 
+    def _send_build(self) -> None:
+        """Open a feed by saying which build is serving it (#501).
+
+        A named event: a page loaded from a benchhud older than this never
+        listens for it, and its ``onmessage`` doesn't see it.
+        """
+        self.wfile.write(f"event: build\ndata: {self.owner.build}\n\n".encode())
+        self.wfile.flush()
+
     def _terminal_stream(self, mode: str) -> None:
         """Feed a terminal page until it goes away or the server stops."""
         from benchhud.terminal.events import terminal_events
@@ -376,6 +433,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._start_stream()
         stopping = lambda: self.owner.stopping  # noqa: E731
         try:
+            self._send_build()
             for event in terminal_events(terminal, mode, stopping, HEARTBEAT_SECONDS):
                 if self.owner.stopping:
                     break
@@ -392,6 +450,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._start_stream()
         version = 0
         try:
+            self._send_build()
             while not self.owner.stopping:
                 latest, payload = self.hub.wait(topic, version, HEARTBEAT_SECONDS)
                 if self.owner.stopping:

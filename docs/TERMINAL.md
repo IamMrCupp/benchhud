@@ -93,6 +93,9 @@ http://127.0.0.1:8780/terminal?token=…
 The stream view renders at the shell's own size and scales to fit the source, so
 full-screen programs (`htop`, `vim`) line up. Around 800 × 450 suits a 16:9 scene.
 
+The page reloads itself after a benchhud upgrade that changed it, the same as the
+panel pages do. See [BROWSER-SOURCES.md](BROWSER-SOURCES.md#after-an-upgrade).
+
 **A shell shows whatever scrolls past:** tokens, keys, customer names in a path.
 So the stream view is careful by design:
 
