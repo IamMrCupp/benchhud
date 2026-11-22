@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/IamMrCupp/benchhud/compare/v0.24.0...v0.25.0) (2026-11-22)
+
+
+### Features
+
+* **chips:** add the [chips] config and a Preferences tab for chip sources ([b0420e7](https://github.com/IamMrCupp/benchhud/commit/b0420e7490b69d209e35b906f4c353b48d64877e))
+
+
+### Bug Fixes
+
+* **chips:** keep the Chips tab and the config in step with what the HUD loads ([b0420e7](https://github.com/IamMrCupp/benchhud/commit/b0420e7490b69d209e35b906f4c353b48d64877e))
+
 ## [0.24.0](https://github.com/IamMrCupp/benchhud/compare/v0.23.0...v0.24.0) (2026-11-22)
 
 
