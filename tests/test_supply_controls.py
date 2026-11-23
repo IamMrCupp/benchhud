@@ -69,7 +69,7 @@ def test_a_refresh_keeps_a_commands_result(qtbot) -> None:
 
 
 def test_an_instrument_that_comes_back_says_ready_again(qtbot) -> None:
-    """A result from before the drop doesn't outlive it."""
+    """A result shown before the drop doesn't outlive it."""
     w = _controls(qtbot)
     w.set_available(**_ON)
     w.show_status("Set 3.30 V: done.")
@@ -77,6 +77,18 @@ def test_an_instrument_that_comes_back_says_ready_again(qtbot) -> None:
     assert w.status.text() == "No instrument connected."
     w.set_available(**_ON)
     assert w.status.text().startswith("Ready.")
+
+
+def test_an_error_stays_red_until_the_instrument_drops(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Output ON: not done. no answer", error=True)
+    w.set_available(**_ON)
+    assert w.status.text() == "Output ON: not done. no answer"
+    assert w.status.property("tone") == "error"
+    w.set_available(**{**_ON, "connected": False})
+    assert w.status.text() == "No instrument connected."
+    assert w.status.property("tone") is None
 
 
 def test_the_spin_boxes_stop_at_the_ceilings(qtbot) -> None:
@@ -149,7 +161,7 @@ def _commands(written: list[str]) -> list[str]:
 
 
 def test_a_window_with_an_instrument_says_ready(qtbot, window_with) -> None:
-    """The line under the supply controls follows the session, not start-up (#524)."""
+    """The line under the supply controls follows the session starting and stopping (#524)."""
     window, _ = window_with(control=True)
     supply = window.power_panel.supply
     assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
