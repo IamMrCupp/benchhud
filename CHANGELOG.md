@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.4](https://github.com/IamMrCupp/benchhud/compare/v0.32.3...v0.32.4) (2026-11-23)
+
+
+### Bug Fixes
+
+* **browser-sources:** a page refused while the panels went off asks again once they're back ([df02aeb](https://github.com/IamMrCupp/benchhud/commit/df02aebdccb4a905273a6a2a2bf483b5819023cf))
+* **browser-sources:** a page whose feed answered with an error opens it again ([a21387c](https://github.com/IamMrCupp/benchhud/commit/a21387c1c4092fe3bdd8221529ebb9a28e1452c6))
+
 ## [0.32.3](https://github.com/IamMrCupp/benchhud/compare/v0.32.2...v0.32.3) (2026-11-22)
 
 
