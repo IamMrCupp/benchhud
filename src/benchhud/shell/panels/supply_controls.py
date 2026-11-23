@@ -150,15 +150,23 @@ class SupplyControls(QGroupBox):
             widget.setEnabled(writes)
         self.off_button.setEnabled(connected)
         if not connected:
-            self.show_status("No instrument connected.")
+            self._show_idle("No instrument connected.")
         elif not control:
-            self.show_status(
+            self._show_idle(
                 "Read-only: instrument control is off ([instruments] control). "
                 "Output OFF still works."
             )
         elif not self.status.text() or self.status.property("idle"):
-            self.show_status(f"Ready. Ceilings: {max_voltage:g} V, {max_current:g} A.")
-            self.status.setProperty("idle", True)
+            self._show_idle(f"Ready. Ceilings: {max_voltage:g} V, {max_current:g} A.")
+
+    def _show_idle(self, text: str) -> None:
+        """Say what's available now. The next refresh may replace this line (#524).
+
+        A command's result goes through :meth:`show_status` and isn't idle, so a
+        refresh while the instrument stays usable leaves it on screen.
+        """
+        self.show_status(text)
+        self.status.setProperty("idle", True)
 
     def show_status(self, text: str, *, error: bool = False) -> None:
         self.status.setText(text)

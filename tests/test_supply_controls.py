@@ -42,6 +42,43 @@ def test_nothing_works_without_an_instrument(qtbot) -> None:
     assert not w.off_button.isEnabled() and not w.on_button.isEnabled()
 
 
+_ON = {"connected": True, "control": True, "max_voltage": 20.0, "max_current": 5.0}
+
+
+def test_connecting_replaces_the_no_instrument_line(qtbot) -> None:
+    """A new panel says there's no instrument; once one connects it says ready (#524)."""
+    w = _controls(qtbot)
+    assert w.status.text() == "No instrument connected."
+    w.set_available(**_ON)
+    assert w.status.text() == "Ready. Ceilings: 20 V, 5 A."
+
+
+def test_turning_control_on_replaces_the_read_only_line(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**{**_ON, "control": False})
+    w.set_available(**_ON)
+    assert w.status.text().startswith("Ready.")
+
+
+def test_a_refresh_keeps_a_commands_result(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Set 3.30 V: done.")
+    w.set_available(**_ON)
+    assert w.status.text() == "Set 3.30 V: done."
+
+
+def test_an_instrument_that_comes_back_says_ready_again(qtbot) -> None:
+    """A result from before the drop doesn't outlive it."""
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Set 3.30 V: done.")
+    w.set_available(**{**_ON, "connected": False})
+    assert w.status.text() == "No instrument connected."
+    w.set_available(**_ON)
+    assert w.status.text().startswith("Ready.")
+
+
 def test_the_spin_boxes_stop_at_the_ceilings(qtbot) -> None:
     w = _controls(qtbot)
     w.set_available(connected=True, control=True, max_voltage=3.3, max_current=0.5)
@@ -109,6 +146,15 @@ def window_with(qtbot, fake_owon_serial):
 def _commands(written: list[str]) -> list[str]:
     """The writes, minus the session's own polls and its OUTP OFF on connect."""
     return [w for w in written[1:] if not w.endswith("?")]
+
+
+def test_a_window_with_an_instrument_says_ready(qtbot, window_with) -> None:
+    """The line under the supply controls follows the session, not start-up (#524)."""
+    window, _ = window_with(control=True)
+    supply = window.power_panel.supply
+    assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
+    window.stop_telemetry()
+    assert supply.status.text() == "No instrument connected."
 
 
 def test_a_setpoint_reaches_the_supply(qtbot, window_with) -> None:
