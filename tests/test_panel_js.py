@@ -1,10 +1,12 @@
-"""The browser-source pages' own script, run for real (#501).
+"""The browser-source pages' own script, run for real (#501, #512).
 
 ``panel.js`` decides when a page left open in OBS reloads itself. Getting that
 wrong shows on stream either way: a page that never reloads keeps an old layout
 after an upgrade, and one that reloads when it shouldn't blinks or, worse, lands
-on an error page that never comes back. So the real file runs here, in Node,
-against stand-ins for the browser (``panel_harness.js``).
+on an error page that never comes back. It also keeps the feed open, and a page
+that stops trying stays blank on stream until someone refreshes it. So the real
+file runs here, in Node, against stand-ins for the browser
+(``panel_harness.js``).
 
 Node comes with every GitHub runner. Without it the tests skip on a laptop and
 fail in CI, so they can't go missing unnoticed.
@@ -243,3 +245,73 @@ def test_the_feed_still_works_as_before(page) -> None:
     assert did["feeds"] == ["/events/job"]
     assert did["renders"] == [None, {"n": 1}, None]
     assert did["offline"] is True
+
+
+# --- a feed the browser gave up on (#512) -----------------------------------
+#
+# EventSource retries a dropped or refused connection by itself. An HTTP error
+# ends it for good: the panels answer 404 while they're switched off and the
+# terminal is still served.
+
+
+def test_a_feed_that_ended_is_opened_again(page) -> None:
+    did = page(loaded="same", steps=[{"message": {"n": 1}}, {"end": True}, {"advance": 5000}])
+    assert did["feeds"] == ["/events/job", "/events/job"]
+    assert did["feedTimes"] == [0, 5000]
+    assert did["openFeeds"] == 1
+    assert did["pendingTimers"] == 0
+
+
+def test_it_blanks_while_the_feed_is_gone(page) -> None:
+    did = page(loaded="same", steps=[{"message": {"n": 1}}, {"end": True}])
+    assert did["renders"] == [None, {"n": 1}, None]
+    assert did["offline"] is True
+    assert did["openFeeds"] == 0
+
+
+def test_it_waits_before_opening_it_again(page) -> None:
+    did = page(loaded="same", steps=[{"end": True}, {"advance": 4999}])
+    assert did["feeds"] == ["/events/job"]
+    assert did["pendingTimers"] == 1
+
+
+def test_the_new_feed_draws_again(page) -> None:
+    did = page(
+        loaded="same",
+        steps=[{"end": True}, {"advance": 5000}, {"build": "same"}, {"message": {"n": 2}}],
+    )
+    assert did["renders"] == [None, None, {"n": 2}]
+    assert did["offline"] is False
+    assert did["reloads"] == []
+
+
+def test_it_keeps_trying_for_as_long_as_the_server_says_no(page) -> None:
+    """Panels can stay off for a whole stream; one feed at a time, however long."""
+    turns = [{"end": True}, {"advance": 5000}] * 30
+    did = page(loaded="same", steps=turns)
+    assert did["feedTimes"] == [5000 * n for n in range(31)]
+    assert did["ended"] == 30
+    assert did["openFeeds"] == 1
+    assert did["pendingTimers"] == 0
+
+
+def test_a_dropped_connection_is_left_to_the_browser(page) -> None:
+    """It's already retrying that one. A second feed would be a second connection."""
+    did = page(loaded="same", steps=[{"error": True}, {"advance": 60000}])
+    assert did["feeds"] == ["/events/job"]
+    assert did["openFeeds"] == 1
+    assert did["pendingTimers"] == 0
+
+
+def test_a_feed_the_page_closed_itself_is_not_opened_twice(page) -> None:
+    """The reload check closes the feed and brings it back by its own rules."""
+    did = page(loaded="old", fetch=["notok"], steps=[{"build": "new"}, {"advance": 60000}])
+    assert did["feeds"] == ["/events/job", "/events/job"]
+    assert did["openFeeds"] == 1
+    assert did["pendingTimers"] == 0
+
+
+def test_a_feed_opened_again_still_notices_a_new_build(page) -> None:
+    did = page(loaded="old", steps=[{"end": True}, {"advance": 5000}, {"build": "new"}])
+    assert len(did["reloads"]) == 1
+    assert did["reloads"][0]["openFeeds"] == 0

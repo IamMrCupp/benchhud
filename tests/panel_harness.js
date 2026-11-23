@@ -16,7 +16,9 @@ const vm = require("node:vm");
 const [script, scenarioFile] = process.argv.slice(2);
 const scenario = JSON.parse(fs.readFileSync(scenarioFile, "utf8"));
 
-const result = { reloads: [], fetches: [], renders: [], offline: false, feeds: [], closed: 0 };
+const result = {
+  reloads: [], fetches: [], renders: [], offline: false, feeds: [], feedTimes: [], closed: 0, ended: 0,
+};
 
 // --- the feed ---------------------------------------------------------------
 
@@ -24,26 +26,49 @@ const feeds = [];
 const openFeeds = () => feeds.filter((feed) => !feed.closed).length;
 
 class FakeEventSource {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 2;
+
   constructor(url) {
     this.url = url;
+    this.readyState = FakeEventSource.CONNECTING;
     this.closed = false;
     this.listeners = {};
     feeds.push(this);
     result.feeds.push(url);
+    result.feedTimes.push(now);
   }
   addEventListener(name, handler) {
     (this.listeners[name] ||= []).push(handler);
   }
+  // The page's own close. `closed` in the result counts only these.
   close() {
     if (!this.closed) result.closed += 1;
     this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
   }
   // A closed EventSource delivers nothing more, as in a browser.
   dispatch(name, data) {
     if (this.closed) return;
+    if (name === "error") {
+      // A dropped connection: the browser is already trying again.
+      this.readyState = FakeEventSource.CONNECTING;
+      this.onerror({});
+      return;
+    }
+    this.readyState = FakeEventSource.OPEN;
     if (name === "message") this.onmessage({ data });
-    else if (name === "error") this.onerror({});
     else for (const handler of this.listeners[name] || []) handler({ data });
+  }
+  // The server answered with an HTTP error: the browser gives up on this one
+  // for good, and says so with one last error.
+  end() {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
+    result.ended += 1;
+    this.onerror({});
   }
 }
 
@@ -158,6 +183,7 @@ vm.runInContext('subscribe("job", render);', context);
     if ("build" in step) feed.dispatch("build", step.build);
     else if ("message" in step) feed.dispatch("message", JSON.stringify(step.message));
     else if (step.error) feed.dispatch("error");
+    else if (step.end) feed.end();
     else if ("advance" in step) await advance(step.advance);
     if (!step.together) await settle();
   }

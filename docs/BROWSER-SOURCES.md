@@ -85,6 +85,10 @@ The pages keep trying to reconnect and pick the feed back up on their own when
 benchhud starts. In between they dim and show "—" rather than the last reading,
 so a stale number can't pass for a live one on stream.
 
+The same goes for switching **Serve panels to OBS as Browser sources** off and
+on: the pages dim while it's off and come back a few seconds after it's on
+again.
+
 ## After an upgrade
 
 OBS keeps a Browser source's page loaded while benchhud restarts; the page only
