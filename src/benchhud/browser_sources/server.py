@@ -27,7 +27,9 @@ never touches the GUI thread. Routes:
   hold the job card's whitelisted fields only.
 
 The data panels (:data:`PANELS`) and the terminal are switched separately: the
-server can run for the terminal alone, and then the panels 404.
+server can run for the terminal alone, and then the panels 404. ``EventSource``
+takes an HTTP error as final, so a panel page left open opens a new feed itself
+every few seconds until the panels are back (#512, ``panel.js``).
 
 **A page left open reloads itself after an upgrade (#501).** OBS keeps a
 Browser source's page loaded across a benchhud restart; the page only reconnects

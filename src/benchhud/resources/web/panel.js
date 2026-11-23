@@ -1,10 +1,10 @@
 // Shared by every browser-source page: subscribe to one panel's live feed, and
 // reload the page when the benchhud behind it has changed.
 //
-// EventSource reconnects by itself, so a page left in an OBS scene picks the
-// feed back up when benchhud restarts. While the feed is down the page is
-// handed `null` and shows placeholders: a frozen reading on stream would pass
-// for a live one.
+// A page left in an OBS scene picks the feed back up when benchhud restarts:
+// EventSource reconnects by itself, and openFeed opens a new one when it gives
+// up. While the feed is down the page is handed `null` and shows placeholders:
+// a frozen reading on stream would pass for a live one.
 
 "use strict";
 
@@ -30,7 +30,8 @@ function subscribe(topic, render) {
 // the page is older than the benchhud it's talking to.
 
 // How long to wait for the page before giving up on a check, and how long to
-// leave it before asking again.
+// leave it before asking again. A feed that has ended is left as long before
+// it's opened again.
 const CHECK_TIMEOUT_MS = 10000;
 const RETRY_MS = 5000;
 
@@ -63,8 +64,9 @@ function rememberReloadFor(build) {
   }
 }
 
-// A build the server wouldn't serve this page for. Left alone for the rest of
-// this page's life: asking again gets the same answer.
+// A build the server wouldn't serve this page for. Left alone while the feed
+// stays up: asking again gets the same answer. Once the feed is turned away too
+// the server's answers have changed, and the refusal is forgotten.
 let refusedBuild = "";
 
 function isStale(build) {
@@ -86,12 +88,24 @@ function pageIsServed() {
     .finally(() => clearTimeout(timer));
 }
 
-// Open a feed. `onMessage` gets each event; `onDown` is called whenever the
-// feed stops, and is where the page blanks what it shows.
+// Open a feed, and keep it open. `onMessage` gets each event; `onDown` is
+// called whenever the feed stops, and is where the page blanks what it shows.
 function openFeed(url, onMessage, onDown) {
   const source = new EventSource(url);
   source.onmessage = onMessage;
-  source.onerror = onDown;
+  source.onerror = () => {
+    // EventSource retries a dropped or refused connection by itself, but an
+    // HTTP error ends it for good (#512). The panels answer 404 while they're
+    // switched off and the terminal is still served, and a page that stopped
+    // there would stay blank after they came back. So open a new one. The
+    // timer is set before the page is told, so nothing the page does about it
+    // can leave it without a feed.
+    if (source.readyState === EventSource.CLOSED) {
+      refusedBuild = "";
+      setTimeout(() => openFeed(url, onMessage, onDown), RETRY_MS);
+    }
+    onDown();
+  };
   source.addEventListener("build", (event) => {
     const build = event.data;
     if (!isStale(build)) return;
