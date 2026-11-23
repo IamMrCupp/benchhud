@@ -17,12 +17,21 @@ const [script, scenarioFile] = process.argv.slice(2);
 const scenario = JSON.parse(fs.readFileSync(scenarioFile, "utf8"));
 
 const result = {
-  reloads: [], fetches: [], renders: [], offline: false, feeds: [], feedTimes: [], closed: 0, ended: 0,
+  reloads: [], fetches: [], renders: [], offline: false, feeds: [], feedTimes: [], closed: 0, ended: 0, thrown: 0,
 };
 
 // --- the feed ---------------------------------------------------------------
 
 const feeds = [];
+
+// A handler that throws doesn't stop a browser: it reports it and carries on.
+function report(handler) {
+  try {
+    handler();
+  } catch {
+    result.thrown += 1;
+  }
+}
 const openFeeds = () => feeds.filter((feed) => !feed.closed).length;
 
 class FakeEventSource {
@@ -54,7 +63,7 @@ class FakeEventSource {
     if (name === "error") {
       // A dropped connection: the browser is already trying again.
       this.readyState = FakeEventSource.CONNECTING;
-      this.onerror({});
+      report(() => this.onerror({}));
       return;
     }
     this.readyState = FakeEventSource.OPEN;
@@ -68,7 +77,7 @@ class FakeEventSource {
     this.closed = true;
     this.readyState = FakeEventSource.CLOSED;
     result.ended += 1;
-    this.onerror({});
+    report(() => this.onerror({}));
   }
 }
 
@@ -170,7 +179,14 @@ const context = vm.createContext({
       },
     },
   },
-  render(data) { result.renders.push(data); },
+  render(data) {
+    result.renders.push(data);
+    // `blankThrows`: a panel that breaks when told its feed has gone. The first
+    // blank is the page's own, before any feed.
+    if (scenario.blankThrows && data === null && result.renders.length > 1) {
+      throw new Error("the panel broke");
+    }
+  },
 });
 
 vm.runInContext(fs.readFileSync(script, "utf8"), context, { filename: script });

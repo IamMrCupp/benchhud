@@ -64,8 +64,9 @@ function rememberReloadFor(build) {
   }
 }
 
-// A build the server wouldn't serve this page for. Left alone for the rest of
-// this page's life: asking again gets the same answer.
+// A build the server wouldn't serve this page for. Left alone while the feed
+// stays up: asking again gets the same answer. Once the feed is turned away too
+// the server's answers have changed, and the refusal is forgotten.
 let refusedBuild = "";
 
 function isStale(build) {
@@ -93,14 +94,17 @@ function openFeed(url, onMessage, onDown) {
   const source = new EventSource(url);
   source.onmessage = onMessage;
   source.onerror = () => {
-    onDown();
     // EventSource retries a dropped or refused connection by itself, but an
     // HTTP error ends it for good (#512). The panels answer 404 while they're
     // switched off and the terminal is still served, and a page that stopped
-    // there would stay blank after they came back. So open a new one.
+    // there would stay blank after they came back. So open a new one. The
+    // timer is set before the page is told, so nothing the page does about it
+    // can leave it without a feed.
     if (source.readyState === EventSource.CLOSED) {
+      refusedBuild = "";
       setTimeout(() => openFeed(url, onMessage, onDown), RETRY_MS);
     }
+    onDown();
   };
   source.addEventListener("build", (event) => {
     const build = event.data;

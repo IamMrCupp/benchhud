@@ -315,3 +315,45 @@ def test_a_feed_opened_again_still_notices_a_new_build(page) -> None:
     did = page(loaded="old", steps=[{"end": True}, {"advance": 5000}, {"build": "new"}])
     assert len(did["reloads"]) == 1
     assert did["reloads"][0]["openFeeds"] == 0
+
+
+def test_a_dropped_connection_that_then_gets_an_error_is_opened_again(page) -> None:
+    """What a browser does when the panels go off under a live page: the feed
+    drops, and its retry is the one that's turned away."""
+    did = page(
+        loaded="same",
+        steps=[{"message": {"n": 1}}, {"error": True}, {"end": True}, {"advance": 5000}],
+    )
+    assert did["feedTimes"] == [0, 5000]
+    assert did["openFeeds"] == 1
+
+
+@pytest.mark.parametrize("stop", ["end", "error"])
+def test_a_feed_opened_again_still_blanks_when_it_stops(page, stop) -> None:
+    """The second feed is held to the first one's rule: nothing stale on stream."""
+    did = page(
+        loaded="same",
+        steps=[{"end": True}, {"advance": 5000}, {"message": {"n": 2}}, {stop: True}],
+    )
+    assert did["renders"] == [None, None, {"n": 2}, None]
+    assert did["offline"] is True
+
+
+def test_a_panel_that_breaks_on_a_blank_still_gets_its_feed_back(page) -> None:
+    did = page(loaded="same", blankThrows=True, steps=[{"end": True}, {"advance": 5000}])
+    assert did["thrown"] == 1
+    assert did["feeds"] == ["/events/job", "/events/job"]
+    assert did["openFeeds"] == 1
+
+
+def test_a_refusal_is_forgotten_once_the_feed_is_turned_away_too(page) -> None:
+    """The page was refused because the panels were going off. When they're back
+    the same build is worth asking about again."""
+    did = page(
+        loaded="old",
+        fetch=["notok", "ok"],
+        steps=[{"build": "new"}, {"end": True}, {"advance": 5000}, {"build": "new"}],
+    )
+    assert len(did["fetches"]) == 2
+    assert len(did["reloads"]) == 1
+    assert did["stored"] == {RELOADED_FOR: "new"}
