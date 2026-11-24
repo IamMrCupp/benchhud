@@ -340,6 +340,11 @@ JOB_COMMAND_TIMEOUT_S = 5.0
 #: serial timeout twice.
 INSTRUMENT_NOT_ANSWERING_AFTER = 3
 
+#: How long quitting waits for a stopped instrument session that was still
+#: finishing a command, so its shutdown ``OUTP OFF`` is written before the
+#: process exits (#532). Its thread is a daemon: the exit would cut it off.
+INSTRUMENT_RELEASE_AT_QUIT_S = 5.0
+
 
 #: Find chip's reason for "Open datasheet" being off when no folder is set.
 NO_DATASHEET_FOLDER = (
@@ -439,6 +444,9 @@ class MainWindow(QMainWindow):
         self._demo_t = 0.0
         self._demo_scope = SyntheticFrameSource(960, 540)
         self._instrument_session: InstrumentSession | None = None
+        #: The last session stopped, which may still be finishing a command;
+        #: the next one waits for it to let go of the port (#532).
+        self._stopped_instrument_session: InstrumentSession | None = None
         #: What the supply controls were last told about the polls (#527).
         self._instrument_answering = True
         self._instrument_timer: QTimer | None = None
@@ -2145,7 +2153,7 @@ class MainWindow(QMainWindow):
             return  # nothing configured or nothing plugged in — not an error
         self._instrument_session = session
         self._instrument_t = 0.0
-        session.start()
+        session.start(after=self._stopped_instrument_session)
         # The session polls on its own thread; this timer only reads the latest
         # snapshot, so a wedged port can never stall the GUI.
         interval = self._config.instruments.poll_interval
@@ -2172,10 +2180,20 @@ class MainWindow(QMainWindow):
             self._instrument_timer.stop()
             self._instrument_timer = None
         if self._instrument_session is not None:
-            # stop() runs the output-off invariant before closing the port.
+            # stop() runs the output-off invariant before closing the port —
+            # or leaves both to the session's thread if it's mid-command (#532).
             self._instrument_session.stop()
+            self._stopped_instrument_session = self._instrument_session
             self._instrument_session = None
         self._refresh_supply()
+
+    def _wait_for_instrument_release(self) -> None:
+        """At quit: give a session still finishing a command time to drop the rail (#532)."""
+        stopped = self._stopped_instrument_session
+        if stopped is not None and not stopped.wait_finished(INSTRUMENT_RELEASE_AT_QUIT_S):
+            log.warning(
+                "the instrument was still busy at quit; the output may not have been dropped"
+            )
 
     def reconfigure_instrument_session(self) -> None:
         """Rebuild the live session after a Preferences change."""
@@ -2851,6 +2869,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._stop_demo()
         self.stop_telemetry()
+        self._wait_for_instrument_release()
         self.stop_preview()
         self.stop_thermal()
         self.stop_output()
