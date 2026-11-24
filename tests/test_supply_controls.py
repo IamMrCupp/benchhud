@@ -8,7 +8,6 @@ and "never retried" are checked against the lines actually written.
 from __future__ import annotations
 
 import threading
-import time
 
 import pytest
 from PySide6.QtWidgets import QMessageBox
@@ -273,13 +272,18 @@ def test_a_window_with_an_instrument_says_ready(qtbot, window_with) -> None:
     assert supply.status.text() == "No instrument connected."
 
 
-def _slow(action=lambda driver: None, seconds: float = 0.3):
-    """A command that's still running when the test stops the session."""
+def _until_stopped(window: MainWindow, action=lambda driver: None):
+    """A command that's still running when the test stops the session.
+
+    It waits for the stop itself rather than sleeping, so a slow machine can't
+    let it finish early.
+    """
+    session = window._instrument_session
     started = threading.Event()
 
     def run(driver):
         started.set()
-        time.sleep(seconds)
+        session._stop.wait(5)
         return action(driver)
 
     return run, started
@@ -295,7 +299,7 @@ def test_a_result_from_a_stopped_session_is_not_shown(qtbot, window_with, fake_o
     window, _ = window_with(control=True)
     supply = window.power_panel.supply
     window.on_telemetry(TelemetrySnapshot(voltage=0.0, current=0.0), 1.0)
-    slow_on, started = _slow(lambda d: d.apply_output(True))
+    slow_on, started = _until_stopped(window, lambda d: d.apply_output(True))
     window.run_supply_command("Output ON", slow_on)
     assert started.wait(2)
 
@@ -316,7 +320,7 @@ def test_a_queued_command_from_a_stopped_session_is_not_shown(
     window, _ = window_with(control=True)
     supply = window.power_panel.supply
     window.on_telemetry(TelemetrySnapshot(voltage=0.0, current=0.0), 1.0)
-    slow, started = _slow()
+    slow, started = _until_stopped(window)
     window.run_supply_command("Set 1.00 V", slow)
     window.run_supply_command("Output ON", lambda d: d.apply_output(True))
     assert started.wait(2)

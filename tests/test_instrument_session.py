@@ -166,7 +166,7 @@ def test_a_command_queued_behind_a_running_one_does_not_run_after_stop(
 
     def slow(_driver) -> None:
         started.set()
-        time.sleep(0.3)
+        session._stop.wait(5)  # until the stop itself: no sleep to outrun
 
     running = session.submit(slow)
     queued = session.submit(lambda d: d.apply_output(True))
@@ -190,7 +190,7 @@ def test_a_queued_output_off_still_runs_after_stop(fake_owon_serial) -> None:
 
     def slow(_driver) -> None:
         started.set()
-        time.sleep(0.3)
+        s._stop.wait(5)
 
     s.submit(slow)
     off = s.submit(lambda d: d.apply_output(False), even_when_stopping=True)
@@ -214,6 +214,30 @@ def test_an_output_off_submitted_just_before_stop_still_runs(fake_owon_serial) -
 
     off.result(timeout=1)
     assert fake_owon_serial.state["OUTP"] == "OFF"
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_thread_that_dies_runs_nothing_that_was_queued(monkeypatch, fake_owon_serial) -> None:
+    """Not only stop(): whatever takes the loop down, a waiting Output ON stays unsent (#530)."""
+    s = InstrumentSession(
+        from_serial_port(fake_owon_serial, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    queued: list[Future] = []
+
+    def poll_that_blows_up(_driver):
+        queued.append(s.submit(lambda d: d.apply_output(True)))
+        raise RuntimeError("not a serial error")
+
+    monkeypatch.setattr("benchhud.instruments.session.read_snapshot", poll_that_blows_up)
+    s.start()
+    try:
+        assert _wait_for(lambda: not s.is_running)
+        with pytest.raises(InstrumentSessionStopped):
+            queued[0].result(timeout=1)
+        assert "OUTP ON" not in fake_owon_serial.written
+        assert fake_owon_serial.written[-1] == "OUTP OFF"
+    finally:
+        s.stop(close_driver=False)
 
 
 def test_stop_closes_the_driver_by_default(fake_owon_serial) -> None:
