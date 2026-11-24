@@ -536,6 +536,8 @@ max_current = 1.0
   regardless.
 - A command that fails is shown and **never retried**; decide yourself whether
   to send it again.
+- If the supply stops answering mid-session, the section says so and leaves
+  only **Output OFF** enabled until a reading comes back.
 - benchhud turns the output off when it connects, disconnects and quits, and
   never inherits a live rail.
 

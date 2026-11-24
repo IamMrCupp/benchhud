@@ -58,8 +58,10 @@ class InstrumentSession:
     def __init__(self, driver: OwonSpm8104, *, poll_interval: float = 0.2) -> None:
         self._driver = driver
         self._poll_interval = poll_interval
-        self._queue: queue.SimpleQueue[tuple[InstrumentAction, Future]] = queue.SimpleQueue()
+        #: (action, its future, whether it still runs once the session is stopping)
+        self._queue: queue.SimpleQueue[tuple[InstrumentAction, Future, bool]] = queue.SimpleQueue()
         self._latest: TelemetrySnapshot | None = None
+        self._failed_polls = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -71,6 +73,8 @@ class InstrumentSession:
         """Start the owner thread (idempotent)."""
         if self.is_running:
             return
+        with self._lock:
+            self._failed_polls = 0
         self._stop.clear()
         self._wake.clear()
         self._thread = threading.Thread(target=self._run, name="InstrumentSession", daemon=True)
@@ -98,8 +102,24 @@ class InstrumentSession:
         with self._lock:
             return self._latest
 
-    def submit(self, action: InstrumentAction[T]) -> Future[T]:
+    @property
+    def failed_polls(self) -> int:
+        """How many polls in a row have failed; 0 once one lands (#527).
+
+        :func:`read_snapshot` never raises, so an instrument that's gone doesn't
+        stop the thread. This is how a consumer tells "running" from "answering".
+        """
+        with self._lock:
+            return self._failed_polls
+
+    def submit(self, action: InstrumentAction[T], *, even_when_stopping: bool = False) -> Future[T]:
         """Queue a control action; it runs before the next poll.
+
+        A command still queued when the session is told to stop is failed, not
+        run (#530). ``even_when_stopping`` is the exception, for a command that
+        can only make things safer: an Output OFF somebody pressed is still sent
+        on the way out. A read-only session doesn't drop the rail itself, so
+        that press may be the only thing that does.
 
         Every failure arrives the same way — on the returned future — so callers
         have one error path whether the command was refused by the driver, by
@@ -109,7 +129,7 @@ class InstrumentSession:
         if not self.is_running:
             future.set_exception(InstrumentSessionStopped("instrument session is not running"))
             return future
-        self._queue.put((action, future))
+        self._queue.put((action, future, even_when_stopping))
         self._wake.set()
         return future
 
@@ -125,11 +145,15 @@ class InstrumentSession:
                 snapshot = read_snapshot(self._driver)
                 with self._lock:
                     self._latest = snapshot
+                    self._failed_polls = 0 if snapshot.ok else self._failed_polls + 1
                 self._wake.wait(self._poll_interval)
                 self._wake.clear()
         finally:
-            # Whatever took the loop down — stop(), or an unexpected raise — the
-            # rail must not outlive the thread that was watching it.
+            # Whatever took the loop down — stop(), or an unexpected raise —
+            # nothing new is started from here, bar a queued Output OFF.
+            self._stop.set()
+            self._drain_commands()
+            # The rail must not outlive the thread that was watching it.
             self._drop_output("on shutdown")
             # Never leave a caller blocked on a future this thread owned.
             self._fail_pending()
@@ -140,13 +164,23 @@ class InstrumentSession:
         A write that changes physical state is not idempotent: a retried
         ``OUTP ON`` after a timeout is the electrical version of double-counting
         stock. The failure goes to the caller's future and stops there.
+
+        Once the session is stopping, only what was submitted
+        ``even_when_stopping`` is started (#530): an ``OUTP ON`` waiting behind
+        a slow command would bring the rail up just as the shutdown is about to
+        drop it. The rest fails with :class:`InstrumentSessionStopped`.
         """
         while True:
             try:
-                action, future = self._queue.get_nowait()
+                action, future, even_when_stopping = self._queue.get_nowait()
             except queue.Empty:
                 return
             if not future.set_running_or_notify_cancel():
+                continue
+            if self._stop.is_set() and not even_when_stopping:
+                future.set_exception(
+                    InstrumentSessionStopped("instrument session stopped before the command ran")
+                )
                 continue
             try:
                 future.set_result(action(self._driver))
@@ -174,7 +208,7 @@ class InstrumentSession:
         """Resolve anything still queued, so no caller waits forever."""
         while True:
             try:
-                _, future = self._queue.get_nowait()
+                _, future, _ = self._queue.get_nowait()
             except queue.Empty:
                 return
             if future.set_running_or_notify_cancel():

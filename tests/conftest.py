@@ -55,6 +55,9 @@ class FakeSerialPort:
             {"VOLT": "0.000", "CURR": "0.000", "OUTP": "OFF"} if supply_state else None
         )
         self.drop: set[str] = set()
+        # With silent set, writes are recorded and nothing answers: an
+        # instrument that's stopped answering mid-session (#527).
+        self.silent = False
         self._terminator = terminator
         self._encoding = encoding
         self._rx = bytearray()
@@ -64,6 +67,8 @@ class FakeSerialPort:
     def write(self, data: bytes) -> int:
         text = data.decode(self._encoding).rstrip(self._terminator)
         self.written.append(text)
+        if self.silent:
+            return len(data)
         if self.state is not None and self._supply(text):
             return len(data)
         if text in self._responses:
