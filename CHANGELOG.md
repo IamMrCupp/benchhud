@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.34.0](https://github.com/IamMrCupp/benchhud/compare/v0.33.0...v0.34.0) (2026-11-24)
+
+
+### Features
+
+* **sources:** a now-playing title too long for the banner scrolls ([5de0521](https://github.com/IamMrCupp/benchhud/commit/5de052121721825b6de38a6dd2cf138e254f6515))
+
+
+### Bug Fixes
+
+* **instruments:** a session stopped mid-command drops the output before closing the port ([52f533b](https://github.com/IamMrCupp/benchhud/commit/52f533b74fac525a40a0aeafef5ae2feedd0ab13))
+* **meter:** quitting and restarting wait for the last session to let go of the port ([eeaff9b](https://github.com/IamMrCupp/benchhud/commit/eeaff9b714d9f8aa99b01c06ce68906042f254e8))
+
 ## [0.33.0](https://github.com/IamMrCupp/benchhud/compare/v0.32.5...v0.33.0) (2026-11-24)
 
 
