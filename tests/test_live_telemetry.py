@@ -7,12 +7,14 @@ answers — that's todo 6 of #164.
 
 from __future__ import annotations
 
+import threading
 import time
 
 from benchhud.config import Config
 from benchhud.instruments.owon_spm8104 import from_serial_port
 from benchhud.instruments.session import InstrumentSession
 from benchhud.shell.main_window import MainWindow
+from conftest import OWON_SPM8104_RESPONSES, FakeSerialPort
 
 
 def _wait_for(predicate, timeout: float = 2.0) -> bool:
@@ -121,6 +123,64 @@ def test_closing_the_window_stops_telemetry(qtbot, fake_owon_serial) -> None:
     window.close()
     assert not window.telemetry_active
     assert not session.is_running
+
+
+def _hold(session: InstrumentSession) -> threading.Event:
+    """Keep the session's thread in a command until the returned event is set."""
+    started, release = threading.Event(), threading.Event()
+
+    def hold(_driver) -> None:
+        started.set()
+        release.wait(5)
+
+    session.submit(hold)
+    assert started.wait(2)
+    return release
+
+
+def test_quitting_waits_for_a_command_to_finish_and_drop_the_rail(
+    qtbot, fake_owon_serial, monkeypatch, caplog
+) -> None:
+    """A daemon thread dies with the process: quit holds on for its OUTP OFF (#532)."""
+    monkeypatch.setattr("benchhud.instruments.session.STOP_JOIN_TIMEOUT_S", 0.05)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    session = _session_for(fake_owon_serial, control=True)
+    window.start_telemetry(lambda: session)
+    release = _hold(session)
+    threading.Timer(1.0, release.set).start()  # finishes after stop() has given up waiting
+
+    with caplog.at_level("WARNING", logger="benchhud.instruments.session"):
+        window.close()
+
+    # Proof the quit went through the hand-off, not a stop() that happened to finish.
+    assert "still busy" in caplog.text
+    assert session.wait_finished(0)
+    assert fake_owon_serial.written[-1] == "OUTP OFF"
+    assert fake_owon_serial.closed
+
+
+def test_a_new_session_waits_for_the_stopped_one(qtbot, fake_owon_serial, monkeypatch) -> None:
+    """Preferences OK restarts at once; the new port stays quiet until the old lets go (#532)."""
+    monkeypatch.setattr("benchhud.instruments.session.STOP_JOIN_TIMEOUT_S", 0.05)
+    window = MainWindow()
+    qtbot.addWidget(window)
+    old = _session_for(fake_owon_serial, control=True)
+    window.start_telemetry(lambda: old)
+    release = _hold(old)
+    window.stop_telemetry()
+
+    other_port = FakeSerialPort(OWON_SPM8104_RESPONSES, supply_state=True)
+    new = _session_for(other_port, control=True)
+    window.start_telemetry(lambda: new)
+    try:
+        assert not _wait_for(lambda: other_port.written, timeout=0.3)
+        release.set()
+        assert _wait_for(lambda: new.latest() is not None)
+        assert fake_owon_serial.closed  # the old one closed its own port on the way out
+    finally:
+        release.set()
+        window.stop_telemetry()
 
 
 # --- demo and live are mutually exclusive --------------------------------

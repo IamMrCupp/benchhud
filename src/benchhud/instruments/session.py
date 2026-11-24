@@ -23,6 +23,14 @@ board gets powered at the wrong voltage by a HUD nobody asked to energize
 anything; ``OUTP OFF`` first, then read. A read-only session (control off) stays
 genuinely read-only and writes nothing.
 
+**Only the owner thread closes a port it's still using** (#532). :meth:`stop`
+waits a couple of seconds; if a slow command is still running then, the thread
+keeps the port, finishes the command, drops the output and closes the port on
+its own way out. Closing it from underneath would turn that ``OUTP OFF`` into a
+write to a closed port. A session started with ``after=`` the one it replaces
+waits for that hand-back before it touches the wire, so one wire still has one
+owner.
+
 Qt-free by design, like everything else in ``instruments/`` — the shell drives
 it, the same way :class:`FramePump` drives capture.
 """
@@ -47,6 +55,18 @@ T = TypeVar("T")
 #: A control action, run on the owner thread with exclusive use of the port.
 InstrumentAction = Callable[[OwonSpm8104], T]
 
+#: How long :meth:`InstrumentSession.stop` waits for the owner thread before
+#: leaving it to finish, drop the output and close the port by itself (#532).
+STOP_JOIN_TIMEOUT_S = 2.0
+
+#: Longest a new session waits for the one it replaces to let go of the port.
+#: Every exchange is bounded by the serial timeout, so a few seconds is the
+#: worst a working port takes; past this the old thread is stuck in the driver
+#: and waiting longer only leaves the meter blank. Going ahead does mean two
+#: owners if the old thread ever comes back: its shutdown ``OUTP OFF`` would
+#: then land in the middle of the new session.
+PREVIOUS_SESSION_WAIT_S = 10.0
+
 
 class InstrumentSessionStopped(Exception):
     """Submitted to a session that isn't running (or was stopped while queued)."""
@@ -66,30 +86,71 @@ class InstrumentSession:
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._after: InstrumentSession | None = None
+        # Ownership of the port between stop() and the owner thread (#532),
+        # both under _lock: whether the thread has let go of it, and whether
+        # it should close it when it does.
+        self._released = True
+        self._close_on_exit = False
+        #: Set once no thread of this session is using the port.
+        self._finished = threading.Event()
+        self._finished.set()
 
     # --- lifecycle -------------------------------------------------------
 
-    def start(self) -> None:
-        """Start the owner thread (idempotent)."""
+    def start(self, *, after: InstrumentSession | None = None) -> None:
+        """Start the owner thread (idempotent).
+
+        ``after`` is the session this one replaces on the same wire. The new
+        thread writes nothing until that one has let go of its port (#532).
+        """
         if self.is_running:
             return
         with self._lock:
+            if not self._released:
+                raise RuntimeError("this session's last run is still finishing a command")
+            self._released = False
+            self._close_on_exit = False
             self._failed_polls = 0
+        self._after = after if after is not self else None
+        self._finished.clear()
         self._stop.clear()
         self._wake.clear()
         self._thread = threading.Thread(target=self._run, name="InstrumentSession", daemon=True)
         self._thread.start()
 
-    def stop(self, *, close_driver: bool = True, timeout: float = 2.0) -> None:
-        """Stop the thread (idempotent) and, by default, close the driver."""
+    def stop(self, *, close_driver: bool = True, timeout: float | None = None) -> None:
+        """Stop the thread (idempotent) and, by default, close the driver.
+
+        Waits ``timeout`` (default :data:`STOP_JOIN_TIMEOUT_S`) for the thread.
+        If a command is still running after that, the thread keeps the port: it
+        sends any queued Output OFF, drops the output and closes the port itself
+        when the command returns (#532). :meth:`wait_finished` waits for that.
+        Either way the session takes no new work once this returns.
+        """
         self._stop.set()
         self._wake.set()
         if self._thread is not None:
-            self._thread.join(timeout)
+            self._thread.join(STOP_JOIN_TIMEOUT_S if timeout is None else timeout)
             self._thread = None
+        with self._lock:
+            handed_off = not self._released
+            if handed_off:
+                # A later stop(close_driver=False) doesn't take back an earlier close.
+                self._close_on_exit = self._close_on_exit or close_driver
+        if handed_off:
+            _log.warning(
+                "the instrument session is still busy; it drops the output and closes "
+                "the port itself once it's done"
+            )
+            return
         self._fail_pending()
         if close_driver:
             self._driver.close()
+
+    def wait_finished(self, timeout: float | None = None) -> bool:
+        """Wait until no thread of this session is using the port; True if so."""
+        return self._finished.wait(timeout)
 
     @property
     def is_running(self) -> bool:
@@ -137,6 +198,9 @@ class InstrumentSession:
 
     def _run(self) -> None:
         try:
+            self._wait_for_previous()
+            if self._stop.is_set():
+                return  # stopped before the port was ours: the finally still drops it
             self._drop_output("on connect")
             while not self._stop.is_set():
                 self._drain_commands()
@@ -157,6 +221,30 @@ class InstrumentSession:
             self._drop_output("on shutdown")
             # Never leave a caller blocked on a future this thread owned.
             self._fail_pending()
+            self._let_go()
+
+    def _wait_for_previous(self) -> None:
+        """Wait for the session this one replaced to let go of the wire (#532).
+
+        Even when this one is stopped meanwhile: its shutdown still writes, and
+        whoever waits on *this* session counts on the one before being done
+        too. Past :data:`PREVIOUS_SESSION_WAIT_S` it goes ahead, with a log line.
+        """
+        previous, self._after = self._after, None  # don't keep a chain of old sessions
+        if previous is not None and not previous.wait_finished(PREVIOUS_SESSION_WAIT_S):
+            _log.warning("the last instrument session never let go of the port; going ahead")
+
+    def _let_go(self) -> None:
+        """Hand the port back; close it here if :meth:`stop` left that to us."""
+        with self._lock:
+            self._released = True
+            close = self._close_on_exit
+        if close:
+            try:
+                self._driver.close()
+            except Exception as exc:
+                _log.warning("could not close the instrument port: %s", exc)
+        self._finished.set()
 
     def _drain_commands(self) -> None:
         """Run every queued command. One attempt each — never a retry.

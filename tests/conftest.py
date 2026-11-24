@@ -64,7 +64,14 @@ class FakeSerialPort:
         self.written: list[str] = []
         self.closed = False
 
+    def _check_open(self) -> None:
+        # pyserial raises PortNotOpenError, with this message, for I/O after
+        # close(): a write that lands after the port closed is lost (#532).
+        if self.closed:
+            raise OSError("Attempting to use a port that is not open")
+
     def write(self, data: bytes) -> int:
+        self._check_open()
         text = data.decode(self._encoding).rstrip(self._terminator)
         self.written.append(text)
         if self.silent:
@@ -89,6 +96,7 @@ class FakeSerialPort:
         return False
 
     def readline(self) -> bytes:
+        self._check_open()
         term = self._terminator.encode(self._encoding)
         idx = self._rx.find(term)
         if idx == -1:
