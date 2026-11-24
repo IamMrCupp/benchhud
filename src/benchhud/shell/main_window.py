@@ -2188,7 +2188,9 @@ class MainWindow(QMainWindow):
             lambda: self.run_supply_command("Output ON", lambda d: d.apply_output(True))
         )
         supply.output_off_requested.connect(
-            lambda: self.run_supply_command("Output OFF", lambda d: d.apply_output(False))
+            lambda: self.run_supply_command(
+                "Output OFF", lambda d: d.apply_output(False), drops_output=True
+            )
         )
         supply.dmm_mode_requested.connect(
             lambda mode: self.run_supply_command(f"DMM to {mode}", lambda d: d.set_dmm_mode(mode))
@@ -2207,11 +2209,15 @@ class MainWindow(QMainWindow):
             max_current=instruments.max_current,
         )
 
-    def run_supply_command(self, what: str, action) -> None:
+    def run_supply_command(self, what: str, action, *, drops_output: bool = False) -> None:
         """Run one supply command through the session, once.
 
         Never retried: a retried OUTP ON after a timeout is the electrical
         version of double-counting stock. The result, good or bad, is shown.
+
+        ``drops_output`` marks Output OFF, the one command that's sent whatever
+        state the session is in: a stop that arrives while it's queued doesn't
+        cancel it (#530).
         """
         supply = self.power_panel.supply
         session = self._instrument_session
@@ -2219,7 +2225,7 @@ class MainWindow(QMainWindow):
             supply.show_status(f"{what}: not done, no instrument is connected.", error=True)
             return
         supply.show_status(f"{what}…")
-        future = session.submit(action)
+        future = session.submit(action, even_when_stopping=drops_output)
         future.add_done_callback(lambda f: self.control_done.emit(what, f, session))
 
     # --- power-on signatures (#236) ------------------------------------------
