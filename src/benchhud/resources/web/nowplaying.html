@@ -13,15 +13,54 @@
   <img class="art" id="art" alt="">
   <div class="text">
     <div class="label" id="label"></div>
-    <div class="title" id="title"></div>
-    <div class="artist" id="artist"></div>
+    <div class="title" id="title"><span class="line"></span></div>
+    <div class="artist" id="artist"><span class="line"></span></div>
   </div>
 </div>
 <script>
 "use strict";
 const card = document.getElementById("card");
 const art = document.getElementById("art");
+const lines = [document.getElementById("title"), document.getElementById("artist")];
+const still = window.matchMedia("(prefers-reduced-motion: reduce)");
 let shown = "";
+
+// A line too long for its box drifts to its end and back (#535), pausing at
+// each end so the whole text can be read. A line that fits stays still, and
+// reduced motion keeps the ellipsis instead.
+const SPEED = 30; // px per second while moving
+const PAUSE = 2000; // ms held at each end
+function scroll(box) {
+  const line = box.firstElementChild;
+  for (const running of line.getAnimations()) running.cancel();
+  box.classList.remove("scrolling");
+  const over = box.scrollWidth - box.clientWidth;
+  // A box with no width yet (a source laid out before it has a size) would
+  // scroll its whole text; the observer below measures it again once it has one.
+  if (over <= 1 || box.clientWidth === 0 || still.matches) return;
+  box.classList.add("scrolling");
+  const move = (over / SPEED) * 1000;
+  const hold = PAUSE / 2 / (move + PAUSE); // alternate joins two holds at each end
+  const at = (x, offset) => ({ transform: `translateX(${x}px)`, offset });
+  // The easing goes on the move alone: on the whole animation it would stretch
+  // the holds and start the move at full speed.
+  const moving = { ...at(0, hold), easing: "ease-in-out" };
+  line.animate([at(0, 0), moving, at(-over, 1 - hold), at(-over, 1)], {
+    duration: move + PAUSE,
+    delay: PAUSE / 2, // the first hold is half a pair; start with a full one
+    iterations: Infinity,
+    direction: "alternate",
+  });
+}
+function scrollAll() {
+  if (!card.classList.contains("hidden")) lines.forEach(scroll);
+}
+// A box changes width when the artwork arrives, the label changes or OBS
+// resizes the source; measure again then.
+const resized = new ResizeObserver((entries) => entries.forEach((e) => scroll(e.target)));
+lines.forEach((box) => resized.observe(box));
+still.addEventListener("change", scrollAll);
+if (document.fonts) document.fonts.ready.then(scrollAll);
 
 subscribe("nowplaying", (data) => {
   const visible = Boolean(data && data.visible);
@@ -31,8 +70,8 @@ subscribe("nowplaying", (data) => {
     return;
   }
   document.getElementById("label").textContent = data.label || "";
-  document.getElementById("title").textContent = data.title || "";
-  document.getElementById("artist").textContent = data.artist || "";
+  lines[0].firstElementChild.textContent = data.title || "";
+  lines[1].firstElementChild.textContent = data.artist || "";
   card.classList.toggle("paused", !data.playing);
   card.classList.toggle("no-art", !data.art);
   if (data.art) art.src = data.art;
@@ -43,6 +82,7 @@ subscribe("nowplaying", (data) => {
     card.classList.remove("enter");
     void card.offsetWidth; // restart the animation
     card.classList.add("enter");
+    scrollAll();
   }
 });
 </script>
