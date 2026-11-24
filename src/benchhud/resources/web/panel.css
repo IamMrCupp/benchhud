@@ -223,6 +223,16 @@ body.offline .live {
   text-overflow: ellipsis;
 }
 
+/* A line wider than its box scrolls (#535); nowplaying.html moves it. While
+   it does, it's a block that can move and the ellipsis would only get in the way. */
+.nowplaying .scrolling {
+  text-overflow: clip;
+}
+
+.nowplaying .scrolling .line {
+  display: inline-block;
+}
+
 .nowplaying.paused {
   opacity: 0.6;
 }

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
+from importlib import resources
 
 import pytest
 
@@ -187,3 +189,33 @@ def test_config_defaults_and_round_trip() -> None:
         {"now_playing": {"enabled": False, "label": "Spinning", "hide_when_paused": False}}
     )
     assert not back.now_playing.enabled and back.now_playing.label == "Spinning"
+
+
+def test_a_line_too_long_for_the_banner_scrolls_and_one_that_fits_does_not() -> None:
+    """A long title scrolls rather than staying cut off (#535).
+
+    Only a line wider than its box moves; reduced motion keeps the ellipsis.
+    """
+    web = resources.files("benchhud").joinpath("resources", "web")
+    page = web.joinpath("nowplaying.html").read_text()
+    css = web.joinpath("panel.css").read_text()
+    # Each line's text sits in an inner span, which is what moves.
+    for line in ("title", "artist"):
+        assert f'<div class="{line}" id="{line}"><span class="line"></span></div>' in page
+    # It scrolls only by the amount it overflows, and not at all under reduced motion.
+    assert "box.scrollWidth - box.clientWidth" in page
+    assert "prefers-reduced-motion: reduce" in page
+    assert re.search(r"if \(over <= 1 \|\|[^)]*still\.matches\) return;", page)
+    # Back and forth for ever, measured again on a new track and on a resize.
+    assert 'direction: "alternate"' in page and "iterations: Infinity" in page
+    assert "new ResizeObserver" in page
+    # Eased on the move only, so the pause at each end stays as long as PAUSE says.
+    assert '{ ...at(0, hold), easing: "ease-in-out" }' in page
+    assert not re.search(r"iterations: Infinity,[^}]*easing", page)
+    assert re.search(r'card\.classList\.add\("enter"\);\s*scrollAll\(\);', page)
+    # The ellipsis stays for a line that isn't scrolling.
+    rules = dict(re.findall(r"(?m)^([^{}@\n]+?)\s*\{([^}]*)\}", css))
+    for line in ("title", "artist"):
+        assert "text-overflow: ellipsis" in rules[f".nowplaying .{line}"]
+    assert "text-overflow: clip" in rules[".nowplaying .scrolling"]
+    assert "display: inline-block" in rules[".nowplaying .scrolling .line"]

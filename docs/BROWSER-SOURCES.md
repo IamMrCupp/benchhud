@@ -54,6 +54,10 @@ page tells the browser what's playing, and the browser tells the desktop.
 - **The title:** SoundCloud mixes often repeat the uploader at the front
   (`Alegria - Voices In My Head`). The banner drops that, since the artist line
   already says it.
+- **Long titles:** a title or artist too long for the banner scrolls slowly to
+  its end and back, pausing at each end, and starts over on the next track. One
+  that fits stays still. With reduced motion turned on (`prefers-reduced-motion`)
+  it's cut off with an ellipsis instead.
 - **The artist line:** for a mix it's usually the uploader's account name, so
   check that your mixes read well on stream.
 - **The artwork:** benchhud serves the image file the player reported, and
