@@ -95,6 +95,106 @@ def test_an_error_stays_red_until_the_instrument_drops(qtbot) -> None:
     assert w.status.property("tone") is None
 
 
+def test_an_instrument_that_stops_answering_leaves_only_output_off(qtbot) -> None:
+    """Connected but silent: the line says so in red, and only OFF is left (#527)."""
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Output ON: done.")
+    w.set_available(**_ON, answering=False)
+    assert w.status.text() == "The instrument isn't answering. Output OFF is still sent."
+    assert w.status.property("tone") == "error"
+    assert w.off_button.isEnabled()
+    for widget in (w.on_button, w.set_voltage_button, w.set_current_button, w.dmm_mode):
+        assert not widget.isEnabled()
+    w.set_available(**_ON)
+    assert w.status.text() == "Ready. Ceilings: 20 V, 5 A."
+    assert w.status.property("tone") is None
+    assert w.on_button.isEnabled()
+
+
+def test_not_answering_wins_over_read_only(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**{**_ON, "control": False}, answering=False)
+    assert "isn't answering" in w.status.text()
+    assert w.off_button.isEnabled()
+
+
+def test_an_output_off_that_failed_stays_on_screen_when_polls_come_back(qtbot) -> None:
+    """The rail may still be up, so that result isn't swapped for "Ready"."""
+    w = _controls(qtbot)
+    w.set_available(**_ON, answering=False)
+    w.show_status("Output OFF: not done. no answer", error=True)
+    w.set_available(**_ON)
+    assert w.status.text() == "Output OFF: not done. no answer"
+    assert w.status.property("tone") == "error"
+
+
+def test_a_failure_from_just_before_it_went_quiet_comes_back(qtbot) -> None:
+    """The command fails first, the third poll fails after: still not "Ready" (#527)."""
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Output ON: not done. no answer", error=True)
+    w.set_available(**_ON, answering=False)
+    assert "isn't answering" in w.status.text()
+    w.set_available(**_ON)
+    assert w.status.text() == "Output ON: not done. no answer"
+    assert w.status.property("tone") == "error"
+    w.set_available(**_ON)  # and it stays, like any other result
+    assert w.status.text() == "Output ON: not done. no answer"
+
+
+def test_a_newer_result_replaces_the_kept_failure(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Output ON: not done. no answer", error=True)
+    w.set_available(**_ON, answering=False)
+    w.show_status("Output OFF: done.")
+    w.set_available(**_ON)
+    assert w.status.text() == "Output OFF: done."
+
+
+def test_a_kept_failure_does_not_outlive_a_disconnect(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**_ON)
+    w.show_status("Output ON: not done. no answer", error=True)
+    w.set_available(**_ON, answering=False)
+    w.set_available(**{**_ON, "connected": False})
+    w.set_available(**_ON)
+    assert w.status.text() == "Ready. Ceilings: 20 V, 5 A."
+
+
+_READ_ONLY = {**_ON, "control": False}
+
+
+def test_read_only_keeps_a_failed_output_off_too(qtbot) -> None:
+    """Control off, rail on from the front panel, OFF fails as it goes quiet (#527)."""
+    w = _controls(qtbot)
+    w.set_available(**_READ_ONLY)
+    w.show_status("Output OFF: not done. no answer", error=True)
+    w.set_available(**_READ_ONLY, answering=False)
+    assert "isn't answering" in w.status.text()
+    w.set_available(**_READ_ONLY)
+    assert w.status.text() == "Output OFF: not done. no answer"
+    assert w.status.property("tone") == "error"
+
+
+def test_read_only_keeps_an_output_off_that_failed_while_it_was_quiet(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**_READ_ONLY, answering=False)
+    w.show_status("Output OFF: not done. no answer", error=True)
+    w.set_available(**_READ_ONLY)
+    assert w.status.text() == "Output OFF: not done. no answer"
+
+
+def test_read_only_goes_back_to_its_own_line_after_a_quiet_spell(qtbot) -> None:
+    w = _controls(qtbot)
+    w.set_available(**_READ_ONLY)
+    w.set_available(**_READ_ONLY, answering=False)
+    w.set_available(**_READ_ONLY)
+    assert w.status.text().startswith("Read-only")
+    assert w.status.property("tone") is None
+
+
 def test_the_spin_boxes_stop_at_the_ceilings(qtbot) -> None:
     w = _controls(qtbot)
     w.set_available(connected=True, control=True, max_voltage=3.3, max_current=0.5)
@@ -227,6 +327,62 @@ def test_a_queued_command_from_a_stopped_session_is_not_shown(
     assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
     assert not window._signature_recorder.recording
     assert fake_owon_serial.state["OUTP"] == "OFF"
+
+
+def test_the_window_follows_an_instrument_that_stops_answering(qtbot, fake_owon_serial) -> None:
+    """Failed polls reach the supply controls without a session stop or start (#527)."""
+    config = Config()
+    config.instruments.control = True
+    window = MainWindow(config, job_store=JobStore(":memory:"))
+    qtbot.addWidget(window)
+    driver = from_serial_port(fake_owon_serial, control_enabled=True)
+    session = InstrumentSession(driver, poll_interval=0.01)
+    window.start_telemetry(lambda: session)
+    supply = window.power_panel.supply
+    try:
+        assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
+
+        fake_owon_serial.silent = True
+        qtbot.waitUntil(lambda: "isn't answering" in supply.status.text(), timeout=5000)
+        assert supply.off_button.isEnabled() and not supply.on_button.isEnabled()
+        assert session.is_running  # the thread outlives the instrument
+
+        fake_owon_serial.silent = False
+        qtbot.waitUntil(lambda: supply.status.text().startswith("Ready."), timeout=5000)
+        assert supply.on_button.isEnabled()
+    finally:
+        window.stop_telemetry()
+
+
+def test_one_or_two_failed_polls_are_a_hiccup(qtbot, monkeypatch, window_with) -> None:
+    """It takes three in a row before the line changes (#527)."""
+    window, _ = window_with(control=True)
+    supply = window.power_panel.supply
+    failed = [0]
+    monkeypatch.setattr(InstrumentSession, "failed_polls", property(lambda self: failed[0]))
+    for count, line in ((1, "Ready."), (2, "Ready."), (3, "The instrument isn't"), (0, "Ready.")):
+        failed[0] = count
+        window._telemetry_tick()
+        assert supply.status.text().startswith(line), (count, supply.status.text())
+
+
+def test_nothing_but_output_off_is_sent_to_an_instrument_that_is_not_answering(
+    qtbot, monkeypatch, window_with
+) -> None:
+    """The buttons are off, but a Yes at a prompt that was already open isn't a button (#527)."""
+    window, written = window_with(control=True)
+    supply = window.power_panel.supply
+    monkeypatch.setattr(InstrumentSession, "failed_polls", property(lambda self: 3))
+    window._telemetry_tick()
+
+    window.run_supply_command("Output ON", lambda d: d.apply_output(True))
+    assert supply.status.text() == "Output ON: not done, the instrument isn't answering."
+    assert supply.status.property("tone") == "error"
+    assert _commands(written) == []
+
+    supply.off_button.click()
+    qtbot.waitUntil(lambda: "Output OFF: done" in supply.status.text(), timeout=5000)
+    assert _commands(written) == ["OUTP OFF"]
 
 
 def test_a_setpoint_reaches_the_supply(qtbot, window_with) -> None:

@@ -87,6 +87,22 @@ def test_submit_returns_the_action_result(session) -> None:
     assert session.submit(lambda d: d.identify()).result(timeout=2).startswith("OWON,SPM8104")
 
 
+def test_failed_polls_count_up_and_a_good_one_clears_them(fake_owon_serial) -> None:
+    """The thread outlives the instrument, so the count is how anyone can tell (#527)."""
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=0.01)
+    s.start()
+    try:
+        assert _wait_for(lambda: s.latest() is not None and s.latest().ok)
+        assert s.failed_polls == 0
+        fake_owon_serial.silent = True
+        assert _wait_for(lambda: s.failed_polls >= 3)
+        assert s.is_running and not s.latest().ok
+        fake_owon_serial.silent = False
+        assert _wait_for(lambda: s.failed_polls == 0)
+    finally:
+        s.stop(close_driver=False)
+
+
 # --- failure handling ----------------------------------------------------
 
 

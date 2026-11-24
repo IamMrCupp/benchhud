@@ -14,6 +14,8 @@ it emits requests, and the main window runs each one once through the
   limits as a convenience; the driver refuses anything over them regardless.
 * **Nothing is retried.** A failed command is shown and left for a human.
 * **With control off** (the default) it says so, and only Output OFF works.
+* **When the instrument stops answering** it says so, and only Output OFF is
+  left enabled: a setpoint or an Output ON sent blind can't be read back.
 """
 
 from __future__ import annotations
@@ -77,6 +79,8 @@ class SupplyControls(QGroupBox):
     ) -> None:
         super().__init__("Supply", parent)
         self._confirm = confirm
+        #: A failed command's line, put back once the instrument answers again.
+        self._kept_failure: str | None = None
 
         self.voltage = QDoubleSpinBox()
         self.voltage.setDecimals(2)
@@ -133,12 +137,23 @@ class SupplyControls(QGroupBox):
         self.set_available(connected=False, control=False, max_voltage=5.5, max_current=1.0)
 
     def set_available(
-        self, *, connected: bool, control: bool, max_voltage: float, max_current: float
+        self,
+        *,
+        connected: bool,
+        control: bool,
+        max_voltage: float,
+        max_current: float,
+        answering: bool = True,
     ) -> None:
-        """Enable what may be used now, and cap the spin boxes at the ceilings."""
+        """Enable what may be used now, and cap the spin boxes at the ceilings.
+
+        ``answering`` is False while a connected instrument's polls are failing
+        (#527): Output OFF stays, everything that would energize or move a rail
+        waits until a poll lands.
+        """
         self.voltage.setMaximum(max_voltage)
         self.current.setMaximum(max_current)
-        writes = connected and control
+        writes = connected and control and answering
         for widget in (
             self.voltage,
             self.set_voltage_button,
@@ -149,28 +164,44 @@ class SupplyControls(QGroupBox):
         ):
             widget.setEnabled(writes)
         self.off_button.setEnabled(connected)
+        idle = bool(self.status.property("idle"))
         if not connected:
+            self._kept_failure = None
             self._show_idle("No instrument connected.")
-        elif not control:
+        elif not answering:
+            # A command that failed as the instrument went quiet is still not
+            # done when it comes back, so its line is kept for then (#527).
+            if not idle and self.status.property("tone") == "error":
+                self._kept_failure = self.status.text()
+            self._show_idle("The instrument isn't answering. Output OFF is still sent.", error=True)
+        elif idle and self._kept_failure is not None:
+            self.show_status(self._kept_failure, error=True)
+        elif not self.status.text() or idle:
+            # A result on screen is left alone, read-only or not: an Output OFF
+            # that failed is the one line nobody should lose.
             self._show_idle(
-                "Read-only: instrument control is off ([instruments] control). "
+                f"Ready. Ceilings: {max_voltage:g} V, {max_current:g} A."
+                if control
+                else "Read-only: instrument control is off ([instruments] control). "
                 "Output OFF still works."
             )
-        elif not self.status.text() or self.status.property("idle"):
-            self._show_idle(f"Ready. Ceilings: {max_voltage:g} V, {max_current:g} A.")
 
-    def _show_idle(self, text: str) -> None:
+    def _show_idle(self, text: str, *, error: bool = False) -> None:
         """Say what's available now. The next refresh may replace this line (#524).
 
         A command's result goes through :meth:`show_status` and isn't idle, so a
         refresh while the instrument stays usable leaves it on screen.
         """
-        self.show_status(text)
-        self.status.setProperty("idle", True)
+        self._set_status(text, error=error, idle=True)
 
     def show_status(self, text: str, *, error: bool = False) -> None:
+        """Show a command's progress or result. It replaces any failure being kept."""
+        self._kept_failure = None
+        self._set_status(text, error=error, idle=False)
+
+    def _set_status(self, text: str, *, error: bool, idle: bool) -> None:
         self.status.setText(text)
-        self.status.setProperty("idle", False)
+        self.status.setProperty("idle", idle)
         set_tone(self.status, "error" if error else None)
 
     def _ask_output_on(self) -> None:

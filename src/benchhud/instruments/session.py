@@ -61,6 +61,7 @@ class InstrumentSession:
         #: (action, its future, whether it still runs once the session is stopping)
         self._queue: queue.SimpleQueue[tuple[InstrumentAction, Future, bool]] = queue.SimpleQueue()
         self._latest: TelemetrySnapshot | None = None
+        self._failed_polls = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -72,6 +73,8 @@ class InstrumentSession:
         """Start the owner thread (idempotent)."""
         if self.is_running:
             return
+        with self._lock:
+            self._failed_polls = 0
         self._stop.clear()
         self._wake.clear()
         self._thread = threading.Thread(target=self._run, name="InstrumentSession", daemon=True)
@@ -98,6 +101,16 @@ class InstrumentSession:
         """The most recent poll, or ``None`` before the first one lands."""
         with self._lock:
             return self._latest
+
+    @property
+    def failed_polls(self) -> int:
+        """How many polls in a row have failed; 0 once one lands (#527).
+
+        :func:`read_snapshot` never raises, so an instrument that's gone doesn't
+        stop the thread. This is how a consumer tells "running" from "answering".
+        """
+        with self._lock:
+            return self._failed_polls
 
     def submit(self, action: InstrumentAction[T], *, even_when_stopping: bool = False) -> Future[T]:
         """Queue a control action; it runs before the next poll.
@@ -132,6 +145,7 @@ class InstrumentSession:
                 snapshot = read_snapshot(self._driver)
                 with self._lock:
                     self._latest = snapshot
+                    self._failed_polls = 0 if snapshot.ok else self._failed_polls + 1
                 self._wake.wait(self._poll_interval)
                 self._wake.clear()
         finally:

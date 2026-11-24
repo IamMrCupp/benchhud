@@ -333,6 +333,13 @@ def largest_screen(screens):
 #: How long a job command waits for the GUI thread before giving up (#433).
 JOB_COMMAND_TIMEOUT_S = 5.0
 
+#: Failed instrument polls in a row before the supply controls say it isn't
+#: answering (#527). One is a hiccup. Three is well under a second at the
+#: default poll when the port is gone and every read fails at once, and about
+#: six seconds when it's there but silent: each failed poll waits out the 1 s
+#: serial timeout twice.
+INSTRUMENT_NOT_ANSWERING_AFTER = 3
+
 
 #: Find chip's reason for "Open datasheet" being off when no folder is set.
 NO_DATASHEET_FOLDER = (
@@ -432,6 +439,8 @@ class MainWindow(QMainWindow):
         self._demo_t = 0.0
         self._demo_scope = SyntheticFrameSource(960, 540)
         self._instrument_session: InstrumentSession | None = None
+        #: What the supply controls were last told about the polls (#527).
+        self._instrument_answering = True
         self._instrument_timer: QTimer | None = None
         self._instrument_t = 0.0
         self._fault_monitor = FaultMonitor(self._config.faults.current_threshold_a)
@@ -2149,6 +2158,8 @@ class MainWindow(QMainWindow):
         session = self._instrument_session
         if session is None:
             return
+        if self._is_answering(session) != self._instrument_answering:
+            self._refresh_supply()  # the polls started failing, or one landed (#527)
         snapshot = session.latest()
         if snapshot is None:
             return  # first poll hasn't landed yet
@@ -2198,12 +2209,24 @@ class MainWindow(QMainWindow):
         self.control_done.connect(self._supply_command_done)
         self._refresh_supply()
 
+    @staticmethod
+    def _is_answering(session: InstrumentSession | None) -> bool:
+        """False once a session's polls have failed a few times running (#527).
+
+        A running thread isn't a connected instrument: ``read_snapshot`` turns
+        every serial error into an error snapshot, so the thread carries on with
+        the USB lead out.
+        """
+        return session is None or session.failed_polls < INSTRUMENT_NOT_ANSWERING_AFTER
+
     def _refresh_supply(self) -> None:
         """Enable the controls that may be used right now."""
         session = self._instrument_session
         instruments = self._config.instruments
+        self._instrument_answering = self._is_answering(session)
         self.power_panel.supply.set_available(
             connected=session is not None and session.is_running,
+            answering=self._instrument_answering,
             control=instruments.control,
             max_voltage=instruments.max_voltage,
             max_current=instruments.max_current,
@@ -2217,12 +2240,17 @@ class MainWindow(QMainWindow):
 
         ``drops_output`` marks Output OFF, the one command that's sent whatever
         state the session is in: a stop that arrives while it's queued doesn't
-        cancel it (#530).
+        cancel it (#530), and it goes out to an instrument that isn't answering
+        too (#527). Nothing else does. The buttons are off by then, but an
+        Output ON prompt that was already open can still be answered Yes.
         """
         supply = self.power_panel.supply
         session = self._instrument_session
         if session is None or not session.is_running:
             supply.show_status(f"{what}: not done, no instrument is connected.", error=True)
+            return
+        if not drops_output and not self._is_answering(session):
+            supply.show_status(f"{what}: not done, the instrument isn't answering.", error=True)
             return
         supply.show_status(f"{what}…")
         future = session.submit(action, even_when_stopping=drops_output)
