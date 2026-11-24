@@ -179,7 +179,8 @@ def _power_on(window, shape, start: float = 100.0) -> None:
     from benchhud.instruments.telemetry import TelemetrySnapshot
 
     window.on_telemetry(TelemetrySnapshot(voltage=0.0, current=0.0), start)
-    window._supply_command_done("Output ON", _Done())  # the supply said yes
+    # The supply said yes. No session here, so "the current one" is None.
+    window._supply_command_done("Output ON", _Done(), None)
     for i in range(1, 12):
         t = i * POLL
         window.on_telemetry(TelemetrySnapshot(voltage=12.0, current=shape(t)), start + t)

@@ -349,9 +349,10 @@ LINK_OUT_LOCKED_BY_ENGAGEMENT = (
 class MainWindow(QMainWindow):
     """Top-level HUD window."""
 
-    #: A supply command finished on the instrument's thread: (what, its Future).
-    #: A signal so the result is handled back on the GUI thread.
-    control_done = Signal(str, object)
+    #: A supply command finished on the instrument's thread: (what, its Future,
+    #: the session it ran on). A signal so the result is handled back on the GUI
+    #: thread; the session says whether the result is still worth showing (#526).
+    control_done = Signal(str, object, object)
     #: A Recovery Mode check's answer, sent from its thread to this one (#370).
     _recovery_probed = Signal(object, str, float)
     #: A job command from the local server's thread, to run on this one (#433):
@@ -2219,7 +2220,7 @@ class MainWindow(QMainWindow):
             return
         supply.show_status(f"{what}…")
         future = session.submit(action)
-        future.add_done_callback(lambda f: self.control_done.emit(what, f))
+        future.add_done_callback(lambda f: self.control_done.emit(what, f, session))
 
     # --- power-on signatures (#236) ------------------------------------------
 
@@ -2327,7 +2328,15 @@ class MainWindow(QMainWindow):
         self._job_store.set_signature_reference(stored.id, True)
         bar.show_status(f"That curve is now the known-good reference for board {job.board_id}.")
 
-    def _supply_command_done(self, what: str, future) -> None:
+    def _supply_command_done(self, what: str, future, session) -> None:
+        """Show one command's result, unless its session has since stopped (#526).
+
+        Stopping a session drops the output, so an "Output ON: done." that
+        arrives afterwards is no longer true, and there's no rail to record a
+        power-on for. The controls already say there's no instrument.
+        """
+        if session is not self._instrument_session:
+            return
         error = future.exception()
         supply = self.power_panel.supply
         if error is None:

@@ -7,12 +7,16 @@ and "never retried" are checked against the lines actually written.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
 from benchhud.config import Config
 from benchhud.instruments.owon_spm8104 import from_serial_port
 from benchhud.instruments.session import InstrumentSession
+from benchhud.instruments.telemetry import TelemetrySnapshot
 from benchhud.jobs.store import JobStore
 from benchhud.shell.main_window import MainWindow
 from benchhud.shell.panels import supply_controls
@@ -167,6 +171,62 @@ def test_a_window_with_an_instrument_says_ready(qtbot, window_with) -> None:
     assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
     window.stop_telemetry()
     assert supply.status.text() == "No instrument connected."
+
+
+def _slow(action=lambda driver: None, seconds: float = 0.3):
+    """A command that's still running when the test stops the session."""
+    started = threading.Event()
+
+    def run(driver):
+        started.set()
+        time.sleep(seconds)
+        return action(driver)
+
+    return run, started
+
+
+def _restart(window: MainWindow, port) -> None:
+    driver = from_serial_port(port, control_enabled=True)
+    window.start_telemetry(lambda: InstrumentSession(driver, poll_interval=5.0))
+
+
+def test_a_result_from_a_stopped_session_is_not_shown(qtbot, window_with, fake_owon_serial) -> None:
+    """Stopping drops the output, so a late "Output ON: done." isn't true (#526)."""
+    window, _ = window_with(control=True)
+    supply = window.power_panel.supply
+    window.on_telemetry(TelemetrySnapshot(voltage=0.0, current=0.0), 1.0)
+    slow_on, started = _slow(lambda d: d.apply_output(True))
+    window.run_supply_command("Output ON", slow_on)
+    assert started.wait(2)
+
+    window.stop_telemetry()
+    qtbot.wait(100)  # the result is delivered once the event loop runs
+    assert supply.status.text() == "No instrument connected."
+    assert not window._signature_recorder.recording  # no rail, nothing to record
+
+    _restart(window, fake_owon_serial)
+    assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
+    assert fake_owon_serial.state["OUTP"] == "OFF"
+
+
+def test_a_queued_command_from_a_stopped_session_is_not_shown(
+    qtbot, window_with, fake_owon_serial
+) -> None:
+    """The command waiting behind a slow one gets the same treatment (#526)."""
+    window, _ = window_with(control=True)
+    supply = window.power_panel.supply
+    window.on_telemetry(TelemetrySnapshot(voltage=0.0, current=0.0), 1.0)
+    slow, started = _slow()
+    window.run_supply_command("Set 1.00 V", slow)
+    window.run_supply_command("Output ON", lambda d: d.apply_output(True))
+    assert started.wait(2)
+
+    window.stop_telemetry()
+    _restart(window, fake_owon_serial)
+    qtbot.wait(100)
+    assert supply.status.text() == "Ready. Ceilings: 5.5 V, 1 A."
+    assert not window._signature_recorder.recording
+    assert fake_owon_serial.state["OUTP"] == "OFF"
 
 
 def test_a_setpoint_reaches_the_supply(qtbot, window_with) -> None:
