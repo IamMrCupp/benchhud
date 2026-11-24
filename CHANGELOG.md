@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.5](https://github.com/IamMrCupp/benchhud/compare/v0.32.4...v0.32.5) (2026-11-24)
+
+
+### Bug Fixes
+
+* **meter:** the supply controls say ready once an instrument connects ([17f0949](https://github.com/IamMrCupp/benchhud/commit/17f0949257d588be7fbe22e916aa62973e9a68a9))
+
 ## [0.32.4](https://github.com/IamMrCupp/benchhud/compare/v0.32.3...v0.32.4) (2026-11-23)
 
 
