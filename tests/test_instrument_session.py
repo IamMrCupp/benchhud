@@ -15,6 +15,7 @@ import pytest
 
 from benchhud.instruments.owon_spm8104 import InstrumentLimitError, from_serial_port
 from benchhud.instruments.session import InstrumentSession, InstrumentSessionStopped
+from conftest import OWON_SPM8104_RESPONSES, FakeSerialPort
 
 # A poll interval long enough that the loop only polls again when woken — which
 # is what makes the ordering assertions deterministic rather than timing-lucky.
@@ -238,6 +239,187 @@ def test_a_thread_that_dies_runs_nothing_that_was_queued(monkeypatch, fake_owon_
         assert fake_owon_serial.written[-1] == "OUTP OFF"
     finally:
         s.stop(close_driver=False)
+
+
+# --- a command that outlives stop()'s wait (#532) -------------------------
+
+
+def _held(s: InstrumentSession):
+    """Submit a command that holds the port until the returned event is set."""
+    started, release = threading.Event(), threading.Event()
+
+    def hold(_driver) -> None:
+        started.set()
+        release.wait(5)
+
+    future = s.submit(hold)
+    assert started.wait(2)
+    return future, release
+
+
+def test_a_command_that_outlives_the_join_still_gets_its_output_off(fake_owon_serial) -> None:
+    """The port isn't closed under the thread, so the shutdown drop is written."""
+    s = InstrumentSession(
+        from_serial_port(fake_owon_serial, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    s.start()
+    running, release = _held(s)
+
+    s.stop(timeout=0.05)
+
+    assert not s.is_running  # takes no new work...
+    assert not fake_owon_serial.closed  # ...but the port is still the thread's
+    release.set()
+    assert s.wait_finished(2)
+    running.result(timeout=1)
+    assert fake_owon_serial.written[-1] == "OUTP OFF"
+    assert fake_owon_serial.closed
+
+
+def test_an_output_off_queued_behind_it_is_still_written(fake_owon_serial) -> None:
+    """Read-only, so that press is the only thing that drops the rail."""
+    fake_owon_serial.state["OUTP"] = "ON"
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+    s.start()
+    _, release = _held(s)
+    off = s.submit(lambda d: d.apply_output(False), even_when_stopping=True)
+
+    s.stop(timeout=0.05)
+    release.set()
+
+    off.result(timeout=2)
+    assert fake_owon_serial.state["OUTP"] == "OFF"
+    assert s.wait_finished(2)
+    assert fake_owon_serial.closed
+
+
+def test_a_command_queued_behind_it_still_fails(fake_owon_serial) -> None:
+    s = InstrumentSession(
+        from_serial_port(fake_owon_serial, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    s.start()
+    _, release = _held(s)
+    on = s.submit(lambda d: d.apply_output(True))
+
+    s.stop(timeout=0.05)
+    release.set()
+
+    with pytest.raises(InstrumentSessionStopped):
+        on.result(timeout=2)
+    assert "OUTP ON" not in fake_owon_serial.written
+
+
+def test_close_driver_false_still_holds_when_the_thread_finishes_late(fake_owon_serial) -> None:
+    s = InstrumentSession(
+        from_serial_port(fake_owon_serial, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    s.start()
+    _, release = _held(s)
+
+    s.stop(close_driver=False, timeout=0.05)
+    release.set()
+
+    assert s.wait_finished(2)
+    assert fake_owon_serial.written[-1] == "OUTP OFF"
+    assert not fake_owon_serial.closed
+
+
+def test_a_session_still_finishing_cannot_be_restarted(fake_owon_serial) -> None:
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+    s.start()
+    _, release = _held(s)
+    s.stop(close_driver=False, timeout=0.05)
+    try:
+        with pytest.raises(RuntimeError):
+            s.start()
+    finally:
+        release.set()
+        assert s.wait_finished(2)
+    s.start()  # once it has let go, it can run again
+    s.stop(close_driver=False)
+
+
+class _Tap(FakeSerialPort):
+    """A second handle on the same wire: both log to one shared list."""
+
+    def __init__(self, name: str, wire: list[tuple[str, str]]) -> None:
+        super().__init__(OWON_SPM8104_RESPONSES, supply_state=True)
+        self._name = name
+        self._wire = wire
+
+    def write(self, data: bytes) -> int:
+        n = super().write(data)
+        self._wire.append((self._name, self.written[-1]))
+        return n
+
+
+def test_the_next_session_waits_for_the_last_to_let_go_of_the_wire() -> None:
+    """Preferences OK opens the port again at once: one wire, one owner (#532)."""
+    wire: list[tuple[str, str]] = []
+    old_port, new_port = _Tap("old", wire), _Tap("new", wire)
+    old = InstrumentSession(
+        from_serial_port(old_port, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    old.start()
+    _, release = _held(old)
+    old.stop(timeout=0.05)
+
+    new = InstrumentSession(
+        from_serial_port(new_port, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    new.start(after=old)
+    try:
+        assert not _wait_for(lambda: new_port.written, timeout=0.3)  # still old's turn
+        release.set()
+        assert _wait_for(lambda: new.latest() is not None)
+        owners = [name for name, _ in wire]
+        assert owners == sorted(owners, key=lambda name: name == "new")  # all old, then all new
+        assert ("old", "OUTP OFF") in wire
+        assert old_port.closed
+    finally:
+        release.set()
+        new.stop(close_driver=False)
+
+
+def test_a_session_stopped_while_waiting_still_waits_its_turn() -> None:
+    """OK twice in a row, or OK then quit: the chain must still wait for the first."""
+    wire: list[tuple[str, str]] = []
+    ports = {name: _Tap(name, wire) for name in "ABC"}
+
+    def session(name: str) -> InstrumentSession:
+        driver = from_serial_port(ports[name], control_enabled=True)
+        return InstrumentSession(driver, poll_interval=SLOW_POLL)
+
+    a, b, c = session("A"), session("B"), session("C")
+    a.start()
+    _, release = _held(a)
+    a.stop(timeout=0.05)
+    b.start(after=a)
+    b.stop(timeout=0.05)  # B never got the wire
+    c.start(after=b)
+    try:
+        assert not b.wait_finished(0)  # B's "finished" now means A's too
+        assert not _wait_for(lambda: any(n != "A" for n, _ in wire), timeout=0.3)  # not over A
+        release.set()
+        assert _wait_for(lambda: c.latest() is not None)
+        owners = [name for name, _ in wire]
+        assert owners == sorted(owners)  # A, then B's shutdown drop, then C
+        assert ("B", "OUTP OFF") in wire
+        assert ports["A"].closed and ports["B"].closed
+    finally:
+        release.set()
+        c.stop(close_driver=False)
+
+
+def test_a_second_stop_does_not_take_back_the_close(fake_owon_serial) -> None:
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+    s.start()
+    _, release = _held(s)
+    s.stop(timeout=0.05)
+    s.stop(close_driver=False, timeout=0.05)
+    release.set()
+    assert s.wait_finished(2)
+    assert fake_owon_serial.closed
 
 
 def test_stop_closes_the_driver_by_default(fake_owon_serial) -> None:
