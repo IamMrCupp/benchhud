@@ -216,12 +216,20 @@ class InstrumentSession:
             # Whatever took the loop down — stop(), or an unexpected raise —
             # nothing new is started from here, bar a queued Output OFF.
             self._stop.set()
-            self._drain_commands()
-            # The rail must not outlive the thread that was watching it.
-            self._drop_output("on shutdown")
-            # Never leave a caller blocked on a future this thread owned.
-            self._fail_pending()
-            self._let_go()
+            # Each step runs even if the one before it raised something that
+            # isn't an Exception, which none of them catch (#540).
+            try:
+                try:
+                    self._drain_commands()
+                finally:
+                    # The rail must not outlive the thread that was watching it.
+                    self._drop_output("on shutdown")
+            finally:
+                try:
+                    # Never leave a caller blocked on a future this thread owned.
+                    self._fail_pending()
+                finally:
+                    self._let_go()
 
     def _wait_for_previous(self) -> None:
         """Wait for the session this one replaced to let go of the wire (#532).
@@ -239,12 +247,15 @@ class InstrumentSession:
         with self._lock:
             self._released = True
             close = self._close_on_exit
-        if close:
-            try:
-                self._driver.close()
-            except Exception as exc:
-                _log.warning("could not close the instrument port: %s", exc)
-        self._finished.set()
+        try:
+            if close:
+                try:
+                    self._driver.close()
+                except Exception as exc:
+                    _log.warning("could not close the instrument port: %s", exc)
+        finally:
+            # Whoever waits on this session waits for this, close or no close.
+            self._finished.set()
 
     def _drain_commands(self) -> None:
         """Run every queued command. One attempt each — never a retry.
@@ -276,6 +287,10 @@ class InstrumentSession:
                 # A refused command must not take the session down with it.
                 _log.warning("instrument command failed: %s", exc)
                 future.set_exception(exc)
+            except BaseException as exc:
+                # This one does take the thread down, but its caller still hears (#540).
+                future.set_exception(exc)
+                raise
 
     def _drop_output(self, when: str) -> None:
         """Best-effort ``OUTP OFF``. Never raises — this runs on failure paths.

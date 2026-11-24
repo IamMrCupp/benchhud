@@ -324,6 +324,98 @@ def test_close_driver_false_still_holds_when_the_thread_finishes_late(fake_owon_
     assert not fake_owon_serial.closed
 
 
+class _Abort(BaseException):
+    """Not an Exception, so nothing on the session thread catches it (#540)."""
+
+
+class _AbortingPort(FakeSerialPort):
+    """Raises :class:`_Abort` on an ``OUTP OFF`` write once ``armed`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__(OWON_SPM8104_RESPONSES, supply_state=True)
+        self.armed = False
+
+    def write(self, data: bytes) -> int:
+        if self.armed and data.decode().strip() == "OUTP OFF":
+            raise _Abort("cut short")
+        return super().write(data)
+
+
+class _AbortingClose(FakeSerialPort):
+    def close(self) -> None:
+        raise _Abort("close cut short")
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_shutdown_drop_cut_short_still_lets_go_of_the_port() -> None:
+    """The close and the "finished" still happen, or every waiter sits out its timeout."""
+    port = _AbortingPort()
+    s = InstrumentSession(from_serial_port(port, control_enabled=True), poll_interval=SLOW_POLL)
+    s.start()
+    _, release = _held(s)
+    thread = s._thread
+    s.stop(timeout=0.05)  # the close is the thread's now
+
+    port.armed = True
+    release.set()
+
+    assert s.wait_finished(2)
+    assert port.closed
+    thread.join(2)  # so its _Abort is reported here, not in the next test
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_close_cut_short_still_counts_as_finished() -> None:
+    port = _AbortingClose(OWON_SPM8104_RESPONSES, supply_state=True)
+    s = InstrumentSession(from_serial_port(port), poll_interval=SLOW_POLL)
+    s.start()
+    _, release = _held(s)
+    thread = s._thread
+    s.stop(timeout=0.05)
+    release.set()
+
+    assert s.wait_finished(2)
+    thread.join(2)
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_command_that_cuts_the_shutdown_short_still_drops_the_rail(fake_owon_serial) -> None:
+    """The drop, the queue behind it and the close all still happen."""
+    s = InstrumentSession(
+        from_serial_port(fake_owon_serial, control_enabled=True), poll_interval=SLOW_POLL
+    )
+    s.start()
+    started, release = threading.Event(), threading.Event()
+
+    def hold_then_abort(_driver) -> None:
+        started.set()
+        release.wait(5)
+        raise _Abort("takes the loop down")
+
+    def abort(_driver) -> None:
+        raise _Abort("cuts the shutdown short")
+
+    first = s.submit(hold_then_abort)
+    assert started.wait(2)
+    drops = fake_owon_serial.written.count("OUTP OFF")  # the one on connect
+    # Left for the shutdown's drain, since the loop's dies on the first.
+    second = s.submit(abort, even_when_stopping=True)
+    behind = s.submit(lambda d: d.apply_output(False), even_when_stopping=True)
+    thread = s._thread
+    s.stop(timeout=0.05)
+    release.set()
+
+    assert s.wait_finished(2)
+    for raised in (first, second):
+        with pytest.raises(_Abort):
+            raised.result(timeout=1)  # their callers hear, rather than waiting forever
+    with pytest.raises(InstrumentSessionStopped):
+        behind.result(timeout=1)
+    assert fake_owon_serial.written.count("OUTP OFF") == drops + 1  # the shutdown drop
+    assert fake_owon_serial.closed
+    thread.join(2)
+
+
 def test_a_session_still_finishing_cannot_be_restarted(fake_owon_serial) -> None:
     s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
     s.start()
