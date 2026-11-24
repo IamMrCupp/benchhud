@@ -11,7 +11,9 @@ import sys
 from benchhud import __version__
 
 #: First arguments that are a command, answered on the terminal with no window.
-COMMANDS = frozenset({"-V", "--version", "udev-rules", "config", "job", "virtual-camera"})
+COMMANDS = frozenset(
+    {"-V", "--version", "udev-rules", "kwin-rule", "config", "job", "virtual-camera"}
+)
 
 
 def use_terminal_streams() -> None:
@@ -52,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
         from benchhud.devices.camnames import udev_rules_main
 
         return udev_rules_main()
+    if argv and argv[0] == "kwin-rule":
+        # Make KDE open the window on the big display (#529). Qt-free as well.
+        from benchhud.cli_kwin_rule import main as kwin_rule_main
+
+        return kwin_rule_main(argv[1:])
     if argv and argv[0] == "config":
         # Scripted config changes (bench-setup). Display-free, like --version.
         from benchhud.cli_config import main as config_main
