@@ -130,6 +130,33 @@ When a camera won't open because something else has it, the status bar names
 the program, for example *couldn't open Thermal Camera (UVC) — held by obs
 (pid 1234)*.
 
+### Open the HUD on the big display (KDE)
+
+On Wayland a window can't place itself, so KDE opens the HUD on whichever
+display has focus. Start it while OBS on the small display is focused and it
+lands there. A KWin "force to screen" rule doesn't change that. A starting
+position does, and benchhud writes it for you:
+
+```bash
+benchhud kwin-rule
+```
+
+It picks the biggest display, writes a starting position for the `benchhud`
+window into KWin's window rules (`~/.config/kwinrulesrc`) and asks KWin to
+reload them. A rule you already have for the HUD is reused, and only its
+position changes. A rule that's switched off, or narrowed to one window title
+or role, is left alone and a new one is added. The position only applies when
+the window opens.
+
+`benchhud kwin-rule --dry-run` says what it would write. `--output HDMI-A-2`
+picks a display by the name `kscreen-doctor -o` gives it. The position is where
+that display sits in the desktop today, so run it again after rearranging the
+displays. It needs `kscreen-doctor`, `kreadconfig6` and `kwriteconfig6`, which
+a Plasma 6 desktop has.
+
+KWin changed the layout of its rules file in Plasma 6.8. The command handles
+both and writes nothing when it can't tell which one the file is.
+
 ### Keep the thermal camera awake
 
 Linux suspends idle USB devices after two seconds, and some thermal cameras
