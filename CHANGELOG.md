@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.33.0](https://github.com/IamMrCupp/benchhud/compare/v0.32.5...v0.33.0) (2026-11-24)
+
+
+### Features
+
+* **shell:** add benchhud kwin-rule to open the window on the big display ([2989a6f](https://github.com/IamMrCupp/benchhud/commit/2989a6f44ab53b525a4d32c26ea4f9102bdcf230))
+
+
+### Bug Fixes
+
+* **instruments:** a stopping session runs nothing that was still queued ([f773f83](https://github.com/IamMrCupp/benchhud/commit/f773f839aa88dbb5b466e4ab9f6898b4b0f14e86))
+* **meter:** a supply result from a stopped session isn't shown ([0d55526](https://github.com/IamMrCupp/benchhud/commit/0d555268d2781f15c57f6ae37b8603cce7149a03))
+* **meter:** the supply controls say when the instrument stops answering ([e313288](https://github.com/IamMrCupp/benchhud/commit/e313288c86189969816688a3959eee88890ae7b0))
+
 ## [0.32.5](https://github.com/IamMrCupp/benchhud/compare/v0.32.4...v0.32.5) (2026-11-24)
 
 
