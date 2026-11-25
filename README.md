@@ -103,11 +103,33 @@ bench read as one family, and a theme file written for any of them works here
 too. The meter, the power chart and the stream overlays keep their own colours
 whatever you pick. [More →](docs/APPEARANCE.md)
 
-![The benchhud window: thermal controls on the left, the fused scope view in the middle, the raw thermal feed and the meter on the right](docs/images/hud.png)
+![The benchhud window in demo mode: thermal controls on the left, a drawn board with one warm chip in the fused view in the middle, the raw thermal feed and the meter on the right](docs/images/hud.png)
 
-*The HUD on the bench. Controls on the left, the fused view in the middle, the
-raw thermal feed and the meter on the right, the rest of the panels tabbed along
-the bottom.*
+*The HUD in demo mode — controls on the left, the fused view in the middle, the
+raw thermal feed and the meter on the right, the rest of the panels in tabs. The
+board is drawn and the heat's made up:
+`scripts/readme_pictures.py` renders this and the next three pictures offscreen,
+no bench needed.*
+
+![The same drawn board four times: a heat blend over the hot chip, isotherm outlines round it with the peak marked, the chip tinted red where it's over 60°C, and a ring marker labelled with its temperature](docs/images/thermal-modes.jpg)
+
+*The four overlay modes on the same warm chip. Blend paints the heat on.
+Isotherm outline draws its edges and marks the peak. Threshold tint colours only
+what's over the threshold — 60°C here. Marker just rings the hottest spot and
+labels it.*
+
+![The Meter panel: volts, amps, watts and peak current in coloured tiles over the supply controls, and a 60-second V/A/W graph below](docs/images/meter.png)
+
+*The meter on demo mode's load — a 12 V rail with a draw that swings and spikes
+to 1.2 A. On a steady rail amps and watts move together, and at this load their
+two axes line up, so the watts line sits right on top of the amps line. No
+supply is connected, so its controls stay greyed out.*
+
+![The Jobs panel with a made-up job and its notes, the last note a capture's readings, and below it the scope and thermal frames that capture saved](docs/images/jobs.png)
+
+*A job with a capture on its timeline. **Capture bench** writes the readings as
+a note and files the scope and thermal frames with the job (below). The job is
+made up, down to the customer.*
 
 ![OBS's program scene: the overhead bench camera, with a second camera inset and a shop logo top-left, the job card across the top, and the meter and power graph in the top-right corner](docs/images/stream.jpg)
 
