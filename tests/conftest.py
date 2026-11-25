@@ -118,6 +118,22 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("BENCHHUD_CONFIG", str(tmp_path / "config.toml"))
 
 
+@pytest.fixture(autouse=True)
+def offline_update_check(monkeypatch):
+    """No test asks apt or GitHub about updates (#560).
+
+    A test that starts the real app leaves a window behind whose update timer
+    can fire in a later test; with these in place it gets a quiet failure.
+    """
+    from benchhud import updates
+
+    def no_network(url: str | None = None) -> str:
+        raise updates.UpdateCheckError("tests don't go online")
+
+    monkeypatch.setattr(updates, "_open_latest", no_network)
+    monkeypatch.setattr(updates, "apt_policy", lambda: None)
+
+
 #: Longest a test waits for a ``benchhud`` it started in another process. A
 #: command answers in a second or two; past this it has gone somewhere else.
 SUBPROCESS_TIMEOUT_S = 60.0

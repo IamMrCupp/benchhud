@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import ssl
+import subprocess
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 import pytest
 
 from benchhud import updates
@@ -48,8 +54,8 @@ def _no_github() -> str:
     [
         ("0.34.3", (0, 34, 3)),
         ("v0.34.3", (0, 34, 3)),
-        ("0.13.0-1~ubuntu-resolute", (0, 13, 0)),
-        ("1:2.0", (2, 0)),
+        ("0.13.1-1~ubuntu-resolute", (0, 13, 1)),
+        ("1:2.1", (2, 1)),
         ("0.34", (0, 34)),
         ("", None),
         ("latest", None),
@@ -181,3 +187,98 @@ def test_answer_for_each_outcome() -> None:
 def test_answer_escapes_what_came_back() -> None:
     text = update_answer_html(UpdateResult("0.34.3", None, "github", "<b>nope</b>"))
     assert "<b>nope</b>" not in text and "&lt;b&gt;" in text
+
+
+# The real lookups, taken before the suite's offline fixture swaps them out.
+REAL_OPEN_LATEST = updates._open_latest
+REAL_APT_POLICY = updates.apt_policy
+
+
+@contextmanager
+def _server(status: int, location: str | None = None):
+    """A local HTTP server that answers every HEAD with ``status``."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_HEAD(self) -> None:
+            self.send_response(status)
+            if location is not None:
+                self.send_header("Location", location)
+            self.end_headers()
+
+        def log_message(self, *args) -> None:
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/IamMrCupp/benchhud/releases/latest"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_open_latest_reads_the_redirect_and_doesnt_follow_it() -> None:
+    tag = "https://github.com/IamMrCupp/benchhud/releases/tag/v0.35.0"
+    with _server(302, tag) as url:
+        assert REAL_OPEN_LATEST(url) == tag
+
+
+@pytest.mark.parametrize(("status", "said"), [(200, "200, not a redirect"), (404, "answered 404")])
+def test_open_latest_without_a_redirect_is_an_error(status: int, said: str) -> None:
+    with _server(status) as url, pytest.raises(UpdateCheckError, match=said):
+        REAL_OPEN_LATEST(url)
+
+
+def test_open_latest_with_nothing_listening_is_an_error() -> None:
+    with _server(302) as url:
+        pass  # closed again: nothing listens there now
+    with pytest.raises(UpdateCheckError, match="couldn't reach GitHub"):
+        REAL_OPEN_LATEST(url)
+
+
+def test_tls_context_is_the_system_trust_store() -> None:
+    import truststore
+
+    context = updates.tls_context()
+    assert isinstance(context, truststore.SSLContext)
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+
+
+def test_apt_policy_runs_apt_cache_in_the_c_locale(monkeypatch) -> None:
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(argv=argv, env=kwargs["env"], timeout=kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, POLICY_BEHIND, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert REAL_APT_POLICY() == POLICY_BEHIND
+    assert seen["argv"] == ["apt-cache", "policy", "benchhud"]
+    assert seen["env"]["LC_ALL"] == "C"
+    assert seen["timeout"] == updates.TIMEOUT_S
+
+
+def test_apt_policy_is_none_when_apt_cache_fails_or_isnt_there(monkeypatch) -> None:
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 100, "", "E: nope")
+    )
+    assert REAL_APT_POLICY() is None
+
+    def missing(argv, **kw):
+        raise FileNotFoundError("apt-cache")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    assert REAL_APT_POLICY() is None
+
+
+def test_trailing_zeros_dont_make_a_version_newer() -> None:
+    assert version_key("0.35") == version_key("0.35.0") == (0, 35)
+    assert not UpdateResult("0.35", "0.35.0", "github").available
+    assert version_key("0") == (0,)
+
+
+def test_the_suite_never_goes_online() -> None:
+    result = check("0.34.2")
+    assert result.latest is None and result.error == "tests don't go online"

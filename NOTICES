@@ -101,3 +101,7 @@ softcam (Windows builds only)
 tomlkit
   https://github.com/python-poetry/tomlkit
   License: MIT
+
+truststore
+  https://github.com/sethmlarson/truststore
+  License: MIT

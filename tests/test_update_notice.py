@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from benchhud import __version__
@@ -168,3 +170,66 @@ def test_check_false_still_answers_help(qtbot) -> None:
 def test_config_reads_check(raw) -> None:
     assert Config.from_dict(raw).updates.check is False
     assert Config.from_dict({}).updates.check is True
+
+
+def test_help_says_its_checking_while_it_checks(qtbot) -> None:
+    window = _window(qtbot, UpdateResult("0.34.2", "0.34.3", "github"))
+    gate = threading.Event()
+    window.update_check = lambda: (gate.wait(2), UpdateResult("0.34.2", "0.34.3", "github"))[1]
+
+    window.check_for_updates()
+    assert window.check_updates_action.text() == "Checking for updates…"
+    assert not window.check_updates_action.isEnabled()
+
+    gate.set()
+    _finish(qtbot, window)
+    assert window.check_updates_action.text() == "Check for updates…"
+    assert window.check_updates_action.isEnabled()
+    window.update_box.close()
+
+
+def test_a_timer_check_doesnt_touch_the_menu(qtbot) -> None:
+    window = _window(qtbot, UpdateResult("0.34.2", "0.34.3", "github"))
+    gate = threading.Event()
+    window.update_check = lambda: (gate.wait(2), UpdateResult("0.34.2", "0.34.3", "github"))[1]
+
+    window._start_update_check(asked=False)
+    assert window.check_updates_action.isEnabled()
+    gate.set()
+    _finish(qtbot, window)
+
+
+def test_asking_again_replaces_the_answer(qtbot) -> None:
+    window = _window(qtbot, UpdateResult("0.34.3", "0.34.3", "github"))
+    window.check_for_updates()
+    _finish(qtbot, window)
+    first = window.update_box
+    gone = []
+    first.destroyed.connect(lambda: gone.append(1))
+
+    window.check_for_updates()
+    _finish(qtbot, window)
+
+    assert window.update_box is not first
+    qtbot.waitUntil(lambda: gone == [1], timeout=2000)
+    window.update_box.close()
+
+
+def test_a_latest_that_isnt_a_version_shows_nothing(qtbot) -> None:
+    window = _window(qtbot, UpdateResult("0.34.2", "1.0.0&<i>", "github"))
+
+    window._start_update_check(asked=False)
+    _finish(qtbot, window)
+
+    assert window.update_label.isHidden()
+
+
+def test_the_window_check_goes_through_the_suites_offline_lookups(qtbot) -> None:
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.check_for_updates()
+    _finish(qtbot, window)
+
+    assert "tests don't go online" in window.update_box.text()
+    window.update_box.close()

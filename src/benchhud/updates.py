@@ -20,6 +20,7 @@ import html
 import logging
 import os
 import re
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -90,12 +91,18 @@ def upstream(version: str) -> str:
 
 
 def version_key(version: str) -> tuple[int, ...] | None:
-    """``"v0.34.3"`` → ``(0, 34, 3)``; None for anything that isn't dotted numbers."""
+    """``"v0.34.3"`` → ``(0, 34, 3)``; None for anything that isn't dotted numbers.
+
+    Trailing zeros don't count, so ``0.35`` and ``0.35.0`` are the same version.
+    """
     text = upstream(version).removeprefix("v")
     parts = text.split(".")
     if not text or not all(p.isdigit() for p in parts):
         return None
-    return tuple(int(p) for p in parts)
+    key = [int(p) for p in parts]
+    while len(key) > 1 and key[-1] == 0:
+        key.pop()
+    return tuple(key)
 
 
 def parse_apt_policy(text: str) -> str | None:
@@ -133,11 +140,29 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None  # hand the 302 back instead of following it
 
 
-def _open_latest() -> str:
+def tls_context() -> ssl.SSLContext:
+    """Certificate checks against the system's own trust store.
+
+    The macOS app's bundled Python has no CA certificates of its own, so its
+    default context refuses every HTTPS server (#560). truststore asks the
+    Keychain on macOS, the certificate store on Windows, and OpenSSL's system
+    paths on Linux.
+    """
+    try:
+        import truststore
+    except ImportError:  # a dependency, so only a broken install gets here
+        log.warning("truststore is missing; checking certificates with Python's defaults")
+        return ssl.create_default_context()
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
+def _open_latest(url: str | None = None) -> str:
     """The ``Location`` that ``releases/latest`` redirects to."""
-    opener = urllib.request.build_opener(_NoRedirect)
+    opener = urllib.request.build_opener(
+        _NoRedirect, urllib.request.HTTPSHandler(context=tls_context())
+    )
     request = urllib.request.Request(
-        LATEST_URL, method="HEAD", headers={"User-Agent": f"benchhud/{__version__}"}
+        url or LATEST_URL, method="HEAD", headers={"User-Agent": f"benchhud/{__version__}"}
     )
     try:
         with opener.open(request, timeout=TIMEOUT_S) as response:
@@ -159,20 +184,26 @@ def parse_latest_location(location: str) -> str:
     return match.group("version")
 
 
-def github_latest(open_latest: Callable[[], str] = _open_latest) -> str:
+def github_latest(open_latest: Callable[[], str] | None = None) -> str:
     """The newest release's version, from where ``releases/latest`` points."""
-    return parse_latest_location(open_latest())
+    return parse_latest_location((open_latest or _open_latest)())
 
 
 def check(
     current: str = __version__,
     *,
     platform: str | None = None,
-    policy: Callable[[], str | None] = apt_policy,
-    latest: Callable[[], str] = github_latest,
+    policy: Callable[[], str | None] | None = None,
+    latest: Callable[[], str] | None = None,
 ) -> UpdateResult:
-    """Find the newest benchhud. Blocks for up to :data:`TIMEOUT_S`; never raises."""
+    """Find the newest benchhud. Blocks for up to :data:`TIMEOUT_S` a source; never raises.
+
+    The sources are looked up when it runs, not when it's defined, so a test
+    can swap :func:`apt_policy` or :func:`_open_latest` for the whole suite.
+    """
     platform = sys.platform if platform is None else platform
+    policy = policy or apt_policy
+    latest = latest or github_latest
     if platform.startswith("linux"):
         text = policy()
         candidate = parse_apt_policy(text) if text else None

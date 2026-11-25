@@ -14,6 +14,7 @@ shell animates end to end with no camera.
 from __future__ import annotations
 
 import contextlib
+import html
 import logging
 import os
 import secrets
@@ -318,10 +319,10 @@ THERMAL_RESET_AFTER_S = 30.0
 #: How often a thermal that won't open is checked for its firmware's Recovery
 #: Mode, and how long to wait between port cycles while it stays there (#362).
 THERMAL_RECOVERY_CHECK_S = 5.0
+THERMAL_RECOVERY_RESET_S = 60.0
 #: The first update check waits this long after start, then they come this far apart (#560).
 UPDATE_FIRST_CHECK_MS = 60_000
 UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
-THERMAL_RECOVERY_RESET_S = 60.0
 
 
 def largest_screen(screens):
@@ -1536,7 +1537,16 @@ class MainWindow(QMainWindow):
         if self._update_checking:
             return  # the check already running answers this one too
         self._update_checking = True
+        if asked:
+            self._show_checking(True)
         threading.Thread(target=self._run_update_check, daemon=True).start()
+
+    def _show_checking(self, checking: bool) -> None:
+        """Help → Check for updates says it's on it: the check can take seconds."""
+        self.check_updates_action.setEnabled(not checking)
+        self.check_updates_action.setText(
+            "Checking for updates…" if checking else "Check for updates…"
+        )
 
     def _run_update_check(self) -> None:
         """The check itself. Runs off the GUI thread: it can wait on the network."""
@@ -1551,6 +1561,7 @@ class MainWindow(QMainWindow):
     def _on_update_checked(self, result: UpdateResult) -> None:
         self._update_checking = False
         asked, self._update_asked = self._update_asked, False
+        self._show_checking(False)
         if result.error is None:
             self._show_update_notice(result)
         else:
@@ -1564,7 +1575,8 @@ class MainWindow(QMainWindow):
         if not result.available:
             self.update_label.hide()
             return
-        self.update_label.setText(f'<a href="{result.url}">benchhud {result.latest} is out</a>')
+        url, latest = html.escape(result.url), html.escape(result.latest or "", quote=False)
+        self.update_label.setText(f'<a href="{url}">benchhud {latest} is out</a>')
         self.update_label.setToolTip(
             f"This is {result.current}. Install it with {result.how}; "
             "benchhud doesn't install anything itself."
@@ -1573,6 +1585,9 @@ class MainWindow(QMainWindow):
 
     def _show_update_answer(self, result: UpdateResult) -> QMessageBox:
         """Say what Help → Check for updates found (non-blocking; returned for tests)."""
+        if self.update_box is not None:
+            self.update_box.close()  # one answer at a time, not a stack of them
+            self.update_box.deleteLater()
         box = QMessageBox(self)
         box.setWindowTitle("Check for updates")
         box.setTextFormat(Qt.TextFormat.RichText)
