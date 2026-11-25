@@ -129,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     window.start_output()  # no-op unless [output] enabled
     window.start_browser_sources()  # no-op unless [browser_sources] or [terminal] enabled
     window.start_obs()  # no-op unless [obs] enabled
+    window.start_update_checks()  # no-op with [updates] check = false
 
     from benchhud.shell import quit_signals
 

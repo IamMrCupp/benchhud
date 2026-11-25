@@ -244,6 +244,14 @@ macOS asks before the first launch of a download, so `bench-setup` will tell
 you to open each menu-bar app once from Applications, then run it again.
 Nothing here needs it. See [bench-suite](https://github.com/IamMrCupp/bench-suite#on-a-mac).
 
+**Updates.** benchhud tells you when a newer release is out: a link on the
+right of the status bar, and Help → Check for updates whenever you ask. It only
+tells you. Installing stays with `apt upgrade`, `brew upgrade` or the
+installer, so nothing changes under a live stream. With the bench apt repo it
+reads apt's own lists and never goes online. Everywhere else it asks github.com
+where the latest release is. `[updates] check = false` in the config stops the
+automatic check.
+
 **From source (any OS).** `uv run benchhud`; see *Development* below.
 
 The shop side runs separately, with its own installers (Linux service `.deb`,

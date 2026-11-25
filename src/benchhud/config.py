@@ -387,6 +387,18 @@ class PerformanceConfig:
 
 
 @dataclass
+class UpdatesConfig:
+    """The "update available" check (#560).
+
+    On Linux with the bench apt repo it reads apt's own lists and goes nowhere;
+    otherwise it asks github.com where the latest release is. Turn it off for a
+    bench that should never go online. Help → Check for updates still works.
+    """
+
+    check: bool = True
+
+
+@dataclass
 class FlashConfig:
     """The flashrom panel (#227): which flashrom, and the last programmer used."""
 
@@ -524,6 +536,7 @@ class Config:
     minipro: MiniproConfig = field(default_factory=MiniproConfig)
     now_playing: NowPlayingConfig = field(default_factory=NowPlayingConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    updates: UpdatesConfig = field(default_factory=UpdatesConfig)
     obs: ObsConfig = field(default_factory=ObsConfig)
     tools: list[ToolConfig] = field(default_factory=list)
     cameras: list[CameraConfig] = field(default_factory=list)
@@ -702,6 +715,7 @@ class Config:
             ("enabled", "hide_when_paused", "label"),
         )
         _apply("performance", cfg.performance, _table(data, "performance"), ("opencv_threads",))
+        _apply("updates", cfg.updates, _table(data, "updates"), ("check",))
         _apply(
             "obs",
             cfg.obs,
