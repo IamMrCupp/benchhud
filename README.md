@@ -42,6 +42,21 @@ glows — on the scope image, with the rest of the board left alone.*
 - **Ticket import** — optionally pull the open queue from a shop intake system
   and drop a ticket onto the bench as a job. Runs standalone without one.
   [More →](docs/INTAKE.md)
+- **Parts on hand** — optionally read stock from a
+  [bench-parts](https://github.com/IamMrCupp/bench-parts) inventory: what's
+  running low up front, a search for the rest, and **Use on job** to take a part
+  off the shelf — booked to the job's ticket when it has one, and noted on the
+  job's timeline. A booking that fails says so and isn't retried — a retry could
+  count the part twice. Runs standalone without one.
+- **Recon engagements** — for hardware pentest work, pick a
+  [bench-recon](https://github.com/IamMrCupp/bench-recon) engagement and the
+  Recon panels follow it: its status, what's been captured or dumped for it, and
+  which probe sits on which port (the gear comes from bench-parts). A JTAG / SWD
+  / UART / CAN / SPI / I²C pinout crib sits beside them. benchhud keeps only the
+  engagement's ref — client, scope and findings stay in bench-recon. The
+  engagement and captures panels are tagged off air, so they never reach the
+  virtual camera or the browser sources, and Find chip's web lookups stay off
+  until you end the engagement.
 - **Board docs** — a local library of board-view files keyed by part number.
   "Do I have this board?" answered from the job, from a quick search, or across
   the whole open ticket queue as a boards-to-source list. Opens in OpenBoardView
