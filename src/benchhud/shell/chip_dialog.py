@@ -5,9 +5,10 @@ what's printed on the part, arrow to a candidate, Enter opens its datasheet.
 
 **One box, tried both ways.** What's typed goes to the source as a mark and as
 a part number (:func:`benchhud.chips.find.find_chips`). The answers are one
-list: the chip whose part number it is comes first, then every chip the text
-could be as a mark, in the source's ranked order. A part number is found only
-when it's typed in full; a mark is found from its first character.
+list: the chip whose part number it is comes first, then every chip whose mark
+the text holds whole, then everything still being typed — marks and the
+starts of part numbers, least left to type first. A mark is found from its
+first character; the start of a part number from the third.
 
 **Never one silent answer.** A mark is many-to-many — the same three characters
 turn up on different chips in different packages — so every candidate is
@@ -110,7 +111,7 @@ from PySide6.QtWidgets import (
 
 from benchhud.chips.card import NOTHING_TO_SHOW, SHOW_ON_CARD, SHOW_ON_CARD_TIP, sent_line
 from benchhud.chips.composite import MergedChip
-from benchhud.chips.find import Candidate, find_chips, with_provenance
+from benchhud.chips.find import MIN_PART_NUMBER_START, Candidate, find_chips, with_provenance
 from benchhud.chips.linkout import (
     MARKING_SITES,
     MAX_SENT,
@@ -120,7 +121,7 @@ from benchhud.chips.linkout import (
     sendable,
 )
 from benchhud.chips.marking import MatchKind, normalise_mark
-from benchhud.chips.model import Chip, Document, Substitute
+from benchhud.chips.model import Chip, Document, Substitute, mpn_key
 from benchhud.chips.source import ChipSource, NullChipSource
 from benchhud.shell.browser import open_in_browser
 from benchhud.shell.qt_util import hint, notice, set_tone
@@ -175,7 +176,7 @@ NO_DATA = (
     " Add a source in Preferences → Chips."
 )
 NO_OPENER = "No datasheet folder is set up, so there's nothing to open."
-PROMPT = "Type the mark printed on the chip, or a part number in full."
+PROMPT = "Type the mark printed on the chip, or its part number."
 NOT_PICKED = "Nothing picked — ↓ moves through the candidates."
 NOT_PICKED_ENTER = NOT_PICKED[:-1] + ", Enter opens the picked one's datasheet."
 
@@ -241,10 +242,19 @@ def match_label(candidate: Candidate) -> str:
     parts = []
     if candidate.by_part_number:
         parts.append("part number")
+    elif candidate.by_part_number_start:
+        parts.append("start of part number")
     if candidate.match is not None:
         kind = candidate.match.kind
         parts.append(_KIND_LABELS.get(kind, str(kind.value)))
     return " + ".join(parts)
+
+
+def _too_short(text: str) -> str:
+    """Why a part number might not have been found yet, when that's the reason."""
+    if len(mpn_key(text)) >= MIN_PART_NUMBER_START:
+        return ""
+    return f" The start of a part number is looked up from {MIN_PART_NUMBER_START} characters."
 
 
 def _plural(count: int, one: str) -> str:
@@ -379,7 +389,7 @@ class FindChipDialog(QDialog):
         self._mono = mono
 
         self.query_edit = QLineEdit()
-        self.query_edit.setPlaceholderText("Mark on the chip, or a part number in full")
+        self.query_edit.setPlaceholderText("Mark on the chip, or its part number")
         self.query_edit.setClearButtonEnabled(True)
         self.query_edit.setMaxLength(MAX_TYPED)
         self.query_edit.setFont(mono)
@@ -883,7 +893,7 @@ class FindChipDialog(QDialog):
         elif not text:
             self._say(PROMPT)
         elif not total:
-            self._say(f"No chip matches “{text}”. A part number has to be typed in full.")
+            self._say(f"No chip matches “{text}”.{_too_short(text)}")
         elif total > MAX_SHOWN:
             self._say(f"Showing the best {MAX_SHOWN:,} of {total:,} candidates — keep typing.")
         elif total == 1:
@@ -1048,6 +1058,8 @@ class FindChipDialog(QDialog):
         parts = []
         if candidate.by_part_number:
             parts.append("Found by its part number.")
+        elif candidate.by_part_number_start:
+            parts.append("Found by the start of its part number.")
         match = candidate.match
         if match is not None:
             meaning = _KIND_MEANINGS.get(match.kind, str(match.kind.value))

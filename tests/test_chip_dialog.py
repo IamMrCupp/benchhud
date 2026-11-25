@@ -244,10 +244,66 @@ def test_no_match_says_so_plainly(qtbot) -> None:
     _type(dialog, "ZZ9")
     assert _rows(dialog) == []
     assert dialog.notice_label.isHidden()  # there is data; this just isn't in it
-    assert "No chip matches “ZZ9”" in dialog.status_label.text()
-    assert "in full" in dialog.status_label.text()
+    assert dialog.status_label.text() == "No chip matches “ZZ9”."
     assert dialog.selected() is None
     assert _details(dialog) == {}
+
+
+def test_a_short_miss_says_when_part_numbers_are_looked_up(qtbot) -> None:
+    dialog = _dialog(qtbot, InMemoryChipSource([]))
+    _type(dialog, "ZZ")
+    assert dialog.status_label.text() == (
+        "No chip matches “ZZ”. The start of a part number is looked up from 3 characters."
+    )
+
+
+def test_nothing_says_a_part_number_has_to_be_typed_in_full(qtbot) -> None:
+    dialog = _dialog(qtbot)
+    assert "in full" not in PROMPT
+    assert "in full" not in dialog.query_edit.placeholderText()
+    assert "in full" not in (chip_dialog.__doc__ or "")
+
+
+def test_the_start_of_a_part_number_lists_its_chips(qtbot) -> None:
+    dialog = _dialog(qtbot)
+    _type(dialog, "ex12")
+    assert _rows(dialog) == [
+        [
+            "EX1234QFN",
+            "Example Semi",
+            "QFN-20 (3x3)",
+            "buck-controller",
+            "—",
+            "start of part number",
+        ],
+        [
+            "EX1235QFN",
+            "Example Semi",
+            "QFN-20 (3x3)",
+            "buck-controller",
+            "—",
+            "start of part number",
+        ],
+    ]
+    assert dialog.status_label.text() == "2 candidates, best match first."
+    assert dialog.selected() is None  # two to choose between: none is picked
+
+
+def test_a_chip_found_by_the_start_of_its_part_number_says_so(qtbot) -> None:
+    dialog = _dialog(qtbot)
+    _type(dialog, "EX9")
+    assert _part_numbers(dialog) == ["EX9000SOT"]
+    assert dialog.selected().chip is _LDO
+    assert dialog.found_label.text().startswith("Found by the start of its part number.")
+
+
+def test_a_part_number_in_full_is_not_called_a_start(qtbot) -> None:
+    dialog = _dialog(qtbot)
+    _type(dialog, "EX1234QFN")
+    assert _rows(dialog)[0][-1] == "part number"
+    dialog.tree.setCurrentItem(dialog.tree.topLevelItem(0))
+    assert dialog.found_label.text().startswith("Found by its part number.")
+    assert "start" not in dialog.found_label.text()
 
 
 def test_clearing_the_box_clears_the_list(qtbot) -> None:
@@ -273,7 +329,7 @@ def test_one_match_is_listed_and_shown(qtbot) -> None:
             "DFN-8 (2x2)",
             "load-switch, reverse-blocking",
             "NW4",
-            "exact",
+            "start of part number + exact",
         ]
     ]
     assert dialog.status_label.text() == "1 candidate."
@@ -420,6 +476,7 @@ def test_a_mark_typed_in_another_case_says_so(qtbot) -> None:
     dialog = _dialog(qtbot)
     _type(dialog, "nw4")
     assert dialog.found_label.text() == (
+        "Found by the start of its part number.  "
         "Found by the mark NW4 — the code is exactly what was typed, in a different case."
     )
 

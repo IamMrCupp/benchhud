@@ -6,7 +6,7 @@ doesn't exist and neither do its parts or their markings.
 
 from __future__ import annotations
 
-from benchhud.chips.find import Candidate, find_chips
+from benchhud.chips.find import MIN_PART_NUMBER_START, Candidate, find_chips
 from benchhud.chips.marking import MatchKind
 from benchhud.chips.model import Chip, Marking
 from benchhud.chips.source import InMemoryChipSource, NullChipSource
@@ -58,8 +58,10 @@ def test_a_full_part_number_finds_its_chip_whatever_the_case() -> None:
     assert found == [Candidate(_BUCK, by_part_number=True)]
 
 
-def test_part_of_a_part_number_is_not_found() -> None:
-    assert find_chips(_source(_BUCK, _LDO), "EX1234") == []
+def test_the_start_of_a_part_number_finds_its_chip() -> None:
+    assert find_chips(_source(_BUCK, _LDO), "ex1234") == [
+        Candidate(_BUCK, by_part_number_start=True)
+    ]
 
 
 def test_a_chip_found_both_ways_is_one_candidate() -> None:
@@ -98,6 +100,9 @@ def test_a_part_number_a_source_repeats_is_listed_once() -> None:
             once = _source(_BUCK).by_marking(text)
             return once + once
 
+        def by_mpn_prefix(self, text: str) -> list[Chip]:
+            return []
+
     assert [c.chip.mpn for c in find_chips(Repeats(), "X1=")] == ["EX1234QFN"]
 
 
@@ -111,4 +116,148 @@ def test_a_source_that_answers_none_for_marks_is_no_marks() -> None:
         def by_marking(self, text: str):
             return None
 
+        def by_mpn_prefix(self, text: str):
+            return None
+
     assert find_chips(Sparse(), "anything") == [Candidate(_BUCK, by_part_number=True)]
+
+
+# --- the start of a part number ---------------------------------------------
+
+
+class _Asked(InMemoryChipSource):
+    """Records every part-number search it's asked for."""
+
+    def __init__(self, *chips: Chip) -> None:
+        super().__init__(list(chips))
+        self.asked: list[str] = []
+
+    def by_mpn_prefix(self, text: str) -> list[Chip]:
+        self.asked.append(text)
+        return super().by_mpn_prefix(text)
+
+
+def test_a_part_number_start_is_not_looked_up_below_the_floor() -> None:
+    assert MIN_PART_NUMBER_START == 3
+    source = _Asked(_BUCK)
+    assert find_chips(source, "EX") == []
+    assert find_chips(source, " E ") == []
+    assert source.asked == []
+    assert find_chips(source, "EX1") == [Candidate(_BUCK, by_part_number_start=True)]
+    assert source.asked == ["EX1"]
+
+
+def test_a_full_part_number_shorter_than_the_floor_is_still_found() -> None:
+    tiny = Chip(mpn="Q1", manufacturer="Example Semi")
+    assert find_chips(_source(tiny), "q1") == [Candidate(tiny, by_part_number=True)]
+
+
+def test_a_mark_is_still_found_from_its_first_character() -> None:
+    assert [c.chip.mpn for c in find_chips(_source(_BUCK, _LDO), "X")] == [
+        "EX1234QFN",
+        "EX9000SOT",
+    ]
+
+
+def test_starts_of_part_numbers_go_least_left_to_type_first() -> None:
+    long = Chip(mpn="EX1234QFN-TR", manufacturer="Example Semi")
+    found = find_chips(_source(long, _LDO, _BUCK), "ex1")
+    assert [c.chip.mpn for c in found] == ["EX1234QFN", "EX1234QFN-TR"]
+    found = find_chips(_source(long, _LDO, _BUCK), "EX")  # under the floor
+    assert found == []
+    assert all(c.by_part_number_start and not c.by_part_number for c in found)
+
+
+def test_the_full_part_number_is_not_also_its_own_start() -> None:
+    longer = Chip(mpn="EX1234QFN-TR", manufacturer="Example Semi")
+    found = find_chips(_source(longer, _BUCK), "EX1234QFN")
+    assert found == [
+        Candidate(_BUCK, by_part_number=True),
+        Candidate(longer, by_part_number_start=True),
+    ]
+
+
+def test_a_chip_found_by_its_start_and_its_mark_is_one_candidate() -> None:
+    # "EX77" starts the part number EX7700BGA and the code EX7700.
+    (only,) = find_chips(_source(_BIG), "EX77")
+    assert only.chip is _BIG
+    assert only.by_part_number_start
+    assert not only.by_part_number
+    assert only.match is not None
+    assert only.match.kind is MatchKind.PARTIAL
+
+
+# Made-up chips for ranking, each found a different way by "AB12".
+_EXACT = Chip(mpn="ZZ0001", manufacturer="Example Semi", markings=(Marking("AB12"),))
+_WHOLE = Chip(mpn="ZZ0002", manufacturer="Example Semi", markings=(Marking("AB1"),))
+_MARK_1_LEFT = Chip(mpn="ZZ0003", manufacturer="Example Semi", markings=(Marking("AB12X"),))
+_MARK_4_LEFT = Chip(mpn="ZZ0004", manufacturer="Example Semi", markings=(Marking("AB12WXYZ"),))
+_START_1_LEFT = Chip(mpn="AB12Q", manufacturer="Example Semi")
+_START_2_LEFT = Chip(mpn="AB12QF", manufacturer="Example Semi")
+_START_6_LEFT = Chip(mpn="AB12QFN-TR", manufacturer="Example Semi")
+_FULL_MPN = Chip(mpn="AB12", manufacturer="Example Semi")
+
+
+def test_how_a_part_number_start_ranks_against_the_marks() -> None:
+    source = _source(
+        _START_6_LEFT,
+        _MARK_4_LEFT,
+        _START_2_LEFT,
+        _WHOLE,
+        _START_1_LEFT,
+        _MARK_1_LEFT,
+        _EXACT,
+        _FULL_MPN,
+    )
+    found = find_chips(source, "AB12")
+    assert [c.chip.mpn for c in found] == [
+        "AB12",  # the part number, typed in full
+        "ZZ0001",  # the code exactly
+        "ZZ0002",  # a code found whole, with more typed after it
+        "ZZ0003",  # still typing: 1 left, a mark goes before a part number
+        "AB12Q",  # still typing: 1 left
+        "AB12QF",  # 2 left
+        "ZZ0004",  # 4 left
+        "AB12QFN-TR",  # 6 left
+    ]
+    assert [c.by_part_number_start for c in found] == [
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+        False,
+        True,
+    ]
+
+
+def test_a_chip_found_two_ways_ranks_at_the_better_of_them() -> None:
+    # Its code is found whole, so it ranks with the whole marks even though
+    # its part number has a lot left to type.
+    both = Chip(mpn="AB12QFN-TR", manufacturer="Example Semi", markings=(Marking("AB1"),))
+    found = find_chips(_source(_START_1_LEFT, both), "AB12")
+    assert [c.chip.mpn for c in found] == ["AB12QFN-TR", "AB12Q"]
+    assert found[0].by_part_number_start
+    assert found[0].match is not None
+    assert found[0].match.kind is MatchKind.WHOLE_MARK
+    # And a code with more left than the part number ranks by the part number.
+    late = Chip(mpn="AB12Z", manufacturer="Example Semi", markings=(Marking("AB12WXYZ"),))
+    found = find_chips(_source(_START_2_LEFT, late), "AB12")
+    assert [c.chip.mpn for c in found] == ["AB12Z", "AB12QF"]
+
+
+def test_a_start_a_source_gets_wrong_is_not_listed() -> None:
+    class Loose(InMemoryChipSource):
+        def by_mpn_prefix(self, text: str) -> list[Chip]:
+            return [_LDO, Chip(mpn="", manufacturer="Example Semi"), _BUCK]
+
+    assert find_chips(Loose([]), "EX12") == [Candidate(_BUCK, by_part_number_start=True)]
+
+
+def test_a_source_that_answers_none_for_starts_is_no_starts() -> None:
+    class Sparse(InMemoryChipSource):
+        def by_mpn_prefix(self, text: str):
+            return None
+
+    assert find_chips(Sparse([_BUCK]), "X1=") == find_chips(_source(_BUCK), "X1=")

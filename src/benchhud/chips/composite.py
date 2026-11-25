@@ -65,6 +65,13 @@ Every source is asked. A chip any of them offers is one candidate, shown as
 the merged chip, and the candidates are ranked together by the same rules as
 one source's (:mod:`benchhud.chips.marking`).
 
+A part-number search
+--------------------
+
+The same: every source is asked, a chip any of them offers is one candidate,
+shown as the merged chip, and the candidates are put in one order — the
+shortest part number first (:func:`~benchhud.chips.source.mpn_prefix_order`).
+
 A source that fails
 -------------------
 
@@ -83,7 +90,7 @@ from typing import Any
 
 from benchhud.chips.marking import MarkingMatch, match_markings, normalise_mark
 from benchhud.chips.model import Chip, Document, Marking, Substitute, UsedIn, mpn_key
-from benchhud.chips.source import ChipSource
+from benchhud.chips.source import ChipSource, mpn_prefix_order
 
 log = logging.getLogger(__name__)
 
@@ -348,6 +355,14 @@ def _sound(match: object) -> bool:
         return False
 
 
+def _starts(chip: object, wanted: str) -> bool:
+    """Whether a source's part-number answer is a chip that starts with ``wanted``."""
+    try:
+        return isinstance(chip, Chip) and bool(chip.key) and chip.key.startswith(wanted)
+    except Exception:
+        return False
+
+
 @dataclass
 class CompositeChipSource:
     """Several sources as one. ``sources`` is in order of precedence, first wins."""
@@ -456,3 +471,26 @@ class CompositeChipSource:
             if key not in ranked:
                 ranked[key] = replace(best[key], chip=chip)
         return sorted(ranked.values(), key=lambda match: match.sort_key)
+
+    def by_mpn_prefix(self, text: str) -> list[Chip]:
+        if not isinstance(text, str) or not (wanted := mpn_key(text)):
+            return []
+        # Per chip: what each source offered, by its place in the order.
+        offered: dict[str, dict[int, Chip]] = {}
+        for place, source in enumerate(self.sources):
+            try:
+                chips = [chip for chip in source.by_mpn_prefix(text) if _starts(chip, wanted)]
+            except Exception:
+                log.exception(
+                    "chips: source %r failed looking up the start of a part number",
+                    _name_of(source),
+                )
+                continue
+            for chip in chips:
+                offered.setdefault(chip.key, {}).setdefault(place, chip)
+        found = [
+            merged.chip
+            for by_place in offered.values()
+            if (merged := self._merge(next(iter(by_place.values())).mpn, by_place)) is not None
+        ]
+        return sorted(found, key=mpn_prefix_order)

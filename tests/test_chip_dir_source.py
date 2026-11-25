@@ -387,6 +387,57 @@ def test_both_paths_answer_a_marking_the_same(tmp_path) -> None:
         assert files.by_marking(typed) == index.by_marking(typed)
 
 
+def test_both_paths_answer_the_start_of_a_part_number_the_same(tmp_path) -> None:
+    files = DirChipSource(root=write_checkout(tmp_path))
+    index = DirChipSource(root=FIXTURE)
+    for typed in ("EX", "ex1", "SD", "sd77/", "SD400BGA", "X1=", "nope", ""):
+        assert files.by_mpn_prefix(typed) == index.by_mpn_prefix(typed)
+    assert [c.mpn for c in index.by_mpn_prefix("sd")] == ["SD400BGA", "SD77/NOPB"]  # shorter first
+
+
+def test_the_start_of_a_part_number_from_an_index() -> None:
+    source = DirChipSource(root=FIXTURE)
+    assert source.by_mpn_prefix(" ex12 ") == [_BUCK]
+    assert [c.mpn for c in source.by_mpn_prefix("EX")] == ["EX1234QFN", "EX9000SOT"]
+    assert source.by_mpn_prefix("1234") == []
+    assert source.by_mpn_prefix("") == []
+
+
+def test_a_part_number_start_finds_the_whole_run_and_nothing_past_it(tmp_path) -> None:
+    # Sorted, the run for "ex12" sits between keys that sort either side of it
+    # without starting with it: the search has to stop at both ends.
+    mpns = ["EX11", "EX1", "EX12", "EX12Z", "EX120", "EX12~", "EX13", "EX2", "EW12", "EX1-2"]
+    source = DirChipSource(root=_write_index(tmp_path / "index.json", [_record(m) for m in mpns]))
+    assert [c.mpn for c in source.by_mpn_prefix("ex12")] == ["EX12", "EX120", "EX12Z", "EX12~"]
+    assert [c.mpn for c in source.by_mpn_prefix("EX2")] == ["EX2"]
+    assert [c.mpn for c in source.by_mpn_prefix("EW")] == ["EW12"]
+    assert source.by_mpn_prefix("EX3") == []
+    same_list = InMemoryChipSource([source.get(m) for m in mpns])
+    for typed in ("E", "EX", "EX1", "ex12", "EX12Z", "EX1-", "Z"):
+        assert source.by_mpn_prefix(typed) == same_list.by_mpn_prefix(typed)
+
+
+def test_a_part_number_twice_starts_the_first_one(tmp_path, warned) -> None:
+    records = [_record("EX1234QFN", package="QFN-20 (3x3)"), _record("ex1234qfn", package="SOP-8")]
+    source = DirChipSource(root=_write_index(tmp_path / "index.json", records))
+    (only,) = source.by_mpn_prefix("EX12")
+    assert only.package == "QFN-20 (3x3)"
+
+
+def test_a_reload_is_what_a_part_number_start_answers_from(tmp_path) -> None:
+    index = _write_index(tmp_path / "index.json", [_record("EX1000QFN")])
+    source = DirChipSource(root=index)
+    assert [c.mpn for c in source.by_mpn_prefix("EX1")] == ["EX1000QFN"]
+    _write_index(index, [_record("EX1000QFN"), _record("EX1001QFN")])
+    assert [c.mpn for c in source.by_mpn_prefix("EX1")] == ["EX1000QFN"]  # held until a reload
+    source.reload()
+    assert [c.mpn for c in source.by_mpn_prefix("EX1")] == ["EX1000QFN", "EX1001QFN"]
+
+
+def test_an_unconfigured_directory_starts_no_part_number() -> None:
+    assert DirChipSource(root=None).by_mpn_prefix("EX12") == []
+
+
 def test_the_part_number_comes_from_the_file_not_its_name(tmp_path) -> None:
     source = DirChipSource(root=write_checkout(tmp_path))
     assert source.get("SD77/NOPB") == Chip(mpn="SD77/NOPB", manufacturer="Sample Devices")
