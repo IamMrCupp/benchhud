@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.34.2](https://github.com/IamMrCupp/benchhud/compare/v0.34.1...v0.34.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **meter:** a command that takes the session down still lets the Output OFF presses behind it run ([e6bb28c](https://github.com/IamMrCupp/benchhud/commit/e6bb28ca5306dd5f29dbcafd4d85f930f034a253))
+* **meter:** a done-callback that raises can't cut the session's last drain short either ([71a4126](https://github.com/IamMrCupp/benchhud/commit/71a412658de3de79ee6dfb4f129d3fefb011ac78))
+
 ## [0.34.1](https://github.com/IamMrCupp/benchhud/compare/v0.34.0...v0.34.1) (2026-11-25)
 
 
