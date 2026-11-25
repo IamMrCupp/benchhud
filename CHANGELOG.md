@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/IamMrCupp/benchhud/compare/v0.34.0...v0.34.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **meter:** the session thread lets go of the port even when its shutdown is cut short ([1ebf8e5](https://github.com/IamMrCupp/benchhud/commit/1ebf8e539337b9e2add96550804aa12b9531e01c))
+
 ## [0.34.0](https://github.com/IamMrCupp/benchhud/compare/v0.33.0...v0.34.0) (2026-11-24)
 
 
