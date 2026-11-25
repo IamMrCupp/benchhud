@@ -265,6 +265,15 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [CHIPS.md](docs/CHIPS.md) | The chip reference: sources, datasheets, Find chip, and what goes on stream. |
 | [BENCHMARK.md](docs/BENCHMARK.md) | `scripts/bench_hud.py`: the frame pipeline timed headless, so a perf change is measured the same way before and after. |
 
+## Support
+
+If it's earned a spot on your bench and you'd like to throw a coffee my way:
+
+- [Ko-fi](https://ko-fi.com/IamMrCupp)
+- [Buy Me a Coffee](https://buymeacoffee.com/IamMrCupp)
+
+No pressure — it stays open source either way.
+
 ## License
 
 Open source under the [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html)
