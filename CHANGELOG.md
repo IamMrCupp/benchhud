@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.3](https://github.com/IamMrCupp/benchhud/compare/v0.34.2...v0.34.3) (2026-11-25)
+
+
+### Documentation
+
+* **readme:** add the parts inventory and recon panels to the feature list ([fcecb39](https://github.com/IamMrCupp/benchhud/commit/fcecb39e4209cf57d5522cfe2b6e7410e017e115))
+
 ## [0.34.2](https://github.com/IamMrCupp/benchhud/compare/v0.34.1...v0.34.2) (2026-11-25)
 
 
