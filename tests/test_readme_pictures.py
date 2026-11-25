@@ -43,7 +43,19 @@ def test_the_heat_sits_on_the_drawn_chip(pictures) -> None:
     assert spot.value > 60.0  # over the default threshold, so the tint shows
 
 
-def test_it_renders_every_picture(pictures, qapp, tmp_path) -> None:
+@pytest.fixture
+def theme_put_back(qapp):
+    """The script themes the app; put the theme back for the tests after this one."""
+    from benchhud.shell import theme
+
+    before = (qapp.styleSheet(), qapp.font(), theme._current)
+    yield
+    qapp.setStyleSheet(before[0])
+    qapp.setFont(before[1])
+    theme._current = before[2]
+
+
+def test_it_renders_every_picture(pictures, theme_put_back, tmp_path) -> None:
     paths = pictures.main(tmp_path)
 
     assert [p.name for p in paths] == ["hud.png", "meter.png", "jobs.png", "thermal-modes.jpg"]
@@ -51,3 +63,13 @@ def test_it_renders_every_picture(pictures, qapp, tmp_path) -> None:
         image = QImage(str(path))
         assert not image.isNull(), path
         assert image.width() >= 600, path
+
+    # The heat made it into the overlay: the threshold tint (bottom left of the
+    # sheet) has red on it. Four plain boards would pass every check above.
+    sheet = QImage(str(tmp_path / "thermal-modes.jpg"))
+    reds = 0
+    for y in range(sheet.height() // 2, sheet.height(), 4):
+        for x in range(0, sheet.width() // 2, 4):
+            c = sheet.pixelColor(x, y)
+            reds += c.red() > 150 and c.green() < 80 and c.blue() < 80
+    assert reds > 50

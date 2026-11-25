@@ -120,9 +120,10 @@ labels it.*
 
 ![The Meter panel: volts, amps, watts and peak current in coloured tiles over the supply controls, and a 60-second V/A/W graph below](docs/images/meter.png)
 
-*The meter on demo mode's load — a 12 V rail with a draw that swings and spikes.
-On a steady rail amps and watts move together, so the watts line sits right on
-top of the amps line. No supply is connected, so its controls stay greyed out.*
+*The meter on demo mode's load — a 12 V rail with a draw that swings and spikes
+to 1.2 A. On a steady rail amps and watts move together, and at this load their
+two axes line up, so the watts line sits right on top of the amps line. No
+supply is connected, so its controls stay greyed out.*
 
 ![The Jobs panel with a made-up job and its notes, the last note a capture's readings, and below it the scope and thermal frames that capture saved](docs/images/jobs.png)
 

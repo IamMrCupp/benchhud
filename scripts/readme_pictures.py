@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the README's HUD pictures offscreen, from demo data (#500).
 
-    QT_QPA_PLATFORM=offscreen PYTHONPATH=src python scripts/readme_pictures.py OUT_DIR
+    PYTHONPATH=src python scripts/readme_pictures.py OUT_DIR
 
 Writes four pictures into OUT_DIR:
 
@@ -26,11 +26,16 @@ Look at every picture before committing it.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+# Offscreen unless told otherwise: no windows popping up on the desktop, and
+# pictures at one pixel per point whatever the screen.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import cv2
 import numpy as np
@@ -338,14 +343,41 @@ def main(out: Path) -> list[Path]:
 
     home = Path(tempfile.mkdtemp(prefix="benchhud-readme-"))
     store = JobStore(home / "jobs.db", now=stamps())
-    job_id = fake_job(store)
+    window: MainWindow | None = None
+    try:
+        job_id = fake_job(store)
+        config = Config()
+        # No device paths: on a Linux box that has them, the window would look
+        # them up and the status bar would show the real cameras' names.
+        config.panels.scope.device = ""
+        config.panels.telemetry.port = ""
+        window = MainWindow(
+            config, scanner=NoDevices(), job_store=store, themes_folder=home / "themes"
+        )
+        window.resize(1600, 1200)
+        window.show()
+        settle(app)
+        render(app, window, store, job_id, out)
+    finally:
+        if window is not None:
+            # Not set_demo_mode(False): that starts polling the meter's serial port.
+            window._stop_demo()
+            for panel_id in ("power", "jobs"):
+                dock = window.panels.dock(panel_id)
+                if dock is not None:
+                    dock.close()
+            window.close()
+            window.deleteLater()
+            app.processEvents()
+        store.close()
+        shutil.rmtree(home, ignore_errors=True)
+    return [out / name for name in PICTURES]
 
-    config = Config()
-    window = MainWindow(config, scanner=NoDevices(), job_store=store, themes_folder=home / "themes")
-    window.resize(1600, 1200)
-    window.show()
-    settle(app)
 
+PICTURES = ("hud.png", "meter.png", "jobs.png", "thermal-modes.jpg")
+
+
+def render(app: QApplication, window: MainWindow, store: JobStore, job_id: int, out: Path) -> None:
     window.jobs_panel.refresh_jobs()
     window.jobs_panel.select_job(job_id)
     # The scope shows the drawn board; demo mode then fills in the heat and
@@ -388,13 +420,6 @@ def main(out: Path) -> list[Path]:
         frame = window.composite_view._frame
         tiles.append((bgr_image(frame).scaledToWidth(800), name))
     sheet(tiles, 2, background).save(str(out / "thermal-modes.jpg"), quality=90)
-
-    # Not set_demo_mode(False): that starts polling the meter's serial port.
-    window._stop_demo()
-    window.close()
-    store.close()
-    shutil.rmtree(home, ignore_errors=True)
-    return [out / name for name in ("hud.png", "meter.png", "jobs.png", "thermal-modes.jpg")]
 
 
 if __name__ == "__main__":
