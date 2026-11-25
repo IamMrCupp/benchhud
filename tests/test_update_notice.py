@@ -215,6 +215,44 @@ def test_asking_again_replaces_the_answer(qtbot) -> None:
     window.update_box.close()
 
 
+def test_the_notice_escapes_what_came_back(qtbot) -> None:
+    # Its upstream part is 1.0.0, so it counts as newer and the label shows.
+    window = _window(qtbot, UpdateResult("0.34.2", "1.0.0-<i>", "github"))
+
+    window._start_update_check(asked=False)
+    _finish(qtbot, window)
+
+    assert not window.update_label.isHidden()
+    assert "<i>" not in window.update_label.text()
+    assert "1.0.0-&lt;i&gt; is out" in window.update_label.text()
+
+
+def test_asking_during_a_timer_check_says_its_checking(qtbot) -> None:
+    window = _window(qtbot, UpdateResult("0.34.2", "0.34.3", "github"))
+    gate = threading.Event()
+    window.update_check = lambda: (gate.wait(2), UpdateResult("0.34.2", "0.34.3", "github"))[1]
+    window._start_update_check(asked=False)
+
+    window.check_for_updates()
+    assert window.check_updates_action.text() == "Checking for updates…"
+
+    gate.set()
+    _finish(qtbot, window)
+    assert window.check_updates_action.text() == "Check for updates…"
+    assert window.update_box is not None
+    window.update_box.close()
+
+
+def test_closing_the_window_stops_the_checks(qtbot) -> None:
+    window = _window(qtbot, UpdateResult("0.34.2", "0.34.3", "github"))
+    window.start_update_checks()
+
+    window.close()
+
+    assert not window._update_timer.isActive()
+    assert not window._update_first.isActive()
+
+
 def test_a_latest_that_isnt_a_version_shows_nothing(qtbot) -> None:
     window = _window(qtbot, UpdateResult("0.34.2", "1.0.0&<i>", "github"))
 

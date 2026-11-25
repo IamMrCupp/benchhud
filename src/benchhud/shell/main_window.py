@@ -435,6 +435,7 @@ class MainWindow(QMainWindow):
         self._update_checking = False
         self._update_asked = False
         self._update_timer: QTimer | None = None
+        self._update_first: QTimer | None = None
         #: The Help → Check for updates answer last shown (kept for tests).
         self.update_box: QMessageBox | None = None
         self._update_checked.connect(self._on_update_checked)
@@ -1523,7 +1524,16 @@ class MainWindow(QMainWindow):
         self._update_timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
         self._update_timer.timeout.connect(self._scheduled_update_check)
         self._update_timer.start()
-        QTimer.singleShot(UPDATE_FIRST_CHECK_MS, self, self._scheduled_update_check)
+        self._update_first = QTimer(self)
+        self._update_first.setSingleShot(True)
+        self._update_first.timeout.connect(self._scheduled_update_check)
+        self._update_first.start(UPDATE_FIRST_CHECK_MS)
+
+    def stop_update_checks(self) -> None:
+        """Stop the automatic checks; one already running just answers into nothing."""
+        for timer in (self._update_timer, self._update_first):
+            if timer is not None:
+                timer.stop()
 
     def _scheduled_update_check(self) -> None:
         self._start_update_check(asked=False)
@@ -1534,11 +1544,11 @@ class MainWindow(QMainWindow):
 
     def _start_update_check(self, *, asked: bool) -> None:
         self._update_asked = self._update_asked or asked
+        if asked:
+            self._show_checking(True)
         if self._update_checking:
             return  # the check already running answers this one too
         self._update_checking = True
-        if asked:
-            self._show_checking(True)
         threading.Thread(target=self._run_update_check, daemon=True).start()
 
     def _show_checking(self, checking: bool) -> None:
@@ -3000,6 +3010,7 @@ class MainWindow(QMainWindow):
         self.stop_browser_sources()
         self.stop_obs()
         self.stop_terminal()
+        self.stop_update_checks()
         self.persist_into_config()
         if self._on_persist is not None:
             self._on_persist(self._config)

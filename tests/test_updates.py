@@ -194,15 +194,29 @@ REAL_OPEN_LATEST = updates._open_latest
 REAL_APT_POLICY = updates.apt_policy
 
 
+@pytest.fixture(autouse=True)
+def _no_proxy_for_the_local_server(monkeypatch) -> None:
+    # A proxy set on the machine would otherwise carry the local requests.
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+
 @contextmanager
-def _server(status: int, location: str | None = None):
-    """A local HTTP server that answers every HEAD with ``status``."""
+def _server(status: int, location: str | None = None, seen: list[str] | None = None):
+    """A local HTTP server that answers every HEAD with ``status``.
+
+    A ``location`` starting with ``/`` points back at this same server, and
+    every request's path goes in ``seen``.
+    """
 
     class Handler(BaseHTTPRequestHandler):
         def do_HEAD(self) -> None:
+            if seen is not None:
+                seen.append(self.path)
             self.send_response(status)
             if location is not None:
-                self.send_header("Location", location)
+                here = f"http://127.0.0.1:{self.server.server_port}"
+                self.send_header("Location", here + location if location[0] == "/" else location)
             self.end_headers()
 
         def log_message(self, *args) -> None:
@@ -219,9 +233,14 @@ def _server(status: int, location: str | None = None):
 
 
 def test_open_latest_reads_the_redirect_and_doesnt_follow_it() -> None:
-    tag = "https://github.com/IamMrCupp/benchhud/releases/tag/v0.35.0"
-    with _server(302, tag) as url:
-        assert REAL_OPEN_LATEST(url) == tag
+    # The redirect points back at the same server, so following it would show
+    # up as a second request here rather than as a trip to github.com.
+    seen: list[str] = []
+    with _server(302, "/IamMrCupp/benchhud/releases/tag/v0.35.0", seen) as url:
+        location = REAL_OPEN_LATEST(url)
+
+    assert parse_latest_location(location) == "0.35.0"
+    assert seen == ["/IamMrCupp/benchhud/releases/latest"]
 
 
 @pytest.mark.parametrize(("status", "said"), [(200, "200, not a redirect"), (404, "answered 404")])
