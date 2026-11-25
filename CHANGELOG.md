@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.0](https://github.com/IamMrCupp/benchhud/compare/v0.35.0...v0.36.0) (2026-11-25)
+
+
+### Features
+
+* **updates:** say when a newer release is out, with Help → Check for updates ([cfc0945](https://github.com/IamMrCupp/benchhud/commit/cfc0945bc36b1b0edd00f8ca5d56dc6c83bbdba9))
+
 ## [0.35.0](https://github.com/IamMrCupp/benchhud/compare/v0.34.3...v0.35.0) (2026-11-25)
 
 
