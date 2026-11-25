@@ -300,6 +300,7 @@ pattern, so `uv run benchhud` opens a working shell you can poke at.
 | [INTAKE.md](docs/INTAKE.md) | Pulling tickets from a shop intake system. |
 | [BOARDS.md](docs/BOARDS.md) | The board-view library: find, open, and source boards. |
 | [CHIPS.md](docs/CHIPS.md) | The chip reference: sources, datasheets, Find chip, and what goes on stream. |
+| [APPEARANCE.md](docs/APPEARANCE.md) | Light, dark or following the OS, and theme files in burnwright's format. |
 | [BENCHMARK.md](docs/BENCHMARK.md) | `scripts/bench_hud.py`: the frame pipeline timed headless, so a perf change is measured the same way before and after. |
 
 ## Support
