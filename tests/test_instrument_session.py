@@ -476,6 +476,83 @@ def test_nothing_unsafe_runs_behind_a_command_that_took_the_loop_down(fake_owon_
     s.stop()
 
 
+def _off_behind(s: InstrumentSession, monkeypatch, setup) -> Future:
+    """Start ``s`` with a poll that runs ``setup``, queues an Output OFF and goes down.
+
+    So it's the shutdown's drain that meets what ``setup`` queued (even_when_stopping,
+    or it never runs), with no later drain to catch up on the Output OFF.
+    """
+    off: list[Future] = []
+
+    def poll(_driver):
+        setup()
+        off.append(s.submit(lambda d: d.apply_output(False), even_when_stopping=True))
+        raise _Abort("takes the loop down")
+
+    monkeypatch.setattr("benchhud.instruments.session.read_snapshot", poll)
+    s.start()
+    thread = s._thread
+    assert s.wait_finished(2)
+    thread.join(2)  # so its _Abort is reported here, not in the next test
+    return off[0]
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_callback_that_raises_again_does_not_cut_the_queue_short(
+    monkeypatch, fake_owon_serial
+) -> None:
+    """The terminal's callback calls result(), which raises inside set_exception (#542)."""
+    fake_owon_serial.state["OUTP"] = "ON"
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+
+    def setup() -> None:
+        s.submit(_abort, even_when_stopping=True).add_done_callback(lambda f: f.result())
+
+    off = _off_behind(s, monkeypatch, setup)
+
+    off.result(timeout=1)
+    assert fake_owon_serial.state["OUTP"] == "OFF"
+    s.stop()
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_callback_that_raises_on_success_does_not_cut_the_queue_short(
+    monkeypatch, fake_owon_serial
+) -> None:
+    fake_owon_serial.state["OUTP"] = "ON"
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+    done: list[Future] = []
+
+    def setup() -> None:
+        done.append(s.submit(lambda _d: "fine", even_when_stopping=True))
+        done[0].add_done_callback(_abort)
+
+    off = _off_behind(s, monkeypatch, setup)
+
+    assert done[0].result(timeout=1) == "fine"
+    off.result(timeout=1)
+    assert fake_owon_serial.state["OUTP"] == "OFF"
+    s.stop()
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_second_raise_on_the_way_down_is_logged(monkeypatch, caplog, fake_owon_serial) -> None:
+    """Only the first is raised out of the thread; the next one still leaves a trace."""
+    s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
+
+    def again(_driver) -> None:
+        raise _Abort("again")
+
+    def setup() -> None:
+        s.submit(_abort, even_when_stopping=True)
+        s.submit(again, even_when_stopping=True)
+
+    _off_behind(s, monkeypatch, setup)
+
+    assert "again" in caplog.text
+    s.stop()
+
+
 def test_a_session_still_finishing_cannot_be_restarted(fake_owon_serial) -> None:
     s = InstrumentSession(from_serial_port(fake_owon_serial), poll_interval=SLOW_POLL)
     s.start()
