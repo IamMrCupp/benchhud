@@ -213,38 +213,89 @@ def test_how_a_part_number_start_ranks_against_the_marks() -> None:
     assert [c.chip.mpn for c in found] == [
         "AB12",  # the part number, typed in full
         "ZZ0001",  # the code exactly
-        "ZZ0002",  # a code found whole, with more typed after it
-        "ZZ0003",  # still typing: 1 left, a mark goes before a part number
-        "AB12Q",  # still typing: 1 left
+        "AB12Q",  # part numbers that start with it: 1 left
         "AB12QF",  # 2 left
-        "ZZ0004",  # 4 left
         "AB12QFN-TR",  # 6 left
+        "ZZ0002",  # a code found whole, with more typed after it
+        "ZZ0003",  # a mark still being typed, 1 left
+        "ZZ0004",  # 4 left
     ]
     assert [c.by_part_number_start for c in found] == [
         False,
         False,
-        False,
-        False,
         True,
         True,
-        False,
         True,
+        False,
+        False,
+        False,
     ]
 
 
+def test_a_long_part_number_is_not_buried_under_short_codes() -> None:
+    # Codes of one to three characters are what SOT-23 parts carry. Each is
+    # found whole in a long part number, but accounts for little of it.
+    wanted = Chip(mpn="EX62130RGTR", manufacturer="Example Semi")
+    codes = [
+        Chip(mpn=f"ZZ{n}", manufacturer="Example Semi", markings=(Marking(code),))
+        for n, code in enumerate(("E", "EX", "EX6"))
+    ]
+    found = find_chips(_source(*codes, wanted), "EX62130RGT")
+    assert [c.chip.mpn for c in found] == ["EX62130RGTR", "ZZ2", "ZZ1", "ZZ0"]
+
+
+def test_marks_keep_the_source_order_around_the_starts() -> None:
+    source = _source(_START_1_LEFT, _MARK_1_LEFT, _WHOLE, _EXACT)
+    marks = [c.chip for c in find_chips(source, "AB12") if not c.by_part_number_start]
+    assert marks == [m.chip for m in source.by_marking("AB12")]
+
+
 def test_a_chip_found_two_ways_ranks_at_the_better_of_them() -> None:
-    # Its code is found whole, so it ranks with the whole marks even though
-    # its part number has a lot left to type.
-    both = Chip(mpn="AB12QFN-TR", manufacturer="Example Semi", markings=(Marking("AB1"),))
-    found = find_chips(_source(_START_1_LEFT, both), "AB12")
+    # Its code is exactly what was typed, so it ranks as an exact mark even
+    # though its part number has a lot left to type.
+    exact = Chip(mpn="AB12QFN-TR", manufacturer="Example Semi", markings=(Marking("AB12"),))
+    found = find_chips(_source(_START_1_LEFT, exact), "AB12")
     assert [c.chip.mpn for c in found] == ["AB12QFN-TR", "AB12Q"]
     assert found[0].by_part_number_start
     assert found[0].match is not None
-    assert found[0].match.kind is MatchKind.WHOLE_MARK
-    # And a code with more left than the part number ranks by the part number.
+    assert found[0].match.kind is MatchKind.EXACT
+    # A code with more left to type ranks by its part number instead.
     late = Chip(mpn="AB12Z", manufacturer="Example Semi", markings=(Marking("AB12WXYZ"),))
-    found = find_chips(_source(_START_2_LEFT, late), "AB12")
-    assert [c.chip.mpn for c in found] == ["AB12Z", "AB12QF"]
+    found = find_chips(_source(_START_2_LEFT, _MARK_1_LEFT, late), "AB12")
+    assert [c.chip.mpn for c in found] == ["AB12Z", "AB12QF", "ZZ0003"]
+    assert found[0].match is not None
+
+
+def test_the_floor_counts_characters_as_typed_not_as_folded() -> None:
+    # "ß" folds to "ss" and "ﬃ" to "ffi": still one character typed.
+    source = _Asked(Chip(mpn="SS1234", manufacturer="Example Semi"))
+    assert find_chips(source, "ß1") == []
+    assert find_chips(source, "ﬃ") == []
+    assert source.asked == []
+    assert [c.chip.mpn for c in find_chips(source, "ß12")] == ["SS1234"]
+    assert source.asked == ["ß12"]
+
+
+def test_a_whole_part_number_found_only_as_a_start_is_the_part_number() -> None:
+    class NoGet(InMemoryChipSource):
+        def get(self, mpn: str) -> Chip | None:
+            return None
+
+    other = Chip(mpn="ZZ0009", manufacturer="Example Semi", markings=(Marking("EX12"),))
+    found = find_chips(NoGet([other, _BUCK]), "ex1234qfn")
+    assert found[0] == Candidate(_BUCK, by_part_number=True)
+    assert [c.chip.mpn for c in found] == ["EX1234QFN", "ZZ0009"]
+
+
+def test_a_candidate_is_never_both_the_part_number_and_its_start() -> None:
+    # A careless get that answers for less than the whole part number: the
+    # chip is still one candidate, said to be found by its part number only.
+    class Careless(InMemoryChipSource):
+        def get(self, mpn: str) -> Chip | None:
+            return _BUCK
+
+    (only,) = find_chips(Careless([_BUCK]), "EX12")
+    assert only == Candidate(_BUCK, by_part_number=True)
 
 
 def test_a_start_a_source_gets_wrong_is_not_listed() -> None:

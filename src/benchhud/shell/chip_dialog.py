@@ -5,9 +5,9 @@ what's printed on the part, arrow to a candidate, Enter opens its datasheet.
 
 **One box, tried both ways.** What's typed goes to the source as a mark and as
 a part number (:func:`benchhud.chips.find.find_chips`). The answers are one
-list: the chip whose part number it is comes first, then every chip whose mark
-the text holds whole, then everything still being typed — marks and the
-starts of part numbers, least left to type first. A mark is found from its
+list: the chip whose part number it is, then a code that is exactly the text,
+then part numbers that start with it (least left to type first), then codes
+the text holds whole, then codes still being typed. A mark is found from its
 first character; the start of a part number from the third.
 
 **Never one silent answer.** A mark is many-to-many — the same three characters
@@ -111,7 +111,13 @@ from PySide6.QtWidgets import (
 
 from benchhud.chips.card import NOTHING_TO_SHOW, SHOW_ON_CARD, SHOW_ON_CARD_TIP, sent_line
 from benchhud.chips.composite import MergedChip
-from benchhud.chips.find import MIN_PART_NUMBER_START, Candidate, find_chips, with_provenance
+from benchhud.chips.find import (
+    MIN_PART_NUMBER_START,
+    Candidate,
+    find_chips,
+    short_of_part_number_start,
+    with_provenance,
+)
 from benchhud.chips.linkout import (
     MARKING_SITES,
     MAX_SENT,
@@ -121,7 +127,7 @@ from benchhud.chips.linkout import (
     sendable,
 )
 from benchhud.chips.marking import MatchKind, normalise_mark
-from benchhud.chips.model import Chip, Document, Substitute, mpn_key
+from benchhud.chips.model import Chip, Document, Substitute
 from benchhud.chips.source import ChipSource, NullChipSource
 from benchhud.shell.browser import open_in_browser
 from benchhud.shell.qt_util import hint, notice, set_tone
@@ -252,7 +258,7 @@ def match_label(candidate: Candidate) -> str:
 
 def _too_short(text: str) -> str:
     """Why a part number might not have been found yet, when that's the reason."""
-    if len(mpn_key(text)) >= MIN_PART_NUMBER_START:
+    if not short_of_part_number_start(text):
         return ""
     return f" The start of a part number is looked up from {MIN_PART_NUMBER_START} characters."
 

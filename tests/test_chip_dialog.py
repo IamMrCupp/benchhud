@@ -257,6 +257,12 @@ def test_a_short_miss_says_when_part_numbers_are_looked_up(qtbot) -> None:
     )
 
 
+def test_the_short_miss_line_counts_characters_as_typed(qtbot) -> None:
+    dialog = _dialog(qtbot, InMemoryChipSource([]))
+    _type(dialog, "ß1")  # folds to three characters; two were typed
+    assert "looked up from 3 characters" in dialog.status_label.text()
+
+
 def test_nothing_says_a_part_number_has_to_be_typed_in_full(qtbot) -> None:
     dialog = _dialog(qtbot)
     assert "in full" not in PROMPT

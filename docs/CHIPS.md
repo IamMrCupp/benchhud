@@ -197,11 +197,16 @@ looked up as a mark and as a part number, and the answers come back as one list.
 - A **part number** is found from its first three characters. You don't have to
   type all of `EX1234QFN`: `EX12` lists every part number that starts that way,
   the shortest first. Case doesn't matter.
-- **How they rank.** The part number typed in full comes first. Then marks found
-  whole — the code exactly, or the code with a date code after it. Then
-  everything you're still typing, marks and part numbers together, the one with
-  the least left to type first. A chip found more than one way is listed once,
-  and the Match column says each way it was found.
+- **How they rank.** What accounts for more of what you typed comes first:
+  1. the part number, typed in full;
+  2. a mark whose code is exactly what you typed;
+  3. part numbers that start with it, the least left to type first;
+  4. marks whose code is the start of what you typed, with a date code after it;
+  5. marks you're still typing.
+
+  So typing `TPS62130` lists `TPS62130RGT` above a chip marked `TP`. A chip
+  found more than one way is listed once, and the Match column says each way it
+  was found.
 - **It's a list, never one answer.** The same three characters turn up on
   different chips in different packages, so every candidate is shown with its
   package and functions. If there are several, none is picked for you.
