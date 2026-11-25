@@ -897,6 +897,121 @@ def test_the_sources_are_held_as_they_were_given() -> None:
     assert CompositeChipSource(None).get("EX1234QFN") is None  # type: ignore[arg-type]
 
 
+# --- the start of a part number -------------------------------------------
+
+
+class _Starts:
+    """A source whose part-number search hands back whatever it's given."""
+
+    def __init__(self, *answer: object, name: str = "starts", lookup: bool = True) -> None:
+        self.answer = answer
+        self.name = name
+        self.lookup = lookup
+
+    def get(self, mpn: str) -> Chip | None:
+        if not self.lookup:
+            return None
+        wanted = mpn.strip().casefold()
+        return next((c for c in self.answer if isinstance(c, Chip) and c.key == wanted), None)
+
+    def by_marking(self, text: str) -> list[MarkingMatch]:
+        return []
+
+    def by_mpn_prefix(self, text: str) -> list:
+        return list(self.answer)
+
+
+def test_no_sources_start_no_part_number() -> None:
+    assert CompositeChipSource([]).by_mpn_prefix("EX12") == []
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None, 7])
+def test_nothing_typed_starts_no_part_number(blank: object) -> None:
+    assert _composite([_FULL]).by_mpn_prefix(blank) == []  # type: ignore[arg-type]
+
+
+def test_a_part_number_start_in_two_sources_is_one_candidate_shown_merged() -> None:
+    local = _chip(description="Runs hot")
+    (found,) = _composite([local], [_FULL]).by_mpn_prefix("ex12")
+    assert found == _merge(local, _FULL).chip
+    assert found.description == "Runs hot"
+    assert found.package == "QFN-20 (3x3)"  # filled from the community source
+
+
+def test_part_number_starts_from_every_source_are_put_in_one_order() -> None:
+    short = _chip("EX12")
+    longer = _chip("EX1234QFN-TR")
+    later = _chip("EX1299QFN")
+    source = _composite([longer, _FULL], [later, short])
+    assert [c.mpn for c in source.by_mpn_prefix("EX12")] == [
+        "EX12",
+        "EX1234QFN",
+        "EX1299QFN",
+        "EX1234QFN-TR",
+    ]
+    assert [c.mpn for c in source.by_mpn_prefix("EX129")] == ["EX1299QFN"]
+
+
+def test_one_source_failing_a_part_number_start_does_not_take_the_others_down(caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="benchhud.chips.composite")
+    good = InMemoryChipSource([_FULL], "community")
+    # _Broken and _Wrong have no part-number search at all: that's a failure too.
+    for broken in (_Broken(), _Wrong(None), _Nameless()):
+        for sources in ([broken, good], [good, broken]):
+            assert CompositeChipSource(sources).by_mpn_prefix("EX12") == [_FULL]
+    assert caplog.records
+    assert CompositeChipSource([_Broken(), _Broken()]).by_mpn_prefix("EX12") == []
+
+
+@pytest.mark.parametrize(
+    "junk",
+    [
+        None,
+        "EX1234QFN",
+        {"mpn": "EX1234QFN"},
+        _chip("EX9000SOT"),  # a chip, but not one the text starts
+        _chip(""),  # no part number at all
+        replace(_FULL, mpn=7),  # type: ignore[arg-type]
+    ],
+)
+def test_a_part_number_start_that_is_not_one_is_ignored(junk: object) -> None:
+    source = CompositeChipSource([_Starts(junk, _FULL), InMemoryChipSource([], "community")])
+    assert source.by_mpn_prefix("EX12") == [_FULL]
+    assert CompositeChipSource([_Starts(junk)]).by_mpn_prefix("EX12") == []
+
+
+def test_an_answer_that_is_not_a_list_is_nothing_from_that_source(caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="benchhud.chips.composite")
+
+    class NoList(_Starts):
+        def by_mpn_prefix(self, text: str):
+            return None
+
+    good = InMemoryChipSource([_FULL], "community")
+    assert CompositeChipSource([NoList(), good]).by_mpn_prefix("EX12") == [_FULL]
+
+
+def test_a_part_number_start_a_source_cannot_look_up_is_still_a_candidate() -> None:
+    offered = _chip("EX7000QFN", description="Offered")
+    extra = _chip("EX7000QFN", package="QFN-16")
+    source = CompositeChipSource(
+        [InMemoryChipSource([extra], "local"), _Starts(offered, lookup=False)]
+    )
+    (found,) = source.by_mpn_prefix("EX70")
+    assert found == _chip("EX7000QFN", package="QFN-16", description="Offered")
+    assert CompositeChipSource([_Starts(offered, lookup=False)]).by_mpn_prefix("EX7") == [offered]
+
+
+def test_a_mangled_chip_costs_only_the_source_that_gave_it_a_start(caplog) -> None:
+    caplog.set_level(logging.ERROR, logger="benchhud.chips.composite")
+    mangled = replace(_FULL, functions=None)  # type: ignore[arg-type]
+    other = _chip("EX1299QFN")
+    source = CompositeChipSource(
+        [InMemoryChipSource([mangled], "local"), InMemoryChipSource([other], "community")]
+    )
+    assert source.by_mpn_prefix("EX12") == [other]
+
+
 # --- with real directory sources ------------------------------------------
 
 
@@ -938,3 +1053,4 @@ def test_an_overlay_directory_over_a_built_index(tmp_path) -> None:
     assert [m.chip.mpn for m in found] == ["EX1234QFN", "EX9000SOT"]
     assert found[0].chip == merged.chip
     assert source.get("SD77/NOPB") == DirChipSource(root=FIXTURE).get("SD77/NOPB")
+    assert source.by_mpn_prefix("ex") == [merged.chip, source.get("EX9000SOT")]

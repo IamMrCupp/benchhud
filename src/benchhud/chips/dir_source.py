@@ -83,6 +83,7 @@ import logging
 import os
 import threading
 import tomllib
+from bisect import bisect_left
 from collections.abc import Iterable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -91,6 +92,7 @@ from typing import Any
 
 from benchhud.chips.marking import MarkingMatch, match_markings
 from benchhud.chips.model import Chip, Document, Marking, Substitute, UsedIn, mpn_key
+from benchhud.chips.source import mpn_prefix_order
 
 log = logging.getLogger(__name__)
 
@@ -458,6 +460,8 @@ class _Loaded:
 
     chips: tuple[Chip, ...] = ()
     by_key: Mapping[str, Chip] = field(default_factory=dict)
+    #: Every key in ``by_key``, sorted: a part-number search bisects it.
+    keys: tuple[str, ...] = ()
     origin: Path | None = None
     read_from: str = ""
     problems: tuple[str, ...] = ()
@@ -469,7 +473,13 @@ def _first_of_each(chips: Iterable[Chip], origin: Path, read_from: str) -> _Load
         held = by_key.setdefault(chip.key, chip)
         if held is not chip:
             _warn("%s: %r is there twice; keeping the first", origin, chip.mpn.strip())
-    return _Loaded(chips=tuple(by_key.values()), by_key=by_key, origin=origin, read_from=read_from)
+    return _Loaded(
+        chips=tuple(by_key.values()),
+        by_key=by_key,
+        keys=tuple(sorted(by_key)),
+        origin=origin,
+        read_from=read_from,
+    )
 
 
 def _load(root: Path | None, name: str) -> _Loaded:
@@ -605,3 +615,18 @@ class DirChipSource:
 
     def by_marking(self, text: str) -> list[MarkingMatch]:
         return match_markings(self._current().chips, text)
+
+    def by_mpn_prefix(self, text: str) -> list[Chip]:
+        wanted = mpn_key(text)
+        if not wanted:
+            return []
+        loaded = self._current()
+        # Every key that starts with the text sorts in one run, from where the
+        # text itself would go — so a search costs the run, not the checkout.
+        keys = loaded.keys
+        found: list[Chip] = []
+        for at in range(bisect_left(keys, wanted), len(keys)):
+            if not keys[at].startswith(wanted):
+                break
+            found.append(loaded.by_key[keys[at]])
+        return sorted(found, key=mpn_prefix_order)

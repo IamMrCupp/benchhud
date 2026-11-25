@@ -17,6 +17,7 @@ No source runs git or reaches the network.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -45,6 +46,47 @@ class ChipSource(Protocol):
         """
         ...
 
+    def by_mpn_prefix(self, text: str) -> list[Chip]:
+        """Chips whose part number starts with ``text``, the shortest first.
+
+        Compared the way part numbers are (:func:`~benchhud.chips.model.mpn_key`):
+        ends trimmed, case ignored. A part number that *is* the text counts.
+        Nothing typed finds nothing. A source answers whatever length it's
+        given; how short is too short to ask is the caller's call. See
+        :func:`mpn_prefix_order` for the order.
+        """
+        ...
+
+
+def mpn_prefix_order(chip: Chip) -> tuple[int, str]:
+    """Where a chip goes in a part-number search: least left to type first.
+
+    The typed text is the start of every one, so the shortest part number is
+    the one it's closest to. Ties go by part number, so the order is fixed.
+    """
+    key = chip.key
+    return len(key), key
+
+
+def match_mpn_prefix(chips: Iterable[Chip], text: str | None) -> list[Chip]:
+    """Every chip whose part number starts with ``text``, in
+    :func:`mpn_prefix_order`.
+
+    A part number that's in ``chips`` twice is the first one, the same as a
+    lookup by part number; a chip with no part number is never found. A plain
+    walk of the list — a source with a lot of chips keeps them sorted and
+    finds the run by bisecting instead.
+    """
+    wanted = mpn_key(text)
+    if not wanted:
+        return []
+    found: dict[str, Chip] = {}
+    for chip in chips:
+        key = chip.key
+        if key and key.startswith(wanted):
+            found.setdefault(key, chip)
+    return sorted(found.values(), key=mpn_prefix_order)
+
 
 class NullChipSource:
     """Default: no chip data configured — benchhud runs without it."""
@@ -57,13 +99,16 @@ class NullChipSource:
     def by_marking(self, text: str) -> list[MarkingMatch]:
         return []
 
+    def by_mpn_prefix(self, text: str) -> list[Chip]:
+        return []
+
 
 @dataclass
 class InMemoryChipSource:
     """A source backed by a list — for tests, demos, and offline fallback.
 
     If two chips in the list share a part number, the first one is the chip,
-    for both lookups. A chip with a blank part number is never found.
+    for every lookup. A chip with a blank part number is never found.
     """
 
     chips: list[Chip] = field(default_factory=list)
@@ -77,3 +122,6 @@ class InMemoryChipSource:
 
     def by_marking(self, text: str) -> list[MarkingMatch]:
         return match_markings(self.chips, text)
+
+    def by_mpn_prefix(self, text: str) -> list[Chip]:
+        return match_mpn_prefix(self.chips, text)

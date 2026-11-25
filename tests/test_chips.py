@@ -464,3 +464,48 @@ def test_no_amount_of_length_lifts_a_half_typed_match_above_a_full_one() -> None
     huge = "Z" * 5000
     assert 0 < marking_score(huge, "z") < marking_score(huge, "Z") < weakest_full
     assert marking_score(huge, huge.lower()) > weakest_full
+
+
+# --- the start of a part number -------------------------------------------
+
+
+def test_null_source_finds_no_part_number_start() -> None:
+    assert NullChipSource().by_mpn_prefix("EX12") == []
+
+
+def test_the_start_of_a_part_number_finds_it_whatever_the_case() -> None:
+    source = InMemoryChipSource([_BUCK])
+    for typed in ("EX12", "ex12", " Ex1234q ", "EX1234QFN"):
+        assert source.by_mpn_prefix(typed) == [_BUCK]
+
+
+def test_only_the_start_counts_not_the_middle() -> None:
+    source = InMemoryChipSource([_BUCK])
+    assert source.by_mpn_prefix("1234") == []
+    assert source.by_mpn_prefix("QFN") == []
+    assert source.by_mpn_prefix("EX1234QFN-TR") == []
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_nothing_typed_starts_no_part_number(blank: str) -> None:
+    assert InMemoryChipSource([_BUCK]).by_mpn_prefix(blank) == []
+
+
+def test_the_shortest_part_number_comes_first_then_by_part_number() -> None:
+    long = _chip("EX1234QFN-TR", "Q1")
+    other = _chip("EX1299QFN", "Q2")
+    short = _chip("EX12", "Q3")
+    found = InMemoryChipSource([long, _BUCK, other, short]).by_mpn_prefix("ex12")
+    assert [c.mpn for c in found] == ["EX12", "EX1234QFN", "EX1299QFN", "EX1234QFN-TR"]
+
+
+def test_a_part_number_start_takes_the_first_of_two_chips_with_one_part_number() -> None:
+    again = _chip("ex1234qfn", "Q9", package="SOP-8")
+    source = InMemoryChipSource([_BUCK, again])
+    assert source.by_mpn_prefix("EX12") == [_BUCK]
+    assert source.by_mpn_prefix("EX12") == [source.get("EX1234QFN")]
+
+
+def test_a_chip_with_no_part_number_starts_nothing() -> None:
+    blank = Chip(mpn="  ", manufacturer="Example Semi")
+    assert InMemoryChipSource([blank, _BUCK]).by_mpn_prefix("E") == [_BUCK]

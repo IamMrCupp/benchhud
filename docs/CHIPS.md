@@ -194,7 +194,17 @@ looked up as a mark and as a part number, and the answers come back as one list.
 
 - A **mark** is found from its first character, and narrows as you type. The
   whole mark is fine — `X1=6A` finds the chip whose code is `X1=`.
-- A **part number** has to be typed in full.
+- A **part number** is found from its first three characters. You don't have to
+  type all of `EX1234QFN`: `EX12` lists every part number that starts that way,
+  the shortest first. Case doesn't matter.
+- **How they rank.** The part number typed in full comes first. Then the marks,
+  in the order the mark rules give them, with part numbers that start with what
+  you typed merged in by how near they are: how much is left to type of the part
+  number, against how far each code's length is from what you typed. So typing
+  `TPS62130` lists `TPS62130RGT` above a chip marked `TP`, and typing `EXC` lists
+  a chip marked `EXCQ` above every part number that starts `EXC` and has more to
+  go. A chip found more than one way is listed once, and the Match column says
+  each way it was found.
 - **It's a list, never one answer.** The same three characters turn up on
   different chips in different packages, so every candidate is shown with its
   package and functions. If there are several, none is picked for you.
