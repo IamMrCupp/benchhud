@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.35.0](https://github.com/IamMrCupp/benchhud/compare/v0.34.3...v0.35.0) (2026-11-25)
+
+
+### Features
+
+* **chips:** find a part number from its first three characters ([66c3c1e](https://github.com/IamMrCupp/benchhud/commit/66c3c1e8dbedb94ecc39184604728bfcd6ae9974))
+* **chips:** find a part number from its first three characters ([9baeec5](https://github.com/IamMrCupp/benchhud/commit/9baeec56e579e8686d468d38092c4bc7e8736371))
+* **chips:** find a part number from its first three characters ([584296e](https://github.com/IamMrCupp/benchhud/commit/584296eab36cc0d152118e9afaebbba24cf7e652))
+* **chips:** find a part number from its first three characters ([ebcecbc](https://github.com/IamMrCupp/benchhud/commit/ebcecbc9d3980345aba32bde2d55b5708d99a7ef))
+* **chips:** find a part number from its first three characters ([88b244d](https://github.com/IamMrCupp/benchhud/commit/88b244d5e0e4fd5ee90f91564762c19d6e1d18c6))
+
+
+### Documentation
+
+* **readme:** add APPEARANCE.md to the docs table ([75cc729](https://github.com/IamMrCupp/benchhud/commit/75cc729a4e0ff696bf58db71c287bfd3aa444e8e))
+* **readme:** keep device names out of the HUD picture, and clean up after the picture script ([1ebe0aa](https://github.com/IamMrCupp/benchhud/commit/1ebe0aac3f1cd3dd88b8ef287775bdc2401cfca4))
+* **readme:** keep device names out of the HUD picture, and clean up after the picture script ([a5e213c](https://github.com/IamMrCupp/benchhud/commit/a5e213c63af745e1cd8f0fa4f758917c024aec67))
+* **readme:** keep device names out of the HUD picture, and clean up after the picture script ([78f5efd](https://github.com/IamMrCupp/benchhud/commit/78f5efdece3591160eb686aa15d94df3502ae05d))
+* **readme:** retake the HUD picture and add the thermal modes, meter and jobs, rendered from demo data ([1ebe0aa](https://github.com/IamMrCupp/benchhud/commit/1ebe0aac3f1cd3dd88b8ef287775bdc2401cfca4))
+* **readme:** retake the HUD picture and add the thermal modes, meter and jobs, rendered from demo data ([a5e213c](https://github.com/IamMrCupp/benchhud/commit/a5e213c63af745e1cd8f0fa4f758917c024aec67))
+* **readme:** retake the HUD picture and add the thermal modes, meter and jobs, rendered from demo data ([78f5efd](https://github.com/IamMrCupp/benchhud/commit/78f5efdece3591160eb686aa15d94df3502ae05d))
+
 ## [0.34.3](https://github.com/IamMrCupp/benchhud/compare/v0.34.2...v0.34.3) (2026-11-25)
 
 
