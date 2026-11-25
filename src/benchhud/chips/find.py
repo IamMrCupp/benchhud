@@ -7,22 +7,29 @@ because it's long and the candidates are wanted before it's all typed. So the
 text is looked up as a mark, as a whole part number and as the start of one,
 and the answers come back as one list:
 
-1. **The chip whose part number it is.** A part number is a chip's identity,
-   so typing one in full is the strongest thing there is to go on.
-2. **Every chip whose code is exactly what was typed.**
-3. **Every chip whose part number starts with it**, least left to type first.
-4. **Every chip whose code the text holds whole**, with more typed after it —
-   a date code, or the rest of something that isn't a mark at all.
-5. **Every chip whose code starts with it**: a mark still being typed.
+1. **The chip whose part number it is, first.** A part number is a chip's
+   identity, so typing one in full is the strongest thing there is to go on.
+2. **Then the marks, in the order the source ranked them**
+   (:mod:`benchhud.chips.marking`), **with the starts of part numbers merged
+   in by how near they are.**
 
-Marks keep the order the source ranked them in (:mod:`benchhud.chips.marking`),
-so (2), (4) and (5) are that order. What this adds is where a part number
-goes. The rule is the marking module's own, carried across: what accounts
-for more of the typed text ranks higher. The start of a part number accounts
-for all of it; a code found whole with more typed after it accounts for only
-the code. So ``TPS62130`` lists ``TPS62130RGT`` above a chip whose code is
-``TP``. A code that *is* the text accounts for all of it with nothing left to
-type, so it stays above every start.
+Near is how many characters stand between what was typed and the candidate:
+
+- for the start of a part number, how much is left to type;
+- for a mark, how far the code's length is from the text's — what's left to
+  type of a code still being typed, or what was typed past a code found
+  whole (``X1=6A`` is two past ``X1=``). A code that *is* the text is 0.
+
+A start goes ahead of every mark further away than it is; on a tie the mark
+goes first. The marks never change order among themselves — a code found
+whole still beats one still being typed, as the marking rules say — so a
+start can only go *between* them.
+
+Why: a short code turns up whole at the start of nearly anything, so
+``TPS62130`` lists ``TPS62130RGT`` (one left to type) ahead of chips coded
+``T`` or ``TP``, which are seven and six characters short of what was typed.
+And a mark one key from done (``EXC`` typed, code ``EXCQ``) isn't buried under
+every part number that starts ``EXC``: those all have more left to type.
 
 A chip found more than one way is one candidate, carrying every fact, at the
 best place any of them earns it.
@@ -54,7 +61,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from benchhud.chips.composite import MergedChip
-from benchhud.chips.marking import MarkingMatch, MatchKind, normalise_mark
+from benchhud.chips.marking import MarkingMatch, normalise_mark
 from benchhud.chips.model import Chip, mpn_key
 from benchhud.chips.source import ChipSource
 
@@ -91,6 +98,10 @@ def short_of_part_number_start(text: str | None) -> bool:
     return len(normalise_mark(text)) < MIN_PART_NUMBER_START
 
 
+def _length(text: str) -> int:
+    return len(normalise_mark(text).casefold())
+
+
 def find_chips(source: ChipSource, text: str | None) -> list[Candidate]:
     """Every chip ``text`` could be, best first.
 
@@ -102,56 +113,55 @@ def find_chips(source: ChipSource, text: str | None) -> list[Candidate]:
     if not typed:
         return []
     wanted = mpn_key(typed)
-    by_mpn = source.get(typed)
-    matches = list(source.by_marking(typed) or ())
+    typed_length = _length(typed)
+    whole = source.get(typed)
+    if whole is not None and whole.key != wanted:
+        whole = None  # not the part number asked for: a source's mistake, not an answer
+    matches = [match for match in source.by_marking(typed) or () if match.chip.key]
     starts: list[Chip] = []
     if not short_of_part_number_start(typed):
-        starts = list(source.by_mpn_prefix(typed) or ())
+        starts = [chip for chip in source.by_mpn_prefix(typed) or () if chip.key.startswith(wanted)]
+    if whole is None:
+        # A source whose lookup by part number missed it, but whose search by
+        # the start found it: it's still the part number that was typed.
+        whole = next((chip for chip in starts if chip.key == wanted), None)
+    starts.sort(key=lambda chip: len(chip.key))  # nearest first; ties as the source gave them
 
-    # Per chip, by key: the candidate so far and the best rank it has earned.
-    # A rank is (place in the module docstring's list, the source's order):
-    # the source already puts its marks best first and its starts least left
-    # to type first, so within a place its order is the order.
+    def mark_distance(match: MarkingMatch) -> int:
+        return abs(_length(match.marking.code) - typed_length)
+
+    # The marks in their own order, the starts merged in by distance.
+    merged: list[tuple[Chip, MarkingMatch | None]] = []
+    m = n = 0
+    while m < len(matches) or n < len(starts):
+        take_mark = n == len(starts) or (
+            m < len(matches) and mark_distance(matches[m]) <= len(starts[n].key) - len(wanted)
+        )
+        if take_mark:
+            merged.append((matches[m].chip, matches[m]))
+            m += 1
+        else:
+            merged.append((starts[n], None))
+            n += 1
+
+    # One candidate per chip, where it first appears, carrying every fact.
     found: dict[str, Candidate] = {}
-    rank: dict[str, tuple[int, int]] = {}
-
-    def earn(key: str, at: tuple[int, int]) -> None:
-        if key not in rank or at < rank[key]:
-            rank[key] = at
-
-    if by_mpn is not None and by_mpn.key:
-        found[by_mpn.key] = Candidate(by_mpn, by_part_number=True)
-        earn(by_mpn.key, (1, 0))
-    for order, match in enumerate(matches):
-        key = match.chip.key
-        if not key:
-            continue
-        held = found.get(key)
-        if held is None:
-            found[key] = Candidate(match.chip, match=match)
-        elif held.match is None:
-            found[key] = replace(held, match=match)
-        else:
-            continue  # a chip is shown under its best mark, the first offered
-        # (4) and (5) share a place: the source ranks a code found whole
-        # above one still being typed.
-        earn(key, (2 if match.kind is MatchKind.EXACT else 4, order))
-    for order, chip in enumerate(starts):
+    if whole is not None:
+        found[whole.key] = Candidate(whole, by_part_number=True)
+    for chip, match in merged:
         key = chip.key
-        if not key or not key.startswith(wanted):
-            continue
         held = found.get(key)
-        if held is not None and (held.by_part_number or held.by_part_number_start):
-            continue
-        if key == wanted:
-            # The whole part number, from a source whose lookup by part number
-            # missed it: it's what was typed, so it's (1), not a start.
-            fact, at = {"by_part_number": True}, (1, 0)
-        else:
-            fact, at = {"by_part_number_start": True}, (3, order)
-        found[key] = Candidate(chip, **fact) if held is None else replace(held, **fact)
-        earn(key, at)
-    return [found[key] for key in sorted(found, key=lambda key: rank[key])]
+        if match is not None:
+            if held is None:
+                found[key] = Candidate(chip, match=match)
+            elif held.match is None:
+                found[key] = replace(held, match=match)
+            # else: a chip is shown under its best mark, the first offered
+        elif held is None:
+            found[key] = Candidate(chip, by_part_number_start=True)
+        elif not (held.by_part_number or held.by_part_number_start):
+            found[key] = replace(held, by_part_number_start=True)
+    return list(found.values())
 
 
 def tells_sources_apart(source: object) -> bool:

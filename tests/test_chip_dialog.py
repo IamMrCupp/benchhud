@@ -312,6 +312,15 @@ def test_a_part_number_in_full_is_not_called_a_start(qtbot) -> None:
     assert "start" not in dialog.found_label.text()
 
 
+def test_a_mark_one_key_from_done_is_shown_over_a_run_of_part_numbers(qtbot) -> None:
+    marked = Chip(mpn="ZZ0001", manufacturer="Example Semi", markings=(Marking("EXCQ"),))
+    family = [Chip(mpn=f"EXC{n:04}EDD", manufacturer="Example Semi") for n in range(250)]
+    dialog = _dialog(qtbot, InMemoryChipSource([*family, marked]))
+    _type(dialog, "EXC")
+    assert _part_numbers(dialog)[0] == "ZZ0001"
+    assert dialog.status_label.text() == "Showing the best 200 of 251 candidates — keep typing."
+
+
 def test_clearing_the_box_clears_the_list(qtbot) -> None:
     dialog = _dialog(qtbot)
     _type(dialog, "X1=")

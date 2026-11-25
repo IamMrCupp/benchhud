@@ -5,10 +5,10 @@ what's printed on the part, arrow to a candidate, Enter opens its datasheet.
 
 **One box, tried both ways.** What's typed goes to the source as a mark and as
 a part number (:func:`benchhud.chips.find.find_chips`). The answers are one
-list: the chip whose part number it is, then a code that is exactly the text,
-then part numbers that start with it (least left to type first), then codes
-the text holds whole, then codes still being typed. A mark is found from its
-first character; the start of a part number from the third.
+list: the chip whose part number it is first, then the marks in the source's
+ranked order, with part numbers that start with the text merged in by how
+near they are. A mark is found from its first character; the start of a part
+number from the third.
 
 **Never one silent answer.** A mark is many-to-many — the same three characters
 turn up on different chips in different packages — so every candidate is
