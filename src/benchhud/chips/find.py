@@ -20,10 +20,16 @@ Near is how many characters stand between what was typed and the candidate:
   type of a code still being typed, or what was typed past a code found
   whole (``X1=6A`` is two past ``X1=``). A code that *is* the text is 0.
 
-A start goes ahead of every mark further away than it is; on a tie the mark
-goes first. The marks never change order among themselves — a code found
-whole still beats one still being typed, as the marking rules say — so a
-start can only go *between* them.
+A start goes ahead of the next mark when it's nearer; on a tie the mark goes
+first. The marks never change order among themselves — a code found whole
+still beats one still being typed, as the marking rules say — so a start can
+only go *between* them. One thing follows from that: a short code found whole
+holds back the marks after it. Typing ``AB12`` in a library with a chip coded
+``A`` (three typed past it) lists ``AB12Q`` and ``AB12QF`` ahead of ``A``, and
+so ahead of a code ``AB12X`` behind it, though that's one from done. Only
+part numbers nearer than the shortest code found whole can pass it, which at
+the bench is a few rows. The other way round — ``A`` ahead of ``AB12Q`` — is
+the bug this order exists to avoid.
 
 Why: a short code turns up whole at the start of nearly anything, so
 ``TPS62130`` lists ``TPS62130RGT`` (one left to type) ahead of chips coded

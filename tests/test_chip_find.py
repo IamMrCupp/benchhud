@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from benchhud.chips.composite import CompositeChipSource
 from benchhud.chips.find import MIN_PART_NUMBER_START, Candidate, find_chips
 from benchhud.chips.marking import MatchKind
 from benchhud.chips.model import Chip, Marking
@@ -198,6 +199,8 @@ _START_1_LEFT = Chip(mpn="AB12Q", manufacturer="Example Semi")
 _START_2_LEFT = Chip(mpn="AB12QF", manufacturer="Example Semi")
 _START_6_LEFT = Chip(mpn="AB12QFN-TR", manufacturer="Example Semi")
 _FULL_MPN = Chip(mpn="AB12", manufacturer="Example Semi")
+_CODED_A = Chip(mpn="ZZ0005", manufacturer="Example Semi", markings=(Marking("A"),))
+_SUB_CODE = Chip(mpn="EX0002", manufacturer="Example Semi", markings=(Marking("X1"),))
 
 
 def test_how_a_part_number_start_ranks_against_the_marks() -> None:
@@ -360,4 +363,39 @@ def test_a_chip_offered_twice_keeps_the_first_mark_it_was_offered_under() -> Non
     assert only.match.marking.code == "X1="
 
 
-_SUB_CODE = Chip(mpn="EX0002", manufacturer="Example Semi", markings=(Marking("X1"),))
+def test_a_short_code_found_whole_holds_back_the_marks_behind_it() -> None:
+    # The cost of keeping the marks in their own order, pinned so it's chosen,
+    # not stumbled on: "A" is three typed past, so the starts nearer than that
+    # go ahead of it — and of "AB12X" behind it, though that's one from done.
+    source = _source(_START_1_LEFT, _START_2_LEFT, _START_6_LEFT, _MARK_1_LEFT, _CODED_A)
+    assert [c.chip.mpn for c in find_chips(source, "AB12")] == [
+        "AB12Q",
+        "AB12QF",
+        "ZZ0005",
+        "ZZ0003",
+        "AB12QFN-TR",
+    ]
+    # Without the short code the near mark goes first, as it should.
+    source = _source(_START_1_LEFT, _START_2_LEFT, _START_6_LEFT, _MARK_1_LEFT)
+    assert find_chips(source, "AB12")[0].chip is _MARK_1_LEFT
+
+
+def test_the_order_holds_through_a_composite_source() -> None:
+    local = InMemoryChipSource([_START_6_LEFT, _MARK_4_LEFT, _START_1_LEFT, _EXACT], "local")
+    community = InMemoryChipSource(
+        [_START_2_LEFT, _WHOLE, _MARK_1_LEFT, _FULL_MPN, replace(_START_1_LEFT, package="QFN-8")],
+        "community",
+    )
+    found = find_chips(CompositeChipSource([local, community]), "ab12")
+    assert [c.chip.mpn for c in found] == [
+        "AB12",
+        "ZZ0001",
+        "ZZ0002",
+        "ZZ0003",
+        "AB12Q",
+        "AB12QF",
+        "ZZ0004",
+        "AB12QFN-TR",
+    ]
+    assert found[4].chip.package == "QFN-8"  # shown merged
+    assert found[4].by_part_number_start
