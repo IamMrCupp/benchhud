@@ -268,12 +268,18 @@ class InstrumentSession:
         ``even_when_stopping`` is started (#530): an ``OUTP ON`` waiting behind
         a slow command would bring the rail up just as the shutdown is about to
         drop it. The rest fails with :class:`InstrumentSessionStopped`.
+
+        A command that raises something that isn't an ``Exception`` takes the
+        thread down, but not before the rest of the queue is seen to, as for a
+        stop (#542). On a read-only session an Output OFF press behind it may
+        be the only thing that drops the rail.
         """
+        fatal: BaseException | None = None
         while True:
             try:
                 action, future, even_when_stopping = self._queue.get_nowait()
             except queue.Empty:
-                return
+                break
             if not future.set_running_or_notify_cancel():
                 continue
             if self._stop.is_set() and not even_when_stopping:
@@ -290,7 +296,12 @@ class InstrumentSession:
             except BaseException as exc:
                 # This one does take the thread down, but its caller still hears (#540).
                 future.set_exception(exc)
-                raise
+                if fatal is None:
+                    fatal = exc
+                    # The thread is going down: from here only what makes it safer runs.
+                    self._stop.set()
+        if fatal is not None:
+            raise fatal
 
     def _drop_output(self, when: str) -> None:
         """Best-effort ``OUTP OFF``. Never raises — this runs on failure paths.
