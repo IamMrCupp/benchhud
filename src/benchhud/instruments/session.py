@@ -268,29 +268,54 @@ class InstrumentSession:
         ``even_when_stopping`` is started (#530): an ``OUTP ON`` waiting behind
         a slow command would bring the rail up just as the shutdown is about to
         drop it. The rest fails with :class:`InstrumentSessionStopped`.
+
+        A command that raises something that isn't an ``Exception`` takes the
+        thread down, but not before the rest of the queue is seen to, as for a
+        stop (#542). On a read-only session an Output OFF press behind it may
+        be the only thing that drops the rail.
         """
+        fatal: BaseException | None = None
         while True:
             try:
                 action, future, even_when_stopping = self._queue.get_nowait()
             except queue.Empty:
-                return
-            if not future.set_running_or_notify_cancel():
-                continue
-            if self._stop.is_set() and not even_when_stopping:
-                future.set_exception(
-                    InstrumentSessionStopped("instrument session stopped before the command ran")
-                )
-                continue
+                break
             try:
-                future.set_result(action(self._driver))
-            except Exception as exc:
-                # A refused command must not take the session down with it.
-                _log.warning("instrument command failed: %s", exc)
-                future.set_exception(exc)
+                self._run_command(action, future, even_when_stopping)
             except BaseException as exc:
-                # This one does take the thread down, but its caller still hears (#540).
-                future.set_exception(exc)
-                raise
+                # From the command, or from a done-callback: setting a future
+                # runs its callbacks here, and they can raise too.
+                if fatal is None:
+                    fatal = exc
+                    # The thread is going down: from here only what makes it safer runs.
+                    self._stop.set()
+                else:
+                    _log.warning("instrument command raised %r as the session went down", exc)
+        if fatal is not None:
+            raise fatal
+
+    def _run_command(
+        self, action: InstrumentAction, future: Future, even_when_stopping: bool
+    ) -> None:
+        if not future.set_running_or_notify_cancel():
+            return
+        if self._stop.is_set() and not even_when_stopping:
+            future.set_exception(
+                InstrumentSessionStopped("instrument session stopped before the command ran")
+            )
+            return
+        try:
+            result = action(self._driver)
+        except Exception as exc:
+            # A refused command must not take the session down with it.
+            _log.warning("instrument command failed: %s", exc)
+            future.set_exception(exc)
+        except BaseException as exc:
+            # This one does take the thread down, but its caller still hears (#540).
+            future.set_exception(exc)
+            raise
+        else:
+            future.set_result(result)
 
     def _drop_output(self, when: str) -> None:
         """Best-effort ``OUTP OFF``. Never raises — this runs on failure paths.
