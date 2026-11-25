@@ -44,6 +44,16 @@ jobs:
             echo "No open release PR at $SHA. It moved on since this CI run, or it's already merged."
             exit 0
           fi
+          # The required "commits" check (no-claude-commits.yml) runs beside CI
+          # and can still be going when CI finishes. Wait for every required
+          # check, or main's ruleset refuses the merge.
+          if ! out=$(gh pr checks "$pr" -R "$REPO" --required --watch --fail-fast --interval 5 2>&1); then
+            echo "$out"
+            case "$out" in
+              *"no required checks"*) ;;  # nothing required on main: carry on
+              *) echo "A required check on #$pr didn't pass. Not merging."; exit 1 ;;
+            esac
+          fi
           # --match-head-commit refuses if release-please pushed again meanwhile;
           # that newer commit gets its own CI run and its own try.
           # Empty body: the default lists every change, which release-please
