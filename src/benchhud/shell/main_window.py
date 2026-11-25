@@ -14,6 +14,7 @@ shell animates end to end with no camera.
 from __future__ import annotations
 
 import contextlib
+import html
 import logging
 import os
 import secrets
@@ -43,6 +44,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
+    QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -176,6 +178,8 @@ from benchhud.terminal import TerminalHost, login_shell
 from benchhud.terminal.serial_session import OwonConsoleSession, SerialSession
 from benchhud.themes import load_themes, normalise_choice, themes_dir
 from benchhud.tickets import HttpTicketSource, NullTicketSource, TicketSource
+from benchhud.updates import UpdateResult, update_answer_html
+from benchhud.updates import check as check_for_update
 
 # How often the frame loop runs with the virtual camera off. With it on, the
 # loop runs at ``output.fps`` instead (#359).
@@ -316,6 +320,9 @@ THERMAL_RESET_AFTER_S = 30.0
 #: Mode, and how long to wait between port cycles while it stays there (#362).
 THERMAL_RECOVERY_CHECK_S = 5.0
 THERMAL_RECOVERY_RESET_S = 60.0
+#: The first update check waits this long after start, then they come this far apart (#560).
+UPDATE_FIRST_CHECK_MS = 60_000
+UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 
 def largest_screen(screens):
@@ -370,6 +377,8 @@ class MainWindow(QMainWindow):
     #: A job command from the local server's thread, to run on this one (#433):
     #: (the work, the Future its answer goes in).
     _job_command = Signal(object, object)
+    #: An update check's answer (an UpdateResult), from its thread to this one (#560).
+    _update_checked = Signal(object)
 
     def __init__(
         self,
@@ -421,6 +430,15 @@ class MainWindow(QMainWindow):
         self._recovery_reset_at = float("-inf")
         self._recovery_probing = False
         self._recovery_probed.connect(self._on_recovery_probed)
+        #: Looks for a newer benchhud (a seam so tests don't go online, #560).
+        self.update_check: Callable[[], UpdateResult] = check_for_update
+        self._update_checking = False
+        self._update_asked = False
+        self._update_timer: QTimer | None = None
+        self._update_first: QTimer | None = None
+        #: The Help → Check for updates answer last shown (kept for tests).
+        self.update_box: QMessageBox | None = None
+        self._update_checked.connect(self._on_update_checked)
         self._thermal_recovery: RecoveryDevice | None = None
         self._thermal_device: str | None = None
         self._last_temps = None
@@ -607,6 +625,7 @@ class MainWindow(QMainWindow):
         self._build_boards_menu()
         self._build_chips_menu()
         self._build_view_menu()
+        self._build_help_menu()
         self._default_state = self.saveState()  # for "Reset layout"
 
         self._refresh_status()
@@ -777,6 +796,24 @@ class MainWindow(QMainWindow):
         quit_action.setMenuRole(QAction.MenuRole.QuitRole)
         quit_action.triggered.connect(self.close)
         menu.addAction(quit_action)
+
+    def _build_help_menu(self) -> None:
+        menu = self.menuBar().addMenu("Help")
+        self.check_updates_action = QAction("Check for updates…", self)
+        # Kept in Help: Qt on macOS moves an action whose text looks like an
+        # app-menu item into the app menu.
+        self.check_updates_action.setMenuRole(QAction.MenuRole.NoRole)
+        self.check_updates_action.triggered.connect(self.check_for_updates)
+        menu.addAction(self.check_updates_action)
+
+        # On the right of the status bar, where the device line's messages
+        # don't cover it. Hidden until a check finds something newer.
+        self.update_label = QLabel(self)
+        self.update_label.setObjectName("UpdateNotice")
+        self.update_label.setTextFormat(Qt.TextFormat.RichText)
+        self.update_label.setOpenExternalLinks(True)
+        self.update_label.hide()
+        self.statusBar().addPermanentWidget(self.update_label)
 
     def _build_boards_menu(self) -> None:
         menu = self.menuBar().addMenu("Boards")
@@ -1469,6 +1506,103 @@ class MainWindow(QMainWindow):
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(about_html())
         box.setIcon(QMessageBox.Icon.Information)
+        box.show()
+        return box
+
+    # --- update notice (#560) --------------------------------------------
+
+    def start_update_checks(self) -> None:
+        """Look for a newer benchhud a minute after start, then every six hours.
+
+        A no-op with ``[updates] check = false``. It only ever says so: installing
+        stays with apt, Homebrew or the installer, so nothing here can change the
+        running HUD mid-stream or with the supply output on (#224).
+        """
+        if not self._config.updates.check or self._update_timer is not None:
+            return
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(UPDATE_CHECK_INTERVAL_MS)
+        self._update_timer.timeout.connect(self._scheduled_update_check)
+        self._update_timer.start()
+        self._update_first = QTimer(self)
+        self._update_first.setSingleShot(True)
+        self._update_first.timeout.connect(self._scheduled_update_check)
+        self._update_first.start(UPDATE_FIRST_CHECK_MS)
+
+    def stop_update_checks(self) -> None:
+        """Stop the automatic checks; one already running just answers into nothing."""
+        for timer in (self._update_timer, self._update_first):
+            if timer is not None:
+                timer.stop()
+
+    def _scheduled_update_check(self) -> None:
+        self._start_update_check(asked=False)
+
+    def check_for_updates(self) -> None:
+        """Help → Check for updates: check now, and say what came of it."""
+        self._start_update_check(asked=True)
+
+    def _start_update_check(self, *, asked: bool) -> None:
+        self._update_asked = self._update_asked or asked
+        if asked:
+            self._show_checking(True)
+        if self._update_checking:
+            return  # the check already running answers this one too
+        self._update_checking = True
+        threading.Thread(target=self._run_update_check, daemon=True).start()
+
+    def _show_checking(self, checking: bool) -> None:
+        """Help → Check for updates says it's on it: the check can take seconds."""
+        self.check_updates_action.setEnabled(not checking)
+        self.check_updates_action.setText(
+            "Checking for updates…" if checking else "Check for updates…"
+        )
+
+    def _run_update_check(self) -> None:
+        """The check itself. Runs off the GUI thread: it can wait on the network."""
+        try:
+            result = self.update_check()
+        except Exception as exc:
+            log.exception("update check failed")
+            result = UpdateResult(__version__, None, "github", str(exc) or type(exc).__name__)
+        with contextlib.suppress(RuntimeError):  # the window closed while it waited
+            self._update_checked.emit(result)
+
+    def _on_update_checked(self, result: UpdateResult) -> None:
+        self._update_checking = False
+        asked, self._update_asked = self._update_asked, False
+        self._show_checking(False)
+        if result.error is None:
+            self._show_update_notice(result)
+        else:
+            # A failed check on its own timer stays quiet; whatever the last
+            # good one found is still true.
+            log.info("update check: %s", result.error)
+        if asked:
+            self.update_box = self._show_update_answer(result)
+
+    def _show_update_notice(self, result: UpdateResult) -> None:
+        if not result.available:
+            self.update_label.hide()
+            return
+        url, latest = html.escape(result.url), html.escape(result.latest or "", quote=False)
+        self.update_label.setText(f'<a href="{url}">benchhud {latest} is out</a>')
+        self.update_label.setToolTip(
+            f"This is {result.current}. Install it with {result.how}; "
+            "benchhud doesn't install anything itself."
+        )
+        self.update_label.show()
+
+    def _show_update_answer(self, result: UpdateResult) -> QMessageBox:
+        """Say what Help → Check for updates found (non-blocking; returned for tests)."""
+        if self.update_box is not None:
+            self.update_box.close()  # one answer at a time, not a stack of them
+            self.update_box.deleteLater()
+        box = QMessageBox(self)
+        box.setWindowTitle("Check for updates")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText(update_answer_html(result))
         box.show()
         return box
 
@@ -2876,6 +3010,7 @@ class MainWindow(QMainWindow):
         self.stop_browser_sources()
         self.stop_obs()
         self.stop_terminal()
+        self.stop_update_checks()
         self.persist_into_config()
         if self._on_persist is not None:
             self._on_persist(self._config)

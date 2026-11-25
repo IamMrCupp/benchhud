@@ -18,6 +18,9 @@ dependencies = [
     # Linux use the standard library's pty.
     "pywinpty>=3.0; sys_platform == 'win32'",
     "tomlkit>=0.13",
+    # The update check's TLS (#560): the system's trust store, since the macOS
+    # app's bundled Python has no CA certificates. MIT, pure Python.
+    "truststore>=0.10",
 ]
 
 [project.urls]

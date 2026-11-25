@@ -408,6 +408,20 @@ jobs:
           "$app" config set intake.base_url http://127.0.0.1:8401
           grep -q 'base_url = "http://127.0.0.1:8401"' "$BENCHHUD_CONFIG"
 
+      # The bundled Python has no CA certificates of its own, so HTTPS only
+      # works through truststore and the Keychain (#560). Run the update
+      # check's real lookup with the bundle's own interpreter and packages.
+      - name: The bundled Python checks certificates (update check)
+        run: |
+          res=build/benchhud/macos/app/benchhud.app/Contents/Resources
+          for py in build/benchhud/macos/app/benchhud.app/Contents/Frameworks/Python.framework/Versions/[0-9]*/bin/python3; do break; done
+          "$py" -I -c '
+          import sys
+          sys.path[:0] = [sys.argv[1] + "/app", sys.argv[1] + "/app_packages"]
+          from benchhud.updates import github_latest
+          print("latest release:", github_latest())
+          ' "$res"
+
       - name: Package (ad-hoc signed)
         if: env.SIGN != 'true'
         run: briefcase package macOS app --adhoc-sign -p zip --no-input

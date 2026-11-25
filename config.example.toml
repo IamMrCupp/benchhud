@@ -256,6 +256,14 @@ label = "Now playing"
 # 0 leaves OpenCV's default. Restart benchhud after changing it.
 opencv_threads = 2
 
+[updates]
+# Look for a newer benchhud at startup and every few hours, and say so in the
+# status bar. It never downloads or installs anything. On Linux with the bench
+# apt repo it reads apt's own lists (no network); otherwise it asks github.com
+# where the latest release is. false keeps the bench offline; Help → Check for
+# updates still works when you ask.
+check = true
+
 [flash]
 # The Flash panel: read, back up and write SPI flash chips with flashrom. A
 # backup is two reads that must match; dumps are filed with the selected job.
