@@ -6,8 +6,6 @@
 ### Features
 
 * **updates:** say when a newer release is out, with Help → Check for updates ([cfc0945](https://github.com/IamMrCupp/benchhud/commit/cfc0945bc36b1b0edd00f8ca5d56dc6c83bbdba9))
-* **updates:** say when a newer release is out, with Help → Check for updates ([f2a5eaf](https://github.com/IamMrCupp/benchhud/commit/f2a5eafbcb0f99aedfbe5727d872594ff8cf2b4a))
-* **updates:** say when a newer release is out, with Help → Check for updates ([3ce5f90](https://github.com/IamMrCupp/benchhud/commit/3ce5f9053465a1802bd9ddf85a52bb205a9b1b39))
 
 ## [0.35.0](https://github.com/IamMrCupp/benchhud/compare/v0.34.3...v0.35.0) (2026-11-25)
 
