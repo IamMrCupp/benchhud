@@ -53,6 +53,14 @@ class _Recorder:
     def close(self) -> None:
         self.closed += 1
 
+    def wait_for_frame(self, value: int, timeout: float = 2.0) -> None:
+        """Wait until the latest write is ``_frame(value)``."""
+        want = _frame(value).tobytes()
+        with self._cond:
+            assert self._cond.wait_for(
+                lambda: bool(self.writes) and self.writes[-1][1] == want, timeout
+            )
+
     def wait_for(self, count: int, timeout: float = 2.0) -> None:
         with self._cond:
             assert self._cond.wait_for(lambda: len(self.writes) >= count, timeout), (
@@ -159,21 +167,120 @@ def test_close_stops_the_writer_and_closes_the_sink_once(sinks) -> None:
         sink.send(_frame(2))
 
 
-def test_a_long_wait_for_a_new_frame_is_logged_when_it_ends(sinks, caplog) -> None:
+def _messages(caplog, text: str) -> list[str]:
+    return [r.getMessage() for r in caplog.records if text in r.getMessage()]
+
+
+def _wait_for_lines(caplog, text: str, count: int = 1, timeout: float = 3.0) -> list[str]:
+    """Poll until ``count`` lines with ``text`` are logged, then a little longer
+    so a line too many would show too."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and len(_messages(caplog, text)) < count:
+        time.sleep(0.01)
+    time.sleep(0.1)
+    return _messages(caplog, text)
+
+
+def test_a_frozen_feed_is_logged_once_as_it_starts(sinks, caplog) -> None:
+    """A GUI thread that stops sending for good still gets a line, and only one,
+    however many repeats follow."""
     caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
     inner = _Recorder()
     sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
     sink.send(_frame(1))
     inner.wait_for(1)
-    time.sleep(0.25)
-    assert "no new frame" not in caplog.text  # said when it ends, not while
-    sink.send(_frame(2))
-    inner.wait_for(len(inner.writes) + 1)
+    lines = _wait_for_lines(caplog, "no new frame")
+    inner.wait_for(len(inner.writes) + 5)  # more repeats after the line
 
-    lines = [r.getMessage() for r in caplog.records if "no new frame" in r.getMessage()]
+    assert _messages(caplog, "no new frame") == lines
     assert len(lines) == 1
-    assert lines[0].startswith("test: no new frame for ")
-    assert "more times meanwhile" in lines[0]
+    assert re.fullmatch(
+        r"test: no new frame for 0\.\d s; writing the last one again until one comes", lines[0]
+    )
+    assert _messages(caplog, "new frames again") == []
+
+
+def test_a_frozen_feed_coming_back_is_logged_with_how_long(sinks, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder()
+    sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
+    sink.send(_frame(1))
+    inner.wait_for(1)
+    _wait_for_lines(caplog, "no new frame")
+    sink.send(_frame(2))
+    lines = _wait_for_lines(caplog, "new frames again")
+
+    assert len(lines) == 1
+    assert re.fullmatch(
+        r"test: new frames again after \d\.\d s; wrote the last one \d+ more times meanwhile",
+        lines[0],
+    )
+
+
+def test_frames_back_are_said_once_per_freeze(caplog) -> None:
+    """On set timestamps, no threads: a new frame right after the one that
+    ended a freeze doesn't say "again" a second time, and each freeze counts
+    its own repeats."""
+    from benchhud.output.steady import _NewFrames
+
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    frames = _NewFrames("test", gap_log=1.0)
+    frames.new(0.0)
+    frames.repeat(0.5)
+    frames.repeat(1.0)
+    frames.repeat(1.1)
+    frames.new(1.2)
+    frames.new(1.25)
+    frames.repeat(2.0)
+    frames.repeat(2.35)  # a second freeze, counted on its own
+    frames.new(2.55)
+
+    assert _messages(caplog, "no new frame") == [
+        "test: no new frame for 1.0 s; writing the last one again until one comes",
+        "test: no new frame for 1.1 s; writing the last one again until one comes",
+    ]
+    assert _messages(caplog, "new frames again") == [
+        "test: new frames again after 1.2 s; wrote the last one 3 more times meanwhile",
+        "test: new frames again after 1.3 s; wrote the last one 2 more times meanwhile",
+    ]
+
+
+def test_a_second_freeze_is_logged_again(sinks, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder()
+    sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
+    sink.send(_frame(1))
+    _wait_for_lines(caplog, "no new frame")
+    sink.send(_frame(2))
+    _wait_for_lines(caplog, "new frames again")
+
+    assert len(_wait_for_lines(caplog, "no new frame", count=2)) == 2
+
+
+def test_a_hung_write_is_not_called_a_frozen_feed(sinks, caplog) -> None:
+    """The writer was held up, not the GUI thread: that's a "between writes"
+    line, and no "new frames again" with no freeze before it."""
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder(block=0.3)  # the second write takes 0.3 s
+    sink = sinks(inner, repeat_after=0.02, gap_log=0.15, write_gap_log=0.15)
+    sink.send(_frame(1))
+    inner.wait_for(1)
+    sink.send(_frame(2))
+    time.sleep(0.05)  # the second write is under way
+    sink.send(_frame(3))
+    inner.wait_for_frame(3)
+    time.sleep(0.05)
+
+    assert _messages(caplog, "between writes")
+    assert _messages(caplog, "new frames again") == []
+    assert _messages(caplog, "no new frame") == []
+
+
+def test_one_repeat_is_said_as_once() -> None:
+    from benchhud.output import steady
+
+    assert steady._times(1) == "once more"
+    assert steady._times(3) == "3 more times"
 
 
 def test_the_first_frame_after_start_is_not_a_gap(sinks, caplog) -> None:

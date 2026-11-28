@@ -206,6 +206,43 @@ def test_a_busy_gui_thread_does_not_stall_the_loopback(qtbot) -> None:
     assert inner.closed is True
 
 
+def test_a_slow_feed_open_does_not_stall_the_loopback(qtbot) -> None:
+    """The thermal feed's node opens on the GUI thread, inside the render, on the
+    thermal camera's first frame. An open that hangs there leaves the main
+    output written: the last frame, repeated (#566)."""
+    config = _enabled_config(64, 48)
+    config.output.scope_device = ""
+    config.output.thermal_device = "/dev/video13"
+    inner = FakeSink(64, 48)
+    main = SteadySink(inner, repeat_after=0.03)
+    opened: list[str] = []
+
+    def factory(device: str, width: int, height: int):
+        if device == "/dev/video10":
+            return main
+        time.sleep(0.4)  # the thermal node's open hangs on the GUI thread
+        opened.append(device)
+        return FakeSink(width, height)
+
+    window = _window(qtbot, config)
+    window._linux_output = True
+    window.start_output(factory)
+    try:
+        window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
+        window.render_composite()
+        qtbot.waitUntil(lambda: inner.frame_count >= 1, timeout=2000)
+
+        before = main.repeats
+        window._on_thermal_frame(np.full((192, 256), 30.0, dtype=np.float32))
+        repeated = main.repeats - before
+    finally:
+        window.stop_output()
+
+    assert opened == ["/dev/video13"]  # the render reached the open
+    assert repeated >= 4
+    assert inner.closed is True
+
+
 class _DeadLoopback(FakeSink):
     """A loopback node that's gone: every write fails."""
 
