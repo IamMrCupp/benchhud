@@ -26,9 +26,11 @@ to whatever else the bench was doing:
   OBS to time out, so this thread didn't get to run (or the write hung). At most
   one line every :data:`WRITE_GAP_LOG_EVERY_S`, counting the ones in between;
 * a stretch of :data:`GAP_LOG_S` or more without a new frame from the GUI
-  thread: once as it passes that, so a feed that froze for good still gets a
-  line, and again when new frames come back, with how long they were gone.
-  Repeats covered it, so OBS saw nothing wrong; the picture just stood still.
+  thread: once as it passes that, so a GUI thread that stops sending for good
+  still gets a line, and again when new frames come back, with how long they
+  were gone. Repeats covered it, so OBS saw nothing wrong; the picture just
+  stood still. A stalled scope camera doesn't show here: the frame pump re-sends
+  its last frame every tick, so frames keep coming.
 
 The copy is what keeps this stream-safe. The frame handed over can be an array
 the GUI thread keeps using (the reader's latest frame, re-offered every tick),
@@ -238,12 +240,15 @@ class _NewFrames:
         self._said = False
 
     def new(self, now: float) -> None:
-        if self._last is not None and now - self._last >= self._gap_log:
+        # Only after a "no new frame" line. A long wait with no such line means
+        # the writer was the one held up (a write that hung), and the "between
+        # writes" line already says so.
+        if self._said and self._last is not None:
             log.warning(
-                "%s: new frames again after %.1f s; wrote the last one %d more times meanwhile",
+                "%s: new frames again after %.1f s; wrote the last one %s meanwhile",
                 self._name,
                 now - self._last,
-                self._repeats,
+                _times(self._repeats),
             )
         self._last, self._repeats, self._said = now, 0, False
 
@@ -251,8 +256,8 @@ class _NewFrames:
         self._repeats += 1
         if self._said or self._last is None or now - self._last < self._gap_log:
             return
-        # Said as it starts, not only when it ends: a camera that never comes
-        # back would otherwise freeze the feed without a line.
+        # Said as it starts, not only when it ends: a GUI thread that never
+        # sends again would otherwise freeze the feed without a line.
         self._said = True
         log.warning(
             "%s: no new frame for %.1f s; writing the last one again until one comes",
@@ -300,6 +305,10 @@ class _WriteGaps:
                 self._worst,
             )
             self._logged_at, self._held, self._worst = now, 0, 0.0
+
+
+def _times(count: int) -> str:
+    return "once more" if count == 1 else f"{count} more times"
 
 
 def _gaps(count: int) -> str:
