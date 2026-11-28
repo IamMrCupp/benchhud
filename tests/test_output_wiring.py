@@ -206,6 +206,35 @@ def test_a_busy_gui_thread_does_not_stall_the_loopback(qtbot) -> None:
     assert inner.closed is True
 
 
+def test_a_slow_feed_open_does_not_stall_the_loopback(qtbot) -> None:
+    """The thermal feed's node opens on the GUI thread on the camera's first
+    frame. An open that hangs there leaves the main output written (#566)."""
+    config = _enabled_config(64, 48)
+    config.output.scope_device = ""
+    config.output.thermal_device = "/dev/video13"
+    inner = FakeSink(64, 48)
+    window = _window(qtbot, config)
+    window._linux_output = True
+    window.start_output(lambda d, w, h: SteadySink(inner, repeat_after=0.03))
+    window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
+    window.render_composite()
+    qtbot.waitUntil(lambda: inner.frame_count >= 1, timeout=2000)
+
+    def slow_open(device: str, width: int, height: int) -> FakeSink:
+        time.sleep(0.4)  # the open hangs on the GUI thread
+        return FakeSink(width, height)
+
+    window._feed_factory = slow_open
+    before = inner.frame_count
+    feed = window._thermal_feed_sink(np.zeros((192, 256), dtype=np.float32))
+    written = inner.frame_count - before
+    window.stop_output()
+
+    assert feed is not None
+    assert written >= 4
+    assert inner.closed is True
+
+
 class _DeadLoopback(FakeSink):
     """A loopback node that's gone: every write fails."""
 

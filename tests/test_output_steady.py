@@ -159,21 +159,58 @@ def test_close_stops_the_writer_and_closes_the_sink_once(sinks) -> None:
         sink.send(_frame(2))
 
 
-def test_a_long_wait_for_a_new_frame_is_logged_when_it_ends(sinks, caplog) -> None:
+def _messages(caplog, text: str) -> list[str]:
+    return [r.getMessage() for r in caplog.records if text in r.getMessage()]
+
+
+def test_a_frozen_feed_is_logged_once_as_it_starts(sinks, caplog) -> None:
+    """A camera that never comes back still gets a line, and only one."""
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder()
+    sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
+    sink.send(_frame(1))
+    inner.wait_for(1)
+    time.sleep(0.4)  # well past gap_log, with a dozen repeats
+
+    lines = _messages(caplog, "no new frame")
+    assert len(lines) == 1
+    assert re.fullmatch(
+        r"test: no new frame for 0\.\d s; writing the last one again until one comes", lines[0]
+    )
+    assert _messages(caplog, "new frames again") == []
+
+
+def test_a_frozen_feed_coming_back_is_logged_with_how_long(sinks, caplog) -> None:
     caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
     inner = _Recorder()
     sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
     sink.send(_frame(1))
     inner.wait_for(1)
     time.sleep(0.25)
-    assert "no new frame" not in caplog.text  # said when it ends, not while
     sink.send(_frame(2))
     inner.wait_for(len(inner.writes) + 1)
+    sink.send(_frame(3))  # a second new frame right after: no new stretch
+    inner.wait_for(len(inner.writes) + 1)
 
-    lines = [r.getMessage() for r in caplog.records if "no new frame" in r.getMessage()]
+    lines = _messages(caplog, "new frames again")
     assert len(lines) == 1
-    assert lines[0].startswith("test: no new frame for ")
-    assert "more times meanwhile" in lines[0]
+    assert re.fullmatch(
+        r"test: new frames again after 0\.\d s; wrote the last one \d+ more times meanwhile",
+        lines[0],
+    )
+    assert len(_messages(caplog, "no new frame")) == 1
+
+
+def test_a_second_freeze_is_logged_again(sinks, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder()
+    sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
+    for value in (1, 2):
+        sink.send(_frame(value))
+        inner.wait_for(len(inner.writes) + 1)
+        time.sleep(0.25)
+
+    assert len(_messages(caplog, "no new frame")) == 2
 
 
 def test_the_first_frame_after_start_is_not_a_gap(sinks, caplog) -> None:

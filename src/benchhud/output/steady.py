@@ -26,7 +26,9 @@ to whatever else the bench was doing:
   OBS to time out, so this thread didn't get to run (or the write hung). At most
   one line every :data:`WRITE_GAP_LOG_EVERY_S`, counting the ones in between;
 * a stretch of :data:`GAP_LOG_S` or more without a new frame from the GUI
-  thread, said when it ends. Repeats covered it, so OBS saw nothing wrong.
+  thread: once as it passes that, so a feed that froze for good still gets a
+  line, and again when new frames come back, with how long they were gone.
+  Repeats covered it, so OBS saw nothing wrong; the picture just stood still.
 
 The copy is what keeps this stream-safe. The frame handed over can be an array
 the GUI thread keeps using (the reader's latest frame, re-offered every tick),
@@ -190,10 +192,9 @@ class SteadySink:
 
     def _write_loop(self) -> None:
         frame: np.ndarray | None = None
-        last_new = 0.0
         last_write: float | None = None
-        repeats_since_new = 0
         gaps = _WriteGaps(self._name, self._write_gap_log_every)
+        fresh = _NewFrames(self._name, self._gap_log)
         try:
             while True:
                 try:
@@ -205,9 +206,12 @@ class SteadySink:
                     gaps.gap(now, now - last_write)
                 else:
                     gaps.flush(now)
-                frame, last_new, repeats_since_new = self._take(
-                    new, frame, now, last_new, repeats_since_new
-                )
+                if new is None:
+                    self.repeats += 1
+                    fresh.repeat(now)
+                else:
+                    frame = new
+                    fresh.new(now)
                 assert frame is not None  # a write has happened, or one just came
                 try:
                     self._sink.send(frame)
@@ -222,26 +226,39 @@ class SteadySink:
         finally:
             gaps.flush(time.monotonic(), force=True)
 
-    def _take(
-        self,
-        new: np.ndarray | None,
-        frame: np.ndarray | None,
-        now: float,
-        last_new: float,
-        repeats_since_new: int,
-    ) -> tuple[np.ndarray | None, float, int]:
-        """The frame to write: the new one, or the last one again; logs a long wait."""
-        if new is None:
-            self.repeats += 1
-            return frame, last_new, repeats_since_new + 1
-        if frame is not None and now - last_new >= self._gap_log:
+
+class _NewFrames:
+    """The "no new frame" lines: once a stretch passes ``gap_log``, and when it ends."""
+
+    def __init__(self, name: str, gap_log: float) -> None:
+        self._name = name
+        self._gap_log = gap_log
+        self._last: float | None = None
+        self._repeats = 0
+        self._said = False
+
+    def new(self, now: float) -> None:
+        if self._last is not None and now - self._last >= self._gap_log:
             log.warning(
-                "%s: no new frame for %.1f s; wrote the last one %d more times meanwhile",
+                "%s: new frames again after %.1f s; wrote the last one %d more times meanwhile",
                 self._name,
-                now - last_new,
-                repeats_since_new,
+                now - self._last,
+                self._repeats,
             )
-        return new, now, 0
+        self._last, self._repeats, self._said = now, 0, False
+
+    def repeat(self, now: float) -> None:
+        self._repeats += 1
+        if self._said or self._last is None or now - self._last < self._gap_log:
+            return
+        # Said as it starts, not only when it ends: a camera that never comes
+        # back would otherwise freeze the feed without a line.
+        self._said = True
+        log.warning(
+            "%s: no new frame for %.1f s; writing the last one again until one comes",
+            self._name,
+            now - self._last,
+        )
 
 
 class _WriteGaps:
