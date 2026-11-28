@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.36.1](https://github.com/IamMrCupp/benchhud/compare/v0.36.0...v0.36.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **output:** leave a hung write its device, and log gaps between writes from 150 ms ([d725caa](https://github.com/IamMrCupp/benchhud/commit/d725caa96ec6291702e244e5ec3a245c641655d7))
+* **output:** say held-back write gaps once a burst ends or the writer stops ([e9c9bc7](https://github.com/IamMrCupp/benchhud/commit/e9c9bc7874f1583f00b765e46f5c7dda0d9e9963))
+* **output:** write the loopback on its own thread so a busy GUI thread can't time OBS out ([68925c0](https://github.com/IamMrCupp/benchhud/commit/68925c05df44639ff39f8970ea3eaf4fef84b275))
+
 ## [0.36.0](https://github.com/IamMrCupp/benchhud/compare/v0.35.0...v0.36.0) (2026-11-25)
 
 
