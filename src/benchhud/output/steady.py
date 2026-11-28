@@ -1,0 +1,182 @@
+"""Keep a loopback output fed while the GUI thread is busy (#566).
+
+The HUD composes on the GUI thread's frame timer and used to write each frame
+there too, so a busy GUI thread meant no writes at all. OBS's v4l2 input waits
+five frame periods for the next frame (166 ms at the 30 fps a v4l2loopback node
+reports) and logs ``select timed out`` when none comes. On 2026-11-27 it logged
+118 of them against the main output, most during a package update, and after the
+burst its input stayed blank, though frames were flowing again, until its device
+was re-opened.
+
+:class:`SteadySink` moves the write onto a thread of its own:
+
+* each new frame is copied and written as it comes;
+* when none has come for :data:`REPEAT_AFTER_S`, the last one is written again,
+  and again every :data:`REPEAT_AFTER_S` until a new one arrives.
+
+So a stalled GUI thread costs OBS a repeated frame, not a timeout. A stretch of
+:data:`GAP_LOG_S` or more without a new frame is logged when it ends, with its
+length, so the next stall can be matched to whatever else the bench was doing.
+So is a stretch that long between writes, which would mean the write itself
+stalled.
+
+The copy is what keeps this stream-safe. The frame handed over can be an array
+the GUI thread keeps using (the reader's latest frame, re-offered every tick),
+and a repeat goes out later. Writing a copy means what reaches the loopback is
+exactly what was on the frame when it was sent, whatever happens to the array
+afterwards.
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+import time
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from benchhud.output.sink import OutputSink
+
+log = logging.getLogger(__name__)
+
+#: Write the last frame again after this long without a new one. Under OBS's
+#: 166 ms select timeout, with room for a slow write.
+REPEAT_AFTER_S = 0.1
+
+#: A stretch without a new frame, or between writes, this long gets a log line.
+GAP_LOG_S = 1.0
+
+#: How long :meth:`SteadySink.close` waits for a write in progress to finish.
+CLOSE_WAIT_S = 2.0
+
+
+class SteadySink:
+    """An :class:`~benchhud.output.sink.OutputSink` that writes on its own thread.
+
+    A failure on the writer thread stops it, and the next :meth:`send` raises
+    that error, so the caller drops the sink the way it would have when the
+    write was synchronous.
+    """
+
+    def __init__(
+        self,
+        sink: OutputSink,
+        *,
+        name: str = "",
+        repeat_after: float = REPEAT_AFTER_S,
+        gap_log: float = GAP_LOG_S,
+    ) -> None:
+        self._sink = sink
+        self._name = name or str(getattr(sink, "device", "output"))
+        self._repeat_after = repeat_after
+        self._gap_log = gap_log
+        self._cond = threading.Condition()
+        self._pending: np.ndarray | None = None
+        self._closed = False
+        self._error: BaseException | None = None
+        #: Writes of the last frame again because no new one came (for tests
+        #: and the gap log).
+        self.repeats = 0
+        self._thread = threading.Thread(
+            target=self._run, name=f"loopback writer {self._name}", daemon=True
+        )
+        self._thread.start()
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return self._sink.size
+
+    @property
+    def inner(self) -> OutputSink:
+        """The sink frames are written to."""
+        return self._sink
+
+    def send(self, frame: np.ndarray) -> None:
+        """Hand over one frame; it's copied, and written on the writer thread."""
+        with self._cond:
+            if self._error is not None:
+                raise self._error
+            if self._closed:
+                raise RuntimeError("sink is closed")
+        width, height = self._sink.size
+        if frame.shape != (height, width, 3):
+            raise ValueError(f"frame is {frame.shape}, sink expects {(height, width, 3)}")
+        copy = np.array(frame, dtype=np.uint8, order="C", copy=True)
+        with self._cond:
+            self._pending = copy
+            self._cond.notify()
+
+    def close(self) -> None:
+        """Stop the writer thread, then close the sink (idempotent)."""
+        with self._cond:
+            if self._closed:
+                return
+            self._closed = True
+            self._cond.notify()
+        self._thread.join(CLOSE_WAIT_S)
+        if self._thread.is_alive():
+            log.warning("%s: a write was still running after %.0f s", self._name, CLOSE_WAIT_S)
+        self._sink.close()
+
+    def _next(self, last_write: float | None) -> np.ndarray | None:
+        """Wait for a new frame, or until the last one written is due again.
+
+        Returns the new frame, or None when it's time to repeat. With nothing
+        written yet there's nothing to repeat, so it waits for a frame. Raises
+        :class:`_Closed` once :meth:`close` has been called.
+        """
+        with self._cond:
+            while self._pending is None and not self._closed:
+                if last_write is None:
+                    self._cond.wait()
+                    continue
+                left = last_write + self._repeat_after - time.monotonic()
+                if left <= 0:
+                    break
+                self._cond.wait(left)
+            if self._closed:
+                raise _Closed
+            new, self._pending = self._pending, None
+            return new
+
+    def _run(self) -> None:
+        frame: np.ndarray | None = None
+        last_new = 0.0
+        last_write: float | None = None
+        repeats_since_new = 0
+        while True:
+            try:
+                new = self._next(last_write)
+            except _Closed:
+                return
+            now = time.monotonic()
+            if new is None:
+                repeats_since_new += 1
+                self.repeats += 1
+            else:
+                if frame is not None and now - last_new >= self._gap_log:
+                    log.warning(
+                        "%s: no new frame for %.1f s; wrote the last one %d more times meanwhile",
+                        self._name,
+                        now - last_new,
+                        repeats_since_new,
+                    )
+                frame, last_new, repeats_since_new = new, now, 0
+            if last_write is not None and now - last_write >= self._gap_log:
+                log.warning("%s: %.1f s between writes", self._name, now - last_write)
+            assert frame is not None  # a write has happened, or one just came
+            try:
+                self._sink.send(frame)
+            except BaseException as exc:
+                with self._cond:
+                    self._error = exc
+                return
+            # When this write started, so a write that hangs shows in the next
+            # gap, and repeats keep to the clock rather than drift by each write.
+            last_write = now
+
+
+class _Closed(Exception):
+    """The sink was closed while the writer waited."""
