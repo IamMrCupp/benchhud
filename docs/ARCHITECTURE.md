@@ -52,7 +52,10 @@ ticket system is a protocol with a fake, not a dependency.
   `open_output_sink`: `V4l2LoopbackSink` (`v4l2.py`: writes frames straight to a
   v4l2loopback node via `VIDIOC_S_FMT` + `os.write`, stdlib only; it asks for
   BGR24, the frames' own byte order, and swaps to RGB24 only when the node
-  answers with that) on Linux,
+  answers with that) on Linux, written from its own thread by `PacedSink`
+  (`paced.py`: the GUI thread only hands over the newest frame, and the last
+  one is written again whenever a new one is late, so OBS never times out on
+  the node while the GUI thread is held up, #566),
   `CmioSink` (`cmio.py`: publishes UYVY frames into OBS's camera-extension sink
   stream through Apple's public CoreMediaIO API via `ctypes` — no PyObjC, no
   compiled extension) on macOS, and `SoftcamSink` (`softcam.py`: sends BGR24

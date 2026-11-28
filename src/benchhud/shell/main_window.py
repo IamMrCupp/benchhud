@@ -119,7 +119,9 @@ from benchhud.obs.protocol import local_password
 from benchhud.obs.tool_scenes import ToolScenes
 from benchhud.output.feeds import fit_frame, thermal_frame, thermal_size
 from benchhud.output.onair import Layer, compose_on_air, compose_preview, excluded
+from benchhud.output.paced import PacedSink
 from benchhud.output.sink import OutputSink, open_output_sink
+from benchhud.output.v4l2 import V4l2LoopbackSink
 from benchhud.overlay.calibration import CalibrationError, Pair, find_tip, solve
 from benchhud.overlay.composite import (
     MarkerTracker,
@@ -220,6 +222,18 @@ SourceFactory = Callable[[], FrameSource]
 SinkFactory = Callable[[str, int, int], OutputSink]
 #: Builds the live instrument session, or None when there's no instrument.
 InstrumentSessionFactory = Callable[[], "InstrumentSession | None"]
+
+
+def paced(sink: OutputSink) -> OutputSink:
+    """A v4l2loopback sink, written from its own thread on a steady clock (#566).
+
+    Written from the GUI thread, a loopback went quiet whenever that thread was
+    held up, and OBS timed out on it. Other sinks are returned as they are.
+    """
+    if isinstance(sink, V4l2LoopbackSink):
+        return PacedSink(sink)
+    return sink
+
 
 log = logging.getLogger(__name__)
 
@@ -2560,7 +2574,11 @@ class MainWindow(QMainWindow):
         if self._sink is not None or not self._config.output.enabled:
             return
         out = self._config.output
-        factory = sink_factory or open_output_sink
+        opener = sink_factory or open_output_sink
+
+        def factory(device: str, width: int, height: int) -> OutputSink:
+            return paced(opener(device, width, height))
+
         self._sink = factory(out.device, out.width, out.height)
         # The scope-only and thermal-only feeds (#344): each its own loopback
         # node, so Linux only. Elsewhere the one virtual camera is the composite.
