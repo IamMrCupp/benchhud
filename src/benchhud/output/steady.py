@@ -152,7 +152,7 @@ class SteadySink:
             self._sink.close()
         else:
             log.warning(
-                "%s: a write was still running after %.1f s; it closes the device when it returns",
+                "%s: the writer hadn't stopped after %.1f s; it closes the device when it does",
                 self._name,
                 self._close_wait,
             )
@@ -193,48 +193,96 @@ class SteadySink:
         last_new = 0.0
         last_write: float | None = None
         repeats_since_new = 0
-        # "Between writes" lines: when the last went out, and what came since.
-        logged_at: float | None = None
-        unlogged, worst = 0, 0.0
-        while True:
-            try:
-                new = self._next(last_write)
-            except _Closed:
-                return
-            now = time.monotonic()
-            if new is None:
-                repeats_since_new += 1
-                self.repeats += 1
-            else:
-                if frame is not None and now - last_new >= self._gap_log:
-                    log.warning(
-                        "%s: no new frame for %.1f s; wrote the last one %d more times meanwhile",
-                        self._name,
-                        now - last_new,
-                        repeats_since_new,
-                    )
-                frame, last_new, repeats_since_new = new, now, 0
-            if last_write is not None and now - last_write >= self._write_gap_log:
-                unlogged, worst = unlogged + 1, max(worst, now - last_write)
-                if logged_at is None or now - logged_at >= self._write_gap_log_every:
-                    more = (
-                        f" ({unlogged - 1} more since the last line, the longest {worst:.2f} s)"
-                        if unlogged > 1
-                        else ""
-                    )
-                    log.warning("%s: %.2f s between writes%s", self._name, now - last_write, more)
-                    logged_at, unlogged, worst = now, 0, 0.0
-            assert frame is not None  # a write has happened, or one just came
-            try:
-                self._sink.send(frame)
-            except BaseException as exc:
-                log.warning("%s: write failed, the writer stopped: %s", self._name, exc)
-                with self._cond:
-                    self._error = exc
-                return
-            # When this write started, so a write that hangs shows in the next
-            # gap, and repeats keep to the clock rather than drift by each write.
-            last_write = now
+        gaps = _WriteGaps(self._name, self._write_gap_log_every)
+        try:
+            while True:
+                try:
+                    new = self._next(last_write)
+                except _Closed:
+                    return
+                now = time.monotonic()
+                if last_write is not None and now - last_write >= self._write_gap_log:
+                    gaps.gap(now, now - last_write)
+                else:
+                    gaps.flush(now)
+                frame, last_new, repeats_since_new = self._take(
+                    new, frame, now, last_new, repeats_since_new
+                )
+                assert frame is not None  # a write has happened, or one just came
+                try:
+                    self._sink.send(frame)
+                except BaseException as exc:
+                    log.warning("%s: write failed, the writer stopped: %s", self._name, exc)
+                    with self._cond:
+                        self._error = exc
+                    return
+                # When this write started, so a write that hangs shows in the next
+                # gap, and repeats keep to the clock rather than drift by each write.
+                last_write = now
+        finally:
+            gaps.flush(time.monotonic(), force=True)
+
+    def _take(
+        self,
+        new: np.ndarray | None,
+        frame: np.ndarray | None,
+        now: float,
+        last_new: float,
+        repeats_since_new: int,
+    ) -> tuple[np.ndarray | None, float, int]:
+        """The frame to write: the new one, or the last one again; logs a long wait."""
+        if new is None:
+            self.repeats += 1
+            return frame, last_new, repeats_since_new + 1
+        if frame is not None and now - last_new >= self._gap_log:
+            log.warning(
+                "%s: no new frame for %.1f s; wrote the last one %d more times meanwhile",
+                self._name,
+                now - last_new,
+                repeats_since_new,
+            )
+        return new, now, 0
+
+
+class _WriteGaps:
+    """The "between writes" lines: one at most every ``every`` seconds.
+
+    Gaps in between are held back and counted. They're said with the next line,
+    or on their own once ``every`` has passed with no new gap, or when the
+    writer stops, so a burst that just ends isn't lost.
+    """
+
+    def __init__(self, name: str, every: float) -> None:
+        self._name = name
+        self._every = every
+        self._logged_at: float | None = None
+        self._held = 0
+        self._worst = 0.0
+
+    def gap(self, now: float, seconds: float) -> None:
+        if self._logged_at is not None and now - self._logged_at < self._every:
+            self._held += 1
+            self._worst = max(self._worst, seconds)
+            return
+        more = (
+            f" ({self._held} more since the last line, the longest {self._worst:.2f} s)"
+            if self._held
+            else ""
+        )
+        log.warning("%s: %.2f s between writes%s", self._name, seconds, more)
+        self._logged_at, self._held, self._worst = now, 0, 0.0
+
+    def flush(self, now: float, *, force: bool = False) -> None:
+        if not self._held or self._logged_at is None:
+            return
+        if force or now - self._logged_at >= self._every:
+            log.warning(
+                "%s: %d more gaps between writes since the last line, the longest %.2f s",
+                self._name,
+                self._held,
+                self._worst,
+            )
+            self._logged_at, self._held, self._worst = now, 0, 0.0
 
 
 class _Closed(Exception):

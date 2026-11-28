@@ -196,14 +196,52 @@ def test_a_stalled_write_is_logged(sinks, caplog) -> None:
     assert any("between writes" in r.getMessage() for r in caplog.records)
 
 
-def test_a_short_gap_between_writes_is_logged_too(sinks, caplog) -> None:
-    """OBS times out after 166 ms; a gap that long is worth a line, not just a second's."""
+def test_the_repeat_cadence_alone_logs_nothing(sinks, caplog) -> None:
+    """A writer keeping up on its own (every 100 ms, the default) is not a gap."""
     caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
-    inner = _Recorder(block=0.2)
-    sinks(inner, repeat_after=0.02).send(_frame(1))
-    inner.wait_for(3)
+    inner = _Recorder()
+    sinks(inner).send(_frame(1))
+    inner.wait_for(5)
 
-    assert any("between writes" in r.getMessage() for r in caplog.records)
+    assert caplog.records == []
+
+
+class _Burst(_Recorder):
+    """Writes 2 to ``until`` each hang 60 ms; the rest go straight through."""
+
+    def __init__(self, until: int) -> None:
+        super().__init__()
+        self._until = until
+
+    def send(self, frame: np.ndarray) -> None:
+        if 1 <= len(self.writes) < self._until:
+            time.sleep(0.06)
+        super().send(frame)
+
+
+def test_gaps_held_back_are_said_once_a_burst_ends(sinks, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Burst(until=4)
+    sink = sinks(inner, repeat_after=0.01, write_gap_log=0.05, write_gap_log_every=0.3)
+    sink.send(_frame(1))
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and "more gaps between writes" not in caplog.text:
+        time.sleep(0.01)
+
+    lines = [r.getMessage() for r in caplog.records if "between writes" in r.getMessage()]
+    assert lines[0].startswith("test: 0.")
+    assert "test: 2 more gaps between writes since the last line, the longest 0." in lines[-1]
+
+
+def test_gaps_held_back_are_said_when_the_writer_stops(sinks, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Burst(until=4)
+    sink = sinks(inner, repeat_after=0.01, write_gap_log=0.05, write_gap_log_every=60)
+    sink.send(_frame(1))
+    inner.wait_for(4)
+    sink.close()
+
+    assert "test: 2 more gaps between writes since the last line" in caplog.text
 
 
 def test_gaps_between_writes_are_rate_limited_and_counted(sinks, caplog) -> None:
@@ -241,7 +279,7 @@ def test_close_leaves_a_hung_write_its_device_until_it_returns(sinks, caplog) ->
 
     sink.close()
     assert inner.closed == 0
-    assert "still running" in caplog.text
+    assert "writer hadn't stopped" in caplog.text
 
     hold.set()
     deadline = time.monotonic() + 2
