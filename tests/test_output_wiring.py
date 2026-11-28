@@ -204,3 +204,32 @@ def test_a_busy_gui_thread_does_not_stall_the_loopback(qtbot) -> None:
 
     assert written >= 4
     assert inner.closed is True
+
+
+class _DeadLoopback(FakeSink):
+    """A loopback node that's gone: every write fails."""
+
+    def send(self, frame: np.ndarray) -> None:
+        raise OSError("device went away")
+
+
+def test_a_write_that_fails_on_the_writer_thread_drops_the_sink(qtbot) -> None:
+    """The writer's error comes back through the next frame and closes the output."""
+    inner = _DeadLoopback(64, 48)
+    window = _window(qtbot, _enabled_config(64, 48))
+    window.start_output(lambda d, w, h: SteadySink(inner, repeat_after=0.03))
+    window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
+    window.render_composite()
+    qtbot.waitUntil(lambda: window._sink is not None and _failed(window), timeout=2000)
+    window.render_composite()  # must not raise
+
+    assert window._sink is None
+    assert inner.closed is True
+
+
+def _failed(window: MainWindow) -> bool:
+    try:
+        window._sink.send(np.zeros((48, 64, 3), dtype=np.uint8))
+    except OSError:
+        return True
+    return False

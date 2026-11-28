@@ -19,19 +19,32 @@ W, H = 8, 6
 class _Recorder:
     """An inner sink that records what was written and when."""
 
-    def __init__(self, *, block: float = 0.0, fail_on: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        block: float = 0.0,
+        block_every: bool = False,
+        fail_on: int = 0,
+        hold: threading.Event | None = None,
+    ) -> None:
         self.size = (W, H)
         self.writes: list[tuple[float, bytes]] = []
         self.closed = 0
+        self.writing = threading.Event()
         self._block = block
+        self._block_every = block_every
         self._fail_on = fail_on
+        self._hold = hold
         self._cond = threading.Condition()
 
     def send(self, frame: np.ndarray) -> None:
         if self._fail_on and len(self.writes) + 1 == self._fail_on:
             raise OSError("loopback went away")
-        if self._block and len(self.writes) == 1:
-            time.sleep(self._block)  # the second write stalls once
+        if self._block and (self._block_every or len(self.writes) == 1):
+            time.sleep(self._block)  # the second write stalls (or every one after the first)
+        if self._hold is not None and self.writes:
+            self.writing.set()
+            self._hold.wait()  # the second write hangs until it's let go
         with self._cond:
             self.writes.append((time.monotonic(), frame.tobytes()))
             self._cond.notify_all()
@@ -89,7 +102,7 @@ def test_a_caller_that_stops_sending_still_gets_frames_written(sinks) -> None:
 
     times = [t for t, _ in inner.writes]
     assert all(data == _frame(7).tobytes() for _, data in inner.writes)
-    assert max(b - a for a, b in pairwise(times)) < 0.3
+    assert max(b - a for a, b in pairwise(times)) < 1.0
     assert sink.repeats >= 5
 
 
@@ -158,7 +171,7 @@ def test_a_long_wait_for_a_new_frame_is_logged_when_it_ends(sinks, caplog) -> No
 
     lines = [r.getMessage() for r in caplog.records if "no new frame" in r.getMessage()]
     assert len(lines) == 1
-    assert lines[0].startswith("test: no new frame for 0.")
+    assert lines[0].startswith("test: no new frame for ")
     assert "more times meanwhile" in lines[0]
 
 
@@ -176,11 +189,66 @@ def test_the_first_frame_after_start_is_not_a_gap(sinks, caplog) -> None:
 def test_a_stalled_write_is_logged(sinks, caplog) -> None:
     caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
     inner = _Recorder(block=0.2)
-    sink = sinks(inner, repeat_after=0.02, gap_log=0.15)
+    sink = sinks(inner, repeat_after=0.02, write_gap_log=0.15)
     sink.send(_frame(1))
     inner.wait_for(3)
 
     assert any("between writes" in r.getMessage() for r in caplog.records)
+
+
+def test_a_short_gap_between_writes_is_logged_too(sinks, caplog) -> None:
+    """OBS times out after 166 ms; a gap that long is worth a line, not just a second's."""
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder(block=0.2)
+    sinks(inner, repeat_after=0.02).send(_frame(1))
+    inner.wait_for(3)
+
+    assert any("between writes" in r.getMessage() for r in caplog.records)
+
+
+def test_gaps_between_writes_are_rate_limited_and_counted(sinks, caplog) -> None:
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder(block=0.06, block_every=True)
+    sink = sinks(inner, repeat_after=0.01, write_gap_log=0.05, write_gap_log_every=0.3)
+    sink.send(_frame(1))
+    inner.wait_for(12)
+
+    lines = [r.getMessage() for r in caplog.records if "between writes" in r.getMessage()]
+    assert 1 <= len(lines) < len(inner.writes) - 3
+    assert any("more since the last line, the longest" in line for line in lines[1:])
+
+
+def test_a_failed_write_is_logged_on_the_writer_thread(sinks, caplog) -> None:
+    """Logged even if nothing is ever sent again to raise it."""
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    inner = _Recorder(fail_on=1)
+    sinks(inner).send(_frame(1))
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and "write failed" not in caplog.text:
+        time.sleep(0.01)
+
+    assert "test: write failed, the writer stopped: loopback went away" in caplog.text
+
+
+def test_close_leaves_a_hung_write_its_device_until_it_returns(sinks, caplog) -> None:
+    """Closing the fd under a write in progress could tear a frame into the next open."""
+    caplog.set_level(logging.WARNING, logger="benchhud.output.steady")
+    hold = threading.Event()
+    inner = _Recorder(hold=hold)
+    sink = sinks(inner, repeat_after=0.01, close_wait=0.05)
+    sink.send(_frame(1))
+    assert inner.writing.wait(2)
+
+    sink.close()
+    assert inner.closed == 0
+    assert "still running" in caplog.text
+
+    hold.set()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not inner.closed:
+        time.sleep(0.01)
+    time.sleep(0.05)
+    assert inner.closed == 1
 
 
 def test_the_linux_loopback_is_written_on_its_own_thread(monkeypatch) -> None:

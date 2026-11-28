@@ -14,11 +14,19 @@ was re-opened.
 * when none has come for :data:`REPEAT_AFTER_S`, the last one is written again,
   and again every :data:`REPEAT_AFTER_S` until a new one arrives.
 
-So a stalled GUI thread costs OBS a repeated frame, not a timeout. A stretch of
-:data:`GAP_LOG_S` or more without a new frame is logged when it ends, with its
-length, so the next stall can be matched to whatever else the bench was doing.
-So is a stretch that long between writes, which would mean the write itself
-stalled.
+So a GUI thread that's busy but lets go of the GIL (waiting on I/O, a lock, a
+paint or a slow box) costs OBS a repeated frame, not a timeout. One that holds
+the GIL the whole time (a long garbage collection, a C call that doesn't release
+it) still stops this thread too. Python can't get round that.
+
+Two things get a log line, so the next stall can be matched to OBS's timeouts and
+to whatever else the bench was doing:
+
+* a stretch of :data:`WRITE_GAP_LOG_S` or more between writes: long enough for
+  OBS to time out, so this thread didn't get to run (or the write hung). At most
+  one line every :data:`WRITE_GAP_LOG_EVERY_S`, counting the ones in between;
+* a stretch of :data:`GAP_LOG_S` or more without a new frame from the GUI
+  thread, said when it ends. Repeats covered it, so OBS saw nothing wrong.
 
 The copy is what keeps this stream-safe. The frame handed over can be an array
 the GUI thread keeps using (the reader's latest frame, re-offered every tick),
@@ -45,8 +53,14 @@ log = logging.getLogger(__name__)
 #: 166 ms select timeout, with room for a slow write.
 REPEAT_AFTER_S = 0.1
 
-#: A stretch without a new frame, or between writes, this long gets a log line.
+#: A stretch without a new frame from the GUI thread this long gets a log line.
 GAP_LOG_S = 1.0
+
+#: A stretch between writes this long gets a log line: just under OBS's timeout.
+WRITE_GAP_LOG_S = 0.15
+
+#: At most one "between writes" line this often; the ones in between are counted.
+WRITE_GAP_LOG_EVERY_S = 10.0
 
 #: How long :meth:`SteadySink.close` waits for a write in progress to finish.
 CLOSE_WAIT_S = 2.0
@@ -67,17 +81,28 @@ class SteadySink:
         name: str = "",
         repeat_after: float = REPEAT_AFTER_S,
         gap_log: float = GAP_LOG_S,
+        write_gap_log: float = WRITE_GAP_LOG_S,
+        write_gap_log_every: float = WRITE_GAP_LOG_EVERY_S,
+        close_wait: float = CLOSE_WAIT_S,
     ) -> None:
         self._sink = sink
         self._name = name or str(getattr(sink, "device", "output"))
         self._repeat_after = repeat_after
         self._gap_log = gap_log
+        self._write_gap_log = write_gap_log
+        self._write_gap_log_every = write_gap_log_every
+        self._close_wait = close_wait
         self._cond = threading.Condition()
         self._pending: np.ndarray | None = None
         self._closed = False
         self._error: BaseException | None = None
-        #: Writes of the last frame again because no new one came (for tests
-        #: and the gap log).
+        # Who closes the inner sink: close() does, unless a write was still
+        # running when it gave up waiting. Then the writer does, once the write
+        # returns, so the descriptor is never closed under it (and reused by
+        # the next open while the old write is still going).
+        self._writer_done = False
+        self._writer_closes = False
+        #: Writes of the last frame again because no new one came.
         self.repeats = 0
         self._thread = threading.Thread(
             target=self._run, name=f"loopback writer {self._name}", daemon=True
@@ -95,18 +120,22 @@ class SteadySink:
 
     def send(self, frame: np.ndarray) -> None:
         """Hand over one frame; it's copied, and written on the writer thread."""
-        with self._cond:
-            if self._error is not None:
-                raise self._error
-            if self._closed:
-                raise RuntimeError("sink is closed")
+        self._check_open()
         width, height = self._sink.size
         if frame.shape != (height, width, 3):
             raise ValueError(f"frame is {frame.shape}, sink expects {(height, width, 3)}")
         copy = np.array(frame, dtype=np.uint8, order="C", copy=True)
         with self._cond:
+            self._check_open()
             self._pending = copy
             self._cond.notify()
+
+    def _check_open(self) -> None:
+        with self._cond:
+            if self._error is not None:
+                raise self._error
+            if self._closed:
+                raise RuntimeError("sink is closed")
 
     def close(self) -> None:
         """Stop the writer thread, then close the sink (idempotent)."""
@@ -115,10 +144,18 @@ class SteadySink:
                 return
             self._closed = True
             self._cond.notify()
-        self._thread.join(CLOSE_WAIT_S)
-        if self._thread.is_alive():
-            log.warning("%s: a write was still running after %.0f s", self._name, CLOSE_WAIT_S)
-        self._sink.close()
+        self._thread.join(self._close_wait)
+        with self._cond:
+            close_here = self._writer_done
+            self._writer_closes = not close_here
+        if close_here:
+            self._sink.close()
+        else:
+            log.warning(
+                "%s: a write was still running after %.1f s; it closes the device when it returns",
+                self._name,
+                self._close_wait,
+            )
 
     def _next(self, last_write: float | None) -> np.ndarray | None:
         """Wait for a new frame, or until the last one written is due again.
@@ -142,10 +179,23 @@ class SteadySink:
             return new
 
     def _run(self) -> None:
+        try:
+            self._write_loop()
+        finally:
+            with self._cond:
+                self._writer_done = True
+                close_here = self._writer_closes
+            if close_here:
+                self._sink.close()
+
+    def _write_loop(self) -> None:
         frame: np.ndarray | None = None
         last_new = 0.0
         last_write: float | None = None
         repeats_since_new = 0
+        # "Between writes" lines: when the last went out, and what came since.
+        logged_at: float | None = None
+        unlogged, worst = 0, 0.0
         while True:
             try:
                 new = self._next(last_write)
@@ -164,12 +214,21 @@ class SteadySink:
                         repeats_since_new,
                     )
                 frame, last_new, repeats_since_new = new, now, 0
-            if last_write is not None and now - last_write >= self._gap_log:
-                log.warning("%s: %.1f s between writes", self._name, now - last_write)
+            if last_write is not None and now - last_write >= self._write_gap_log:
+                unlogged, worst = unlogged + 1, max(worst, now - last_write)
+                if logged_at is None or now - logged_at >= self._write_gap_log_every:
+                    more = (
+                        f" ({unlogged - 1} more since the last line, the longest {worst:.2f} s)"
+                        if unlogged > 1
+                        else ""
+                    )
+                    log.warning("%s: %.2f s between writes%s", self._name, now - last_write, more)
+                    logged_at, unlogged, worst = now, 0, 0.0
             assert frame is not None  # a write has happened, or one just came
             try:
                 self._sink.send(frame)
             except BaseException as exc:
+                log.warning("%s: write failed, the writer stopped: %s", self._name, exc)
                 with self._cond:
                     self._error = exc
                 return
