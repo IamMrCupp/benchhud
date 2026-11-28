@@ -14,9 +14,13 @@ arrives, and writes the last one again whenever no new one has come for
 time out, however late the next composite is.
 
 It logs a warning when the output itself went more than ``gap_warning_s``
-without a write, with how long, and one when the composite stopped coming for
-that long (the frame was repeated meanwhile). Either can be matched to OBS's
-log by time.
+without a write, with how long. When new frames stop coming for that long it
+logs once as the repeating starts, and again when they come back, with how long
+they were gone. Each can be matched to OBS's log by time.
+
+A frame that stops coming is repeated until a new one comes, without a limit.
+A frozen picture on stream is visible and recoverable; a node that goes quiet
+makes OBS time out, and on 2026-11-27 its input stayed blank afterwards.
 
 Clock and wait are injected so tests run on simulated time.
 """
@@ -71,6 +75,9 @@ class PacedSink:
         self._frame: np.ndarray | None = None
         self._fresh = False  # a frame has come that isn't written yet
         self._closed = False
+        self._exited = False  # the writer thread has returned
+        self._close_on_exit = False  # close() gave up waiting: the writer closes
+        self._stale_logged = False
         self._error: BaseException | None = None
         self._last_write: float | None = None
         self._last_fresh: float | None = None
@@ -111,10 +118,18 @@ class PacedSink:
             self._cond.notify()
         if threading.current_thread() is not self._thread:
             self._thread.join(timeout)
-            if self._thread.is_alive():
+        with self._cond:
+            if not self._exited:
+                # A write stuck in the device. Closing the fd under it would let
+                # the rest of that frame land on whatever opens next and takes
+                # the same fd number, so the writer closes it when it returns.
+                self._close_on_exit = True
                 log.warning(
-                    "%s: writer still busy after %.0f s; closing anyway", self._name, timeout
+                    "%s: a write is still stuck after %.0f s; it closes when that returns",
+                    self._name,
+                    timeout,
                 )
+                return
         self._inner.close()
 
     # --- the writer thread --------------------------------------------------
@@ -128,8 +143,14 @@ class PacedSink:
                         return  # closed
                 self._write(frame, fresh)
         except Exception as exc:
-            self._error = exc
             log.exception("%s: write failed; the output stops", self._name)
+            self._error = exc
+        finally:
+            with self._cond:
+                self._exited = True
+                close = self._close_on_exit
+            if close:
+                self._inner.close()
 
     def _next_frame(self) -> tuple[np.ndarray | None, bool]:
         """Wait (holding the condition) for a new frame or the repeat deadline."""
@@ -150,16 +171,27 @@ class PacedSink:
 
     def _write(self, frame: np.ndarray, fresh: bool) -> None:
         now = self._clock()
+        stale_for = 0.0 if self._last_fresh is None else now - self._last_fresh
         if fresh:
-            if self._last_fresh is not None and now - self._last_fresh > self._gap_warning_s:
+            if stale_for > self._gap_warning_s:
                 log.warning(
-                    "%s: no new frame for %.1f s; the last one was repeated meanwhile",
+                    "%s: new frames again after %.1f s; the last one was repeated meanwhile",
                     self._name,
-                    now - self._last_fresh,
+                    stale_for,
                 )
             self._last_fresh = now
+            self._stale_logged = False
         else:
             self.repeats += 1
+            if stale_for > self._gap_warning_s and not self._stale_logged:
+                # Said once as it starts, not only when it ends: a camera that
+                # never comes back would otherwise freeze the feed unlogged.
+                self._stale_logged = True
+                log.warning(
+                    "%s: no new frame for %.1f s; repeating the last one until one comes",
+                    self._name,
+                    stale_for,
+                )
         self._inner.send(frame)
         done = self._clock()
         if self._last_write is not None and done - self._last_write > self._gap_warning_s:

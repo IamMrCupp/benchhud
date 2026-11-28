@@ -157,6 +157,7 @@ def test_a_failed_write_surfaces_on_the_next_send(caplog) -> None:
         with caplog.at_level(logging.ERROR, logger="benchhud.output.paced"):
             sink.send(_frame())
             assert _wait_for(lambda: sink._error is not None)
+        assert "broken: write failed" in caplog.text
         with pytest.raises(RuntimeError, match="write failed"):
             sink.send(_frame())
         assert "broken: write failed" in caplog.text
@@ -174,6 +175,33 @@ def test_close_stops_the_writer_and_closes_the_device() -> None:
     with pytest.raises(RuntimeError, match="closed"):
         sink.send(_frame())
     sink.close()  # idempotent
+
+
+def test_a_stuck_write_closes_the_device_only_when_it_returns(caplog) -> None:
+    """Closing the fd under a write in progress would let the rest of the frame
+    land on whatever opens next with the same fd number (restart_output)."""
+    entered, release = threading.Event(), threading.Event()
+
+    class _Stuck(FakeSink):
+        def send(self, frame: np.ndarray) -> None:
+            entered.set()
+            release.wait(10)
+            super().send(frame)
+
+    inner = _Stuck(W, H)
+    sink = PacedSink(inner, name="stuck")
+    try:
+        sink.send(_frame())
+        assert _wait_for(entered.is_set)
+        with caplog.at_level(logging.WARNING, logger="benchhud.output.paced"):
+            sink.close(timeout=0.05)
+        assert not inner.closed
+        assert "stuck: a write is still stuck" in caplog.text
+        release.set()
+        assert _wait_for(lambda: inner.closed)
+        assert inner.frame_count == 1
+    finally:
+        release.set()
 
 
 def test_a_long_gap_between_writes_is_logged_with_its_length(caplog) -> None:
@@ -213,8 +241,29 @@ def test_a_long_wait_for_a_new_frame_is_logged_with_its_length(caplog) -> None:
             assert _wait_for(lambda: inner.frame_count == 1)
             now[0] += 3.2  # the composite stopped coming for 3.2 s
             sink.send(_frame(2))
-            assert _wait_for(lambda: "no new frame" in caplog.text)
-        assert "/dev/video10: no new frame for 3.2 s" in caplog.text
+            assert _wait_for(lambda: "new frames again" in caplog.text)
+        assert "/dev/video10: new frames again after 3.2 s" in caplog.text
+    finally:
+        sink.close()
+
+
+def test_a_frame_that_stops_coming_is_logged_as_the_repeating_starts(caplog) -> None:
+    """A camera that never comes back still gets a line, once, not one per repeat."""
+    now = [100.0]
+    inner = _TimedSink()
+    sink = PacedSink(inner, name="/dev/video13", repeat_after=0.01, clock=lambda: now[0])
+    try:
+        with caplog.at_level(logging.WARNING, logger="benchhud.output.paced"):
+            sink.send(_frame(1))
+            assert _wait_for(lambda: inner.frame_count == 1)
+            now[0] += 1.5
+            assert _wait_for(lambda: inner.frame_count >= 2)
+            now[0] += 1.0
+            assert _wait_for(lambda: inner.frame_count >= 3)
+        lines = [r.getMessage() for r in caplog.records if "no new frame" in r.getMessage()]
+        assert lines == [
+            "/dev/video13: no new frame for 1.5 s; repeating the last one until one comes"
+        ]
     finally:
         sink.close()
 
