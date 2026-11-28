@@ -227,14 +227,16 @@ def test_a_slow_feed_open_does_not_stall_the_loopback(qtbot) -> None:
     window = _window(qtbot, config)
     window._linux_output = True
     window.start_output(factory)
-    window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
-    window.render_composite()
-    qtbot.waitUntil(lambda: inner.frame_count >= 1, timeout=2000)
+    try:
+        window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
+        window.render_composite()
+        qtbot.waitUntil(lambda: inner.frame_count >= 1, timeout=2000)
 
-    before = main.repeats
-    window._on_thermal_frame(np.full((192, 256), 30.0, dtype=np.float32))
-    repeated = main.repeats - before
-    window.stop_output()
+        before = main.repeats
+        window._on_thermal_frame(np.full((192, 256), 30.0, dtype=np.float32))
+        repeated = main.repeats - before
+    finally:
+        window.stop_output()
 
     assert opened == ["/dev/video13"]  # the render reached the open
     assert repeated >= 4

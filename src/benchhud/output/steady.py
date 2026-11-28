@@ -30,7 +30,8 @@ to whatever else the bench was doing:
   still gets a line, and again when new frames come back, with how long they
   were gone. Repeats covered it, so OBS saw nothing wrong; the picture just
   stood still. A stalled scope camera doesn't show here: the frame pump re-sends
-  its last frame every tick, so frames keep coming.
+  its last frame every tick, so frames keep coming. A stalled thermal camera
+  does on a thermal-only setup, which renders only on new thermal frames.
 
 The copy is what keeps this stream-safe. The frame handed over can be an array
 the GUI thread keeps using (the reader's latest frame, re-offered every tick),
