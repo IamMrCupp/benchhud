@@ -265,7 +265,7 @@ class _WriteGaps:
             self._worst = max(self._worst, seconds)
             return
         more = (
-            f" ({self._held} more since the last line, the longest {self._worst:.2f} s)"
+            f" ({_gaps(self._held)} since the last line held back, the longest {self._worst:.2f} s)"
             if self._held
             else ""
         )
@@ -277,12 +277,16 @@ class _WriteGaps:
             return
         if force or now - self._logged_at >= self._every:
             log.warning(
-                "%s: %d more gaps between writes since the last line, the longest %.2f s",
+                "%s: %s between writes since the last line, the longest %.2f s",
                 self._name,
-                self._held,
+                _gaps(self._held),
                 self._worst,
             )
             self._logged_at, self._held, self._worst = now, 0, 0.0
+
+
+def _gaps(count: int) -> str:
+    return f"{count} more gap" if count == 1 else f"{count} more gaps"
 
 
 class _Closed(Exception):

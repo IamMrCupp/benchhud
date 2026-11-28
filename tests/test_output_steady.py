@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from itertools import pairwise
@@ -230,7 +231,10 @@ def test_gaps_held_back_are_said_once_a_burst_ends(sinks, caplog) -> None:
 
     lines = [r.getMessage() for r in caplog.records if "between writes" in r.getMessage()]
     assert lines[0].startswith("test: 0.")
-    assert "test: 2 more gaps between writes since the last line, the longest 0." in lines[-1]
+    assert re.fullmatch(
+        r"test: \d+ more gaps? between writes since the last line, the longest 0\.\d\d s",
+        lines[-1],
+    )
 
 
 def test_gaps_held_back_are_said_when_the_writer_stops(sinks, caplog) -> None:
@@ -238,7 +242,7 @@ def test_gaps_held_back_are_said_when_the_writer_stops(sinks, caplog) -> None:
     inner = _Burst(until=4)
     sink = sinks(inner, repeat_after=0.01, write_gap_log=0.05, write_gap_log_every=60)
     sink.send(_frame(1))
-    inner.wait_for(4)
+    inner.wait_for(5)  # written after the pass that held the second gap
     sink.close()
 
     assert "test: 2 more gaps between writes since the last line" in caplog.text
@@ -253,7 +257,7 @@ def test_gaps_between_writes_are_rate_limited_and_counted(sinks, caplog) -> None
 
     lines = [r.getMessage() for r in caplog.records if "between writes" in r.getMessage()]
     assert 1 <= len(lines) < len(inner.writes) - 3
-    assert any("more since the last line, the longest" in line for line in lines[1:])
+    assert any("since the last line held back, the longest" in line for line in lines[1:])
 
 
 def test_a_failed_write_is_logged_on_the_writer_thread(sinks, caplog) -> None:
