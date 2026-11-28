@@ -6,12 +6,15 @@ real loopback node is bench-gated.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import ClassVar
 
 import numpy as np
 
 from benchhud.config import Config
 from benchhud.output.sink import FakeSink
+from benchhud.output.steady import SteadySink
 from benchhud.shell.main_window import MainWindow
 
 
@@ -151,3 +154,82 @@ def test_close_event_releases_the_sink(qtbot) -> None:
     window.close()
 
     assert sink.closed is True
+
+
+class _StallingCamera:
+    """Hands over one frame, then never another until it's closed."""
+
+    def __init__(self) -> None:
+        self._sent = False
+        self._closed = threading.Event()
+
+    def read(self) -> np.ndarray | None:
+        if not self._sent:
+            self._sent = True
+            return np.full((48, 64, 3), 9, dtype=np.uint8)
+        self._closed.wait(0.05)
+        return None
+
+    def close(self) -> None:
+        self._closed.set()
+
+
+def test_a_stalled_camera_does_not_stall_the_output(qtbot) -> None:
+    """The frame ticks keep re-sending the last frame while the camera is silent (#566)."""
+    sink = FakeSink(64, 48)
+    window = _window(qtbot, _enabled_config(64, 48))
+    window.start_output(lambda d, w, h: sink)
+    window.start_preview(_StallingCamera)
+    try:
+        qtbot.waitUntil(lambda: sink.frame_count >= 5, timeout=3000)
+    finally:
+        window.stop_preview()
+
+    assert all(int(frame[0, 0, 0]) == 9 for frame in sink.frames)
+
+
+def test_a_busy_gui_thread_does_not_stall_the_loopback(qtbot) -> None:
+    """Writes go on while the GUI thread is stuck, as they do on the bench (#566)."""
+    inner = FakeSink(64, 48)
+    window = _window(qtbot, _enabled_config(64, 48))
+    window.start_output(lambda d, w, h: SteadySink(inner, repeat_after=0.03))
+    window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
+    window.render_composite()
+    qtbot.waitUntil(lambda: inner.frame_count >= 1, timeout=2000)
+
+    before = inner.frame_count
+    time.sleep(0.4)  # the GUI thread is busy: no ticks, no new frames
+    written = inner.frame_count - before
+    window.stop_output()
+
+    assert written >= 4
+    assert inner.closed is True
+
+
+class _DeadLoopback(FakeSink):
+    """A loopback node that's gone: every write fails."""
+
+    def send(self, frame: np.ndarray) -> None:
+        raise OSError("device went away")
+
+
+def test_a_write_that_fails_on_the_writer_thread_drops_the_sink(qtbot) -> None:
+    """The writer's error comes back through the next frame and closes the output."""
+    inner = _DeadLoopback(64, 48)
+    window = _window(qtbot, _enabled_config(64, 48))
+    window.start_output(lambda d, w, h: SteadySink(inner, repeat_after=0.03))
+    window.scope_panel.update_frame(np.full((48, 64, 3), 5, dtype=np.uint8))
+    window.render_composite()
+    qtbot.waitUntil(lambda: window._sink is not None and _failed(window), timeout=2000)
+    window.render_composite()  # must not raise
+
+    assert window._sink is None
+    assert inner.closed is True
+
+
+def _failed(window: MainWindow) -> bool:
+    try:
+        window._sink.send(np.zeros((48, 64, 3), dtype=np.uint8))
+    except OSError:
+        return True
+    return False

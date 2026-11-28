@@ -2,7 +2,8 @@
 
 Consumers depend on the :class:`OutputSink` protocol. :class:`FakeSink` records
 frames in memory for tests; :class:`~benchhud.output.v4l2.V4l2LoopbackSink`
-writes them to a v4l2loopback device for OBS to capture.
+writes them to a v4l2loopback device for OBS to capture, on a thread of its own
+(:class:`~benchhud.output.steady.SteadySink`).
 
 One real backend per platform, chosen by :func:`open_output_sink`: v4l2loopback
 on Linux, OBS's camera extension on macOS (:mod:`benchhud.output.cmio`), and
@@ -20,6 +21,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 from benchhud.output.loopback_probe import diagnose as diagnose_loopback
+from benchhud.output.steady import SteadySink
 from benchhud.output.v4l2 import V4l2LoopbackSink
 
 log = logging.getLogger(__name__)
@@ -135,9 +137,12 @@ def open_output_sink(device: str, width: int, height: int) -> OutputSink:
         log.warning("%s; frames will be discarded", UNSUPPORTED_PLATFORM)
         return NullSink(width, height, reason=UNSUPPORTED_PLATFORM)
     try:
-        return V4l2LoopbackSink(device, width, height)
+        loopback = V4l2LoopbackSink(device, width, height)
     except (OSError, RuntimeError) as exc:
         log.warning("virtual-camera output unavailable on %s: %s", device, exc)
         # Say which of the usual problems it is (#240); the raw error otherwise.
         reason = diagnose_loopback(device) or f"{device} unavailable ({exc})"
         return NullSink(width, height, reason=reason)
+    # Written on a thread of its own, so a busy GUI thread can't leave OBS's
+    # input waiting long enough to time out (#566).
+    return SteadySink(loopback, name=device)
